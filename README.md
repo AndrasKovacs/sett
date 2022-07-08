@@ -1,2 +1,2 @@
 # sett
-Setoid type theory implementation
+Setoid type theory implementation (new, WIP)
