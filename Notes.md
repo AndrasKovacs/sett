@@ -1,19 +1,19 @@
 
 ## SeTT
 
-**Language:
-  - Haskell
-  - Strict (language Strict)**
+**Language**:
+  - **Haskell**
+  - **Strict (language Strict)**
 
-**Libs:
-  - bytestring
-  - flatparse, primdata, dynamic-array
-  - containers (for IntSet + no Hashable req), unordered-containers
-  - template-haskell**
+**Libs**:
+  - **bytestring**
+  - **flatparse, primdata, dynamic-array**
+  - **containers (for IntSet + no Hashable req), unordered-containers**
+  - **template-haskell**
   -   ? pretty printing, interaction, lsp
 
-**Strings:
-  - bytestring, String**
+**Strings**:
+  - **bytestring, String**
 
 Syntax/Lexing/Parsing:
   - problem: operators in record fields
@@ -30,7 +30,7 @@ Syntax/Lexing/Parsing:
 Type system
   - **OTT, closest to Loic & Nicolas**
   - **Strict Prop, ⊤, ⊥, Σ, Π, =, coe, refl, sym, trans, ap,**
-    Set : Set, Prop : Set
+    **Set : Set, Prop : Set**
   - **strict coe-refl and coe-trans rule**
   - **local let**
   - **top-level postulates and top-level defs**
@@ -58,14 +58,14 @@ Records:
 
  - Σ or telescope?
 
- - 1. **Σ only
-     - type-directed projection elaboration
+ - 1. **Σ only**
+     - **type-directed projection elaboration**
 	     example: t : (foo : A) × (bar : B) × ⊤
 		          t.foo
 				  t.bar
 				  (foo, bar, tt)**
 
-     - **magical injectivity annotation**
+     - **magical injectivity annotations**
 
      - (foo : A) × let myDef = ... in (bar : B) × ⊤   let is not observable from outside
 	 - we don't have: definitions + extensions in signatures
@@ -129,19 +129,21 @@ Inductives:
   - primitive rec/elim
   - for an inductive declaration, there's a single telescope of external params
 
-  **1. infinitary QIIT
-    - probably: no sort equations
-	- signatures should be strictly telescope-based (like in Agda)
-	  every constructor has a telescope of args
-    - TODO: Id, coe computation        Id Nat Nat ≡ ⊤,  Id Con Con ≡ ⊤**
+  **infinitary QIIT**
+  
+    - **probably: no sort equations**
+    - **signatures should be strictly telescope-based (like in Agda)**
+	  **every constructor has a telescope of args**
+    - **TODO: Id, coe computation **       Id Nat Nat ≡ ⊤,  Id Con Con ≡ ⊤**
 
-  **2. non-quotient types
-    - Id: all constructors are disjoint & injective
-	  (Id/coe computation is primitive)
+  **non-quotient types**
+  
+    - **Id: all constructors are disjoint & injective**
+	  **(Id/coe computation is primitive)**
     - Future: acyclicity of constructors?      Id (suc n) n ≡ ⊥
-	- TODO: Id, coe computation**
+    - TODO: Id, coe computation**
 
-  - overloaded constructors
+  overloaded constructors
     - harder than overloaded fields
 	- presyntax should be in spine form so that we can look at overloaded heads
 
