@@ -130,14 +130,14 @@ Inductives:
   - for an inductive declaration, there's a single telescope of external params
 
   **infinitary QIIT**
-  
+
     - **probably: no sort equations**
     - **signatures should be strictly telescope-based (like in Agda)**
 	  **every constructor has a telescope of args**
     - **TODO: Id, coe computation **       Id Nat Nat ≡ ⊤,  Id Con Con ≡ ⊤**
 
   **non-quotient types**
-  
+
     - **Id: all constructors are disjoint & injective**
 	  **(Id/coe computation is primitive)**
     - Future: acyclicity of constructors?      Id (suc n) n ≡ ⊥
@@ -228,3 +228,8 @@ Long term:
 Ultra long term:
   - internal/external languages
   - full-fledged metatheory of signatures
+
+<!-- -------------------------------------------------------------------------------- -->
+
+0th version:
+  - Only basic features, no modules, no inductives, no Set/Prop ambiguity

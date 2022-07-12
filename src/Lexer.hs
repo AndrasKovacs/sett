@@ -261,26 +261,31 @@ kw' :: String -> Q Exp
 kw' str =
   [| spanOfToken' (($(FP.string str) `notFollowedBy` identChar) `pcut` Lit str) |]
 
--- | Parse a keyword string, return the `Span`, don't check that it's not an identifier.
+-- | Parse a keyword string, return the `Span`, don't check indentation and that it's not
+--   a keyword. Used in atom parsing as an easy optimization.
 rawKw :: String -> Q Exp
-rawKw str = [| spanOfToken $(FP.string str) |]
+rawKw str = [| do
+  Env src _ <- ask
+  FP.Span x y <- FP.spanOf $(FP.string str) <* ws
+  pure $ Span# src x y  |]
 
 -- | Raw non-token parser that reads any keyword.
 anyKw :: Parser ()
 anyKw = $(switch [| case _ of
-  "let"     -> pure ()
-  "λ"       -> pure ()
-  "Set"     -> pure ()
-  "Prop"    -> pure ()
-  "refl"    -> pure ()
-  "coe"     -> pure ()
-  "Top"     -> pure ()
-  "Bot"     -> pure ()
-  "tt"      -> pure ()
-  "ap"      -> pure ()
-  "sym"     -> pure ()
-  "trans"   -> pure ()
-  "exfalso" -> pure () |])
+  "let"     -> eof
+  "λ"       -> eof
+  "Set"     -> eof
+  "Prop"    -> eof
+  "refl"    -> eof
+  "coe"     -> eof
+  "Top"     -> eof
+  "Bot"     -> eof
+  "tt"      -> eof
+  "ap"      -> eof
+  "sym"     -> eof
+  "trans"   -> eof
+  "El"      -> eof
+  "exfalso" -> eof |])
 
 scanIdent :: Parser ()
 scanIdent = identStartChar >> many_ inlineIdentChar

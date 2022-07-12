@@ -29,7 +29,7 @@ import Common
 
 {-
 
-Precedences from strongest to weakest:
+Precedence summary from strongest to weakest:
   - atoms
   - projections            (postfix)
   - function application   (left assoc)
@@ -40,23 +40,24 @@ Precedences from strongest to weakest:
 
 Context-free grammar (disregarding indentation!)
 
-  builtin     = "Set" | "Prop" | "refl" | "coe" | "ap" | "sym" | "trans" | "⊤" | "tt" | "⊥" | "exfalso"
+  builtin     = "Set" | "Prop" | "refl" | "coe" | "ap" | "sym" | "trans" | "⊤" | "Top" | "Bot" | "tt" | "⊥" | "exfalso"
 
   identifier  = <non-empty string of alphanumeric characters or "'", starting with a letter>
   binder      = identifier | "_"
   typedbinder = binder | binder ":" term
   arrow       = "->" | "→"
-  pibinder    = "{" (binder)+ : term "}" | "(" (binder)+ : term ")" | "{" (binder)+ "}"
+  pibinder    = "{" binder+ : term "}" | "(" binder+ : term ")" | "{" binder+ "}"
   lambda      = "λ" | "\"
   times       = "×" | "*"
-  lambinder   = binder | "(" binder ":" term ")" | "{" typedbinder "}" | "{" typedbinder "=" binder "}"
+  lambinder   = binder | "(" binder ":" term ")" | "{" typedbinder "}" | "{" typedbinder ":=" binder "}"
 
   atom        = builtin | identifier | "_" | "(" term ")" |
-  projection  = atom | projection ".₁" | projection ".₂" | projection "." identifier
-  application = projection | application projection | application "{" term "}" | application "{" identifier "=" term "}"
+  projection  = atom | projection ".₁" | projection ".₂" | projection ".1" | projection ".2" | projection "." identifier
+  application = projection | application projection | application "{" term "}" | application "{" identifier ":=" term "}"
+                | "El" projection
   equality    = application | application "=" application
   sigma       = equality | equality "×" sigma | "(" binder : term ")" "×" sigma
-  pi          = sigma | sigma arrow pi | (pibinder)+ arrow pi
+  pi          = sigma | sigma arrow pi | pibinder+ arrow pi
   lamLet      = pi | lambda (lambinder)+ "." lamLet | "let" identifier ":=" pair "in" lamLet
                 | "let" identifier ":" pair ":=" pair in lamLet
   pair        = lamLet | lamLet "," pair
@@ -85,8 +86,12 @@ tmErr     = ["a term"]
 
 --------------------------------------------------------------------------------
 
+-- todo: get rid of ' parsers, instead write custom cut messages
+
+assign  = $(sym  ":=")
+assign' = $(sym' ":=")
 colon   = token  ($(FP.string ":") `notFollowedBy` $(FP.string "="))
-colon'  = token  ($(FP.string ":") `notFollowedBy` $(FP.string "="))
+colon'  = token' ($(FP.string ":") `notFollowedBy` $(FP.string "="))
 semi    = $(sym  ";")
 braceL  = $(sym  "{")
 braceR  = $(sym  "}")
@@ -95,14 +100,13 @@ parL    = $(sym  "(")
 parR'   = $(sym' ")")
 parR    = $(sym  ")")
 dot     = $(sym  ".")
-assign  = $(sym  ":=")
-assign' = $(sym' ":=")
 arrow   = token  $(switch [| case _ of "->" -> pure (); "→" -> pure () |])
 times   = token  $(switch [| case _ of "*"  -> pure (); "×" -> pure () |])
-lambda  = token' $(switch [| case _ of "λ"  -> pure (); "\\" -> pure () |])
+lambda  = token  $(switch [| case _ of "λ"  -> pure (); "\\" -> pure () |])
 
 --------------------------------------------------------------------------------
 
+-- todo: optimize this for perf
 atom :: Parser Tm
 atom =
   branch ident              (pure . Var)          $
@@ -124,9 +128,7 @@ atom =
   empty
 
 atom' :: Parser Tm
-atom' =
-  atom
-  `cut` atomErr
+atom' = atom `cut` atomErr
 
 bind :: Parser Bind
 bind = (Bind     <$> ident)
@@ -173,7 +175,9 @@ goApp t = branch braceL
      (pure t))
 
 app' :: Parser Tm
-app' = (goApp =<< proj')
+app' =
+  (branch $(kw "El") (\(Span p1 p2) -> El p1 <$> proj')
+  (goApp =<< proj'))
   `cut` appErr
 
 eq' :: Parser Tm
@@ -278,7 +282,7 @@ implLamBinder = do
 
 lamBinder :: Parser (Bind, ArgInfo, Maybe Tm)
 lamBinder =
-  branch parL   (\_ -> (,NoName Expl,) <$> bind' <*> (Just <$> (colon' *> tyAnnot <* parR'))) $
+  branch parL (\_ -> (,NoName Expl,) <$> bind' <*> (Just <$> (colon' *> tyAnnot <* parR'))) $
   branch braceL (\_ -> implLamBinder) $
   ((,NoName Expl,Nothing) <$> bind)
 

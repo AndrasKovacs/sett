@@ -2,7 +2,8 @@
 
 module Presyntax where
 
-import Common
+import Common hiding (Name)
+import qualified Data.ByteString as B
 
 data Bind
   = Bind Name
@@ -13,6 +14,9 @@ instance Show Bind where
   showsPrec _  DontBind acc = '_':acc
 
 newtype Name = Name Span
+
+nameToBs :: Name -> B.ByteString
+nameToBs (Name x) = spanToBs x
 
 instance Show Name where
   showsPrec _ (Name x) acc = spanToString x ++ acc
@@ -46,6 +50,7 @@ data Tm
   | Top  Span
   | Tt   Span
   | Bot  Span
+  | El Pos Tm
 
   | Eq Tm Tm
   | Exfalso Span
@@ -86,6 +91,7 @@ span t = Span (left t) (right t) where
     Trans (Span l _)      -> l
     Ap (Span l _)         -> l
     Hole    (Span l _)    -> l
+    El l _                -> l
 
   right :: Tm -> Pos
   right = \case
@@ -112,3 +118,4 @@ span t = Span (left t) (right t) where
     Trans (Span _ r)              -> r
     Ap (Span _ r)                 -> r
     Hole (Span l r)               -> r
+    El _ t                        -> right t

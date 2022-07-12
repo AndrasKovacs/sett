@@ -203,31 +203,56 @@ pattern Span x y <- ((\(Span# src x y) -> (Pos src x, Pos src y)) -> (x, y)) whe
     | otherwise             = impossible
 {-# complete Span #-}
 
-spanToByteString :: Span -> B.ByteString
-spanToByteString (Span (Pos src i) (Pos _ j)) =
+spanToBs :: Span -> B.ByteString
+spanToBs (Span (Pos src i) (Pos _ j)) =
   let bstr = srcToByteString src
       i'   = B.length bstr - coerce i   -- Pos counts backwards from the end of the string
       j'   = B.length bstr - coerce j
   in B.take (j' - i') (B.drop i' bstr)
 
 spanToString :: Span -> String
-spanToString s = FP.unpackUTF8 (spanToByteString s)
+spanToString s = FP.unpackUTF8 (spanToBs s)
 
+-- Names in core syntax
+--------------------------------------------------------------------------------
 
--- -- Names in core syntax
--- --------------------------------------------------------------------------------
+data Name
+  = NUnused                    -- ^ Unused binder (underscore in surface syntax).
+  | NSpan {-# unpack #-} Span  -- ^ Name which comes from user source.
+  | NX
+  | NY
+  | NZ
+  | NP
+  | NQ
+  | NA
+  | NB
+  | NF
+  | NG
 
--- data Name
---   = NUnused                    -- ^ Unused binder (underscore in surface syntax).
---   | NX                         -- ^ Generic non-informative name. It will be usually
---                                --   un-shadowed in pretty printing.
---   | NSpan {-# unpack #-} Span  -- ^ Name which comes from user source.
+instance Show Name where
+  showsPrec d NUnused   acc = '_':acc
+  showsPrec d NX        acc = 'x':acc
+  showsPrec d NY        acc = 'y':acc
+  showsPrec d NZ        acc = 'z':acc
+  showsPrec d NP        acc = 'p':acc
+  showsPrec d NQ        acc = 'q':acc
+  showsPrec d NA        acc = 'A':acc
+  showsPrec d NB        acc = 'B':acc
+  showsPrec d NF        acc = 'f':acc
+  showsPrec d NG        acc = 'g':acc
+  showsPrec d (NSpan x) acc = showsPrec d x acc
 
--- instance Show Name where
---   showsPrec d NUnused   acc = '_':acc
---   showsPrec d NX        acc = 'x':acc
---   showsPrec d (NSpan x) acc = showsPrec d x acc
+pick :: Name -> Name -> Name
+pick x y = case x of
+  NUnused -> case y of
+    NUnused -> NX
+    y -> y
+  x -> x
 
+--------------------------------------------------------------------------------
+
+-- Set/Prop
+data SP = S | P deriving (Eq, Show)
 
 -- Timing
 --------------------------------------------------------------------------------
