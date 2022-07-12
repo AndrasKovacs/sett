@@ -229,7 +229,7 @@ Ultra long term:
   - internal/external languages
   - full-fledged metatheory of signatures
 
-<!-- -------------------------------------------------------------------------------- -->
+--------------------------------------------------------------------------------
 
 0th version:
   - Only basic features, no modules, no inductives, no Set/Prop ambiguity

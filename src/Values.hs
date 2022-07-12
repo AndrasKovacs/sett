@@ -7,7 +7,7 @@ import qualified Presyntax as P
 --------------------------------------------------------------------------------
 
 data RigidHead
-  = RHLocalVar Lvl
+  = RHLocalVar Lvl Ty
   | RHPostulate Lvl
   | RHCoe Val Val Val Val
   | RHRefl Val Val
@@ -78,7 +78,7 @@ data Val
 
   -- Traced reductions
   | Unfold UnfoldHead Spine ~Val  -- unfolding choice (top/meta)
-  | Eq Val Val Val Val            -- Eq computation to non-Eq type
+  -- | Eq Val Val Val Val            -- Eq computation to non-Eq type
 
   -- Canonical values
   | Pair SP Val Val
@@ -92,6 +92,12 @@ data Val
   | Tt
   | Bot
   | Irrelevant
+
+markEq :: Val -> Val -> Val -> Val -> Val
+markEq ~a ~t ~u ~v = v
+{-# inline markEq #-}
+
+pattern Var x ga = Rigid (RHLocalVar x ga) SId
 
 pattern LamP x i a t = Lam P x i a (Cl t)
 pattern LamS x i a t = Lam S x i a (Cl t)

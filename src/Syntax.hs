@@ -40,7 +40,7 @@ data Tm
   | Top
   | Tt
   | Bot
-  | Eq
+  -- | Eq
   | Coe
   | Refl
   | Sym

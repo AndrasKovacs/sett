@@ -54,7 +54,7 @@ solve x tv a = do
 
 data TopEntry
   = TEDef P.Name S.Ty S.Tm MetaVar -- ^ Name, type, definition, marker for frozen metas.
-  | TEPostulate S.Ty MetaVar       -- ^ Type, marker for frozen metas.
+  | TEPostulate S.Ty V.Ty MetaVar       -- ^ Type, type val, marker for frozen metas.
 
 type TopInfo = ADL.Array TopEntry
 
