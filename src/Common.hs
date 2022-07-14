@@ -2,8 +2,10 @@
 
 module Common (
     module Common
+  , catch
   , coerce ) where
 
+import Control.Exception
 import Data.List
 import GHC.Exts
 import Data.Bits
@@ -153,9 +155,9 @@ instance Show Src where
   show (File fp _) = "File " ++ fp
   show (Interactive _) = "Interactive"
 
-srcToByteString :: Src -> B.ByteString
-srcToByteString (File _ bs)      = bs
-srcToByteString (Interactive bs) = bs
+srcToBs :: Src -> B.ByteString
+srcToBs (File _ bs)      = bs
+srcToBs (Interactive bs) = bs
 
 -- | Equality of bytestrings by reference, used for sanity checks.
 samePtr :: B.ByteString -> B.ByteString -> Bool
@@ -205,16 +207,27 @@ pattern Span x y <- ((\(Span# src x y) -> (Pos src x, Pos src y)) -> (x, y)) whe
 
 spanToBs :: Span -> B.ByteString
 spanToBs (Span (Pos src i) (Pos _ j)) =
-  let bstr = srcToByteString src
+  let bstr = srcToBs src
       i'   = B.length bstr - coerce i   -- Pos counts backwards from the end of the string
       j'   = B.length bstr - coerce j
   in B.take (j' - i') (B.drop i' bstr)
+
+instance Eq Span where
+  x == y = spanToBs x == spanToBs y
 
 spanToString :: Span -> String
 spanToString s = FP.unpackUTF8 (spanToBs s)
 
 -- Names in core syntax
 --------------------------------------------------------------------------------
+
+data Bind
+  = Bind Span
+  | DontBind
+
+instance Show Bind where
+  showsPrec _ (Bind x)  acc = showsPrec 0 x acc
+  showsPrec _  DontBind acc = '_':acc
 
 data Name
   = NUnused                    -- ^ Unused binder (underscore in surface syntax).
@@ -228,6 +241,7 @@ data Name
   | NB
   | NF
   | NG
+  deriving Eq
 
 instance Show Name where
   showsPrec d NUnused   acc = '_':acc
@@ -241,6 +255,11 @@ instance Show Name where
   showsPrec d NF        acc = 'f':acc
   showsPrec d NG        acc = 'g':acc
   showsPrec d (NName x) acc = showsPrec d x acc
+
+bindToName :: Bind -> Name
+bindToName = \case
+  Bind x   -> NName x
+  DontBind -> NUnused
 
 pick :: Name -> Name -> Name
 pick x y = case x of
@@ -258,6 +277,13 @@ data SP = S | P deriving (Eq, Show)
 
 data UnfoldOpt = UnfoldMetas | UnfoldAll | UnfoldNone
   deriving (Eq, Show)
+
+data UnifyState = USRigid | USFlex | USFull | USIrrelevant
+  deriving (Eq, Show)
+
+data ConvState = CSRigid | CSFlex | CSFull
+  deriving (Eq, Show)
+
 
 -- Timing
 --------------------------------------------------------------------------------

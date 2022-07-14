@@ -7,7 +7,6 @@ import qualified Data.ByteString      as B
 import qualified Data.HashMap.Strict  as HM
 
 import Common
-import qualified Presyntax as P
 import qualified Syntax    as S
 import qualified Values    as V
 
@@ -17,8 +16,10 @@ data Entry
 
 type NameTable = HM.HashMap B.ByteString Entry
 
-lookup :: P.Name -> NameTable -> Maybe Entry
-lookup x = HM.lookup (P.nameToBs x)
+lookup :: Span -> NameTable -> Maybe Entry
+lookup x = HM.lookup (spanToBs x)
 
-insert :: P.Name -> Entry -> NameTable -> NameTable
-insert  x entry = HM.insert (P.nameToBs x) entry
+insert :: Bind -> Entry -> NameTable -> NameTable
+insert x entry tbl = case x of
+  Bind x   -> HM.insert (spanToBs x) entry tbl
+  DontBind -> tbl

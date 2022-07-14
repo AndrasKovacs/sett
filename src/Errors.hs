@@ -1,18 +1,29 @@
 
 module Errors where
 
+import Control.Exception
+
 import Syntax
 import Common
+import Values
 import qualified Presyntax as P
 
+data UnifyEx = CantUnify | FrozenSolution | FlexSolution
+  deriving (Eq, Show)
+instance Exception UnifyEx
+
 data Error
-  = UnifyError Tm Tm
+  = UnifyError Val Val
   | NameNotInScope P.Name
   | NoSuchField P.Name
-  | NoSuchArgument P.Name
+  | NoNamedImplicitArg P.Name
   | IcitMismatch Icit Icit
   | NoNamedLambdaInference
   | ExpectedSg Tm
-  deriving Show
 
-data ElabError = ElabError Locals P.Tm Error
+data ErrorInCxt = ErrorInCxt Locals P.Tm Error
+
+instance Show ErrorInCxt where
+  show = uf
+
+instance Exception ErrorInCxt

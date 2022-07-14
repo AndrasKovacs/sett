@@ -6,6 +6,7 @@ import qualified Data.Array.Dynamic.L as ADL
 import qualified Data.Ref.F           as RF
 
 import Common
+import Values
 import qualified Values as V
 import qualified Syntax as S
 import qualified Presyntax as P
@@ -17,8 +18,8 @@ import qualified Presyntax as P
 type OccursCache = RF.Ref MetaVar
 
 data MetaEntry
-  = MEUnsolved V.Ty                   -- ^ Type
-  | MESolved OccursCache V.Val V.GTy  -- ^ Occurs check cache, value, type
+  = MEUnsolved V.Ty                              -- ^ Type
+  | MESolved OccursCache Val {-# unpack #-} GTy  -- ^ Occurs check cache, value, type
 
 type MetaCxt = ADL.Array MetaEntry
 

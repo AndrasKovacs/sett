@@ -3,20 +3,8 @@
 module Presyntax where
 
 import Common hiding (Name)
-import qualified Data.ByteString as B
-
-data Bind
-  = Bind Name
-  | DontBind
-
-instance Show Bind where
-  showsPrec _ (Bind x)  acc = showsPrec 0 x acc
-  showsPrec _  DontBind acc = '_':acc
 
 type Name = Span
-
-nameToBs :: Name -> B.ByteString
-nameToBs = spanToBs
 
 data TopLevel
   = Nil

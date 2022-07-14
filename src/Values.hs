@@ -125,12 +125,15 @@ funS a b = PiSE NUnused a \_ -> b
 andP :: Val -> Val -> Val
 andP a b = SgP NUnused a \_ -> b
 
+gSet = gjoin Set
+gProp = gjoin Prop
+
 --------------------------------------------------------------------------------
 
-data GVal = G {g1, g2 :: ~Val}
-type GTy  = GVal
+data G    = G {g1, g2 :: ~Val}
+type GTy  = G
 
-gjoin :: Val -> GVal
+gjoin :: Val -> G
 gjoin ~v = G v v
 {-# inline gjoin #-}
 
