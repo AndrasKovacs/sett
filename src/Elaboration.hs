@@ -14,6 +14,7 @@ import qualified Presyntax as P
 import qualified Unification as Unif
 import qualified Syntax as S
 import qualified Values as V
+import qualified NameTable as NT
 
 --------------------------------------------------------------------------------
 
@@ -45,45 +46,56 @@ freshMeta cxt a = do
 
 
 -- | Insert fresh implicit applications.
-insert' :: Cxt -> IO (Tm, V.Ty) -> IO (Tm, V.Ty)
-insert' cxt act = go =<< act where
-  go :: (Tm, V.Ty) -> IO (Tm, V.Ty)
-  go (!t, !va) = forceAll cxt va >>= \case
+insertApps' :: Cxt -> IO Infer -> IO Infer
+insertApps' cxt act = go =<< act where
+  go :: Infer -> IO Infer
+  go (Infer t (G a fa)) = forceAll cxt fa >>= \case
     V.Pi _ x Impl a b -> do
       m <- freshMeta cxt a
       let mv = eval cxt m
-      go (S.App t m Impl // (b $$ mv))
-    va -> pure (t, va)
+      let b' = gjoin (b $$ mv)
+      go $ Infer (S.App t m Impl) b'
+    fa -> pure $ Infer t (G a fa)
 
 -- | Insert fresh implicit applications to a term which is not
 --   an implicit lambda (i.e. neutral).
-insert :: Cxt -> IO (Tm, V.Ty) -> IO (Tm, V.Ty)
-insert cxt act = act >>= \case
-  (t@(S.Lam _ _ Impl _ _), !va) -> pure (t, va)
-  (t                     ,  va) -> insert' cxt (pure (t, va))
+insertApps :: Cxt -> IO Infer -> IO Infer
+insertApps cxt act = act >>= \case
+  inf@(Infer (S.Lam _ _ Impl _ _) _) -> pure inf
+  inf                                -> insertApps' cxt (pure inf)
 
 -- | Insert fresh implicit applications until we hit a Pi with
 --   a particular binder name.
-insertUntilName :: Cxt -> P.Tm -> P.Name -> IO (Tm, V.Ty) -> IO (Tm, V.Ty)
-insertUntilName cxt pt name act = go =<< act where
-  go :: (Tm, V.Ty) -> IO (Tm, V.Ty)
-  go (!t, !va) = forceAll cxt va >>= \case
-    va@(V.Pi _ x Impl a b) -> do
+insertAppsUntilName :: Cxt -> P.Tm -> P.Name -> IO Infer -> IO Infer
+insertAppsUntilName cxt pt name act = go =<< act where
+  go :: Infer -> IO Infer
+  go (Infer t (G a fa)) = forceAll cxt fa >>= \case
+    fa@(V.Pi _ x Impl a b) -> do
       if x == NName name then
-        pure (t, va)
+        pure (Infer t (G a fa))
       else do
         m <- freshMeta cxt a
         let mv = eval cxt m
-        go (S.App t m Impl // (b $$ mv))
+        go $ Infer (S.App t m Impl) (gjoin $! (b $$ mv))
     _ ->
       elabError cxt pt $ NoNamedImplicitArg name
 
 
 --------------------------------------------------------------------------------
 
-subtype :: Cxt -> S.Tm -> V.Ty -> V.Ty -> IO S.Tm
-subtype = uf
+subtype :: Cxt -> P.Tm -> S.Tm -> V.Ty -> V.Ty -> IO S.Tm
+subtype cxt pt t a b = do
+  fa <- forceAll cxt a
+  fb <- forceAll cxt b
+  case (fa, fb) of
+    (V.Prop, V.Set) -> do
+      pure (S.El t)
+    (fa, fb) -> do
+      unify cxt pt (G a fa) (G b fb)
+      pure t
 
+
+-- Check
 --------------------------------------------------------------------------------
 
 checkEl :: Cxt -> P.Tm -> GTy -> IO S.Tm
@@ -141,7 +153,7 @@ checkEl cxt topt (G topa ftopa) = do
 
     (topt, ftopa) -> do
       Infer t tty <- infer cxt topt
-      subtype cxt t (g2 tty) (V.El ftopa)
+      subtype cxt topt t (g2 tty) (V.El ftopa)
 
 
 check :: Cxt -> P.Tm -> GTy -> IO S.Tm
@@ -226,7 +238,66 @@ check cxt topt (G topa ftopa) = do
 
     (topt, ftopa) -> do
       Infer t tty <- infer cxt topt
-      subtype cxt t (g2 tty) ftopa
+      subtype cxt topt t (g2 tty) ftopa
+
+-- infer
+--------------------------------------------------------------------------------
 
 infer :: Cxt -> P.Tm -> IO Infer
-infer cxt pt = uf
+infer cxt topt = case topt of
+
+  P.Var x -> case NT.lookup x (_nameTable cxt) of
+    Nothing ->
+      elabError cxt topt $ NameNotInScope x
+    Just (NT.Top x a ga v) ->
+      pure $ Infer (S.TopDef (coerce v) x) ga
+    Just (NT.Local x ga) ->
+      pure $ Infer (S.LocalVar (lvlToIx (_lvl cxt) x)) ga
+
+  P.App topt topu i -> do
+    (i, t, a, fa) <- case i of
+      P.NoName Impl -> do
+        Infer t (G a fa) <- infer cxt topt
+        pure (Impl, t, a, fa)
+      P.NoName Expl -> do
+        Infer t (G a fa) <- insertApps' cxt $ infer cxt topt
+        pure (Expl, t, a, fa)
+      P.Named x -> do
+        Infer t (G a fa) <- insertAppsUntilName cxt topt x $ infer cxt topt
+        pure (Impl, t, a , fa)
+
+    forceAll cxt fa >>= \case
+
+      V.Pi _ x _ a b -> do
+        u <- check cxt topu (gjoin a)
+        pure $ Infer (S.App t u i) (gjoin $! (b $$$ eval cxt u))
+
+      V.El (V.Pi _ x i a b) -> do
+        u <- check cxt topu (gjoin $ V.El a)
+        pure $ Infer (S.App t u i) (gjoin $! V.El (b $$$ eval cxt u))
+
+      fa ->
+        elabError cxt topt $ ExpectedFunOrForall a
+
+  P.Lam{} ->
+    elabError cxt topt $ GenericError "can't infer type for lambda"
+
+  P.Pair{} ->
+    elabError cxt topt $ GenericError "can't infer type for pair"
+
+  P.ProjField t x -> do
+    uf
+
+  P.Let _ x ma t u -> do
+    (a, va) <- case ma of
+      Just a  -> do
+        a <- check cxt a gSet
+        pure (a, eval cxt a)
+      Nothing -> do
+        a' <- freshMeta cxt V.Set
+        let va' = eval cxt a'
+        pure (a', va')
+    t <- check cxt t (gjoin va)
+    let ~vt = eval cxt t
+    Infer u uty <- infer (define x a (gjoin va) t vt cxt) u
+    pure $ Infer (S.Let (NName x) a t u) uty

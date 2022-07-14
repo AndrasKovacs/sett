@@ -20,6 +20,8 @@ data Error
   | IcitMismatch Icit Icit
   | NoNamedLambdaInference
   | ExpectedSg Tm
+  | ExpectedFunOrForall Val -- inferred type
+  | GenericError String
 
 data ErrorInCxt = ErrorInCxt Locals P.Tm Error
 

@@ -130,7 +130,7 @@ gProp = gjoin Prop
 
 --------------------------------------------------------------------------------
 
-data G    = G {g1, g2 :: ~Val}
+data G    = G {g1, g2 :: Val}
 type GTy  = G
 
 gjoin :: Val -> G
