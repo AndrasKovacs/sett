@@ -2,7 +2,6 @@
 module Values where
 
 import Common
-import qualified Presyntax as P
 
 --------------------------------------------------------------------------------
 
@@ -26,6 +25,11 @@ data FlexHead
   = FHMeta MetaVar                    -- blocking on meta
   | FHCoeRefl MetaVar Val Val Val Val -- coe-refl rule blocked by a meta
 
+headMeta :: FlexHead -> MetaVar
+headMeta = \case
+  FHMeta x            -> x
+  FHCoeRefl x _ _ _ _ -> x
+
 data UnfoldHead
   = UHSolvedMeta MetaVar
   | UHTopDef Lvl
@@ -37,7 +41,7 @@ data Spine
 
   | SProj1 Spine
   | SProj2 Spine
-  | SProjField Spine P.Name Int
+  | SProjField Spine Name Int
 
   | SCoeSrc Spine Val Val Val    -- netural source type
   | SCoeTgt Val Spine Val Val    -- neutral target type

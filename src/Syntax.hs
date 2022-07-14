@@ -3,7 +3,6 @@ module Syntax where
 
 import Common
 import Values (Val)
-import qualified Presyntax as P
 
 type Ty = Tm
 
@@ -22,7 +21,7 @@ data Tm
   | App Tm Tm Icit
 
   | Pair SP Tm Tm
-  | ProjField Tm P.Name Int
+  | ProjField Tm Name Int
   | Proj1 Tm
   | Proj2 Tm
 
