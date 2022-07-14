@@ -1,85 +1,38 @@
 
 module Cxt.Extension where
 
--- import qualified Data.HashMap.Strict as M
+import Common
+import Cxt.Types
+import Values
 
--- import Common
--- import Cxt.Types
--- import Evaluation
+import qualified NameTable as N
+import qualified Presyntax as P
+import qualified Syntax as S
+import qualified Values as V
 
--- import qualified Syntax as S
--- import qualified Values as V
+empty :: Cxt
+empty = Cxt V.ENil 0 S.LEmpty mempty
 
---------------------------------------------------------------------------------
+-- | Insert a bound variable.
+bind :: P.Name -> S.Ty -> V.GTy -> Cxt -> Cxt
+bind x a ga (Cxt e l ls tbl) =
+  Cxt (V.EDef e (V.Var l (g2 ga)))
+      (l + 1)
+      (S.LBind ls (NName x) a)
+      (N.insert x (N.Local l ga) tbl)
 
--- emptyCxt :: RawName -> Cxt
--- emptyCxt = Cxt V.Nil 0 S.Empty mempty
--- {-# inline emptyCxt #-}
+-- | Insert a definition.
+define :: P.Name -> S.Ty -> V.GTy -> S.Tm -> V.Val -> Cxt -> Cxt
+define x a ga t vt (Cxt e l ls tbl) =
+  Cxt (V.EDef e vt)
+      (l + 1)
+      (S.LDefine ls (NName x) a t)
+      (N.insert x (N.Local l ga) tbl)
 
--- bind :: RawName -> S.Ty -> S.U -> Cxt -> Cxt
--- bind x a au (Cxt env l loc ntbl src) =
---   Cxt (V.Skip env l)
---       (l + 1)
---       (S.Bind loc (NName x) a au)
---       (M.insert x (NILocal l (eval env l a) au) ntbl)
---       src
--- {-# inline bind #-}
-
--- bindEmpty :: S.Ty -> S.U -> Cxt -> Cxt
--- bindEmpty a au (Cxt env l loc ntbl src) =
---   Cxt (V.Skip env l)
---       (l + 1)
---       (S.Bind loc NEmpty a au)
---       ntbl
---       src
--- {-# inline bindEmpty #-}
-
--- bind' :: RawName -> S.Ty -> V.Ty -> S.U -> Cxt -> Cxt
--- bind' x a va au (Cxt env l loc ntbl src) =
---   Cxt (V.Skip env l)
---       (l + 1)
---       (S.Bind loc (NName x) a au)
---       (M.insert x (NILocal l va au) ntbl)
---       src
--- {-# inline bind' #-}
-
--- bindEmpty' :: S.Ty -> V.Ty -> S.U -> Cxt -> Cxt
--- bindEmpty' a va au (Cxt env l loc ntbl src) =
---   Cxt (V.Skip env l)
---       (l + 1)
---       (S.Bind loc NEmpty a au)
---       ntbl
---       src
--- {-# inline bindEmpty' #-}
-
--- newBinder :: Name -> S.Ty -> S.U -> Cxt -> Cxt
--- newBinder x a au (Cxt env l loc ntbl src) =
---   Cxt (V.Skip env l)
---       (l + 1)
---       (S.Bind loc x a au)
---       ntbl
---       src
--- {-# inline newBinder #-}
-
--- define :: RawName -> S.Tm -> S.Ty -> S.U -> Cxt -> Cxt
--- define x t a au (Cxt env l loc ntbl src) =
---   Cxt (V.Snoc env (unS (eval env l t)))
---       (l + 1)
---       (S.Define loc (NName x) t a au)
---       (M.insert x (NILocal l (eval env l a) au) ntbl)
---       src
--- {-# inline define #-}
-
--- define' :: RawName -> S.Tm -> V.WVal -> S.Ty -> V.Ty -> S.U -> Cxt -> Cxt
--- define' x t ~vt a va au (Cxt env l loc ntbl src) =
---   Cxt (V.Snoc env vt)
---       (l + 1)
---       (S.Define loc (NName x) t a au)
---       (M.insert x (NILocal l va au) ntbl)
---       src
--- {-# inline define' #-}
-
--- closeVal :: Cxt -> V.Val -> V.Closure
--- closeVal cxt t =
---   V.Close (_env cxt) (_lvl cxt) (quote (_lvl cxt + 1) DontUnfold t)
--- {-# inline closeVal #-}
+-- | Insert a bound variable which does not exist in the source.
+insertBind :: S.Ty -> V.GTy -> Cxt -> Cxt
+insertBind a ga (Cxt e l ls tbl) =
+  Cxt (V.EDef e (V.Var l (g2 ga)))
+      (l + 1)
+      (S.LBind ls NUnused a)
+      tbl

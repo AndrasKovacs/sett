@@ -68,7 +68,7 @@ projField t x n = case t of
   _              -> impossible
 
 coe :: Lvl -> Val -> Val -> Val -> Val -> Val
-coe l a b p t = case a // b of
+coe l a b p t = case (a, b) of
 
   -- canonical
   ------------------------------------------------------------
@@ -113,9 +113,17 @@ coe l a b p t = case a // b of
   (a@Rigid{}, b) -> coeTrans l a b p t
   (a, b@Rigid{}) -> coeTrans l a b p t
 
-  -- canonical mismatch
-  ------------------------------------------------------------
-  (a, b) -> Exfalso b p
+
+  -- Canonical mismatch
+  -- NOTE: Canonical mismatch can't compute to Exfalso!
+  --       That + coe-trans causes conversion to be undecidable.
+  --       If Bot is provable, then every canonical type is irrelevant.
+  --       E.g.    true
+  --             = coe Bool Bool _ true
+  --             = coe Nat Bool _ (coe Bool Nat _ true)
+  --             = Exfalso Bool _
+
+  (a, b) -> Rigid (RHCoe a b p t) SId
 
 
 coeTrans :: Lvl -> Val -> Val -> Val -> Val -> Val
@@ -165,7 +173,7 @@ eq l a t u = case a of
   _             -> impossible
 
 eqSet :: Lvl -> Val -> Val -> Val
-eqSet l a b = case a // b of
+eqSet l a b = case (a, b) of
 
   -- canonical
   ------------------------------------------------------------
@@ -223,7 +231,7 @@ spine l v sp =
     SEqRhs a t u      -> eq l a t (go u)
 
 maskEnv :: Env -> S.Locals -> Spine
-maskEnv e ls = case e // ls of
+maskEnv e ls = case (e, ls) of
   (ENil,     S.LEmpty          ) -> SId
   (EDef e _, S.LDefine ls _ _ _) -> maskEnv e ls
   (EDef e v, S.LBind ls x _    ) -> SApp (maskEnv e ls) v Expl
@@ -236,20 +244,20 @@ insertedMeta l e x ls = runIO do
     MEUnsolved{}   -> pure (Flex (FHMeta x) sp)
     MESolved _ v _ -> pure (Unfold (UHSolvedMeta x) sp (spine l v sp))
 
-eqCl, coeCl, symCl, apCl, transCl :: Lvl -> Val
-eqCl  l   = LamSI NA Set \a -> LamSE NX a \x -> LamSE NY a \y -> eq l a x y
-coeCl l   = LamSI NA Set \a -> LamSI NB Set \b -> LamSE NP (El (eqSet l a b)) \p -> LamSE NX a \x ->
-            coe l a b p x
-symCl l   = LamPI NA Set \a -> LamPI NY a \x -> LamPI NY a \y -> LamPE NP (El (eq l a x y)) \p -> Sym a x y p
-apCl  l   = LamPI NA Set \a -> LamPI NB Set \b -> LamPE NF (funS a b) \f -> LamPI NX a \x -> LamPI NY a \y ->
-            LamPE NP(eq l a x y) \p -> Ap a b f x y p
-transCl l = LamPI NA Set \a -> LamPI NX a \x -> LamPI NY a \y -> LamPI NZ a \z -> LamPE NP (eq l a x y) \p ->
-            LamPE NQ (eq l a y z) \q -> Trans a x y z p q
+eqSym, coeSym, symSym, apSym, transSym :: Lvl -> Val
+eqSym  l   = LamSI NA Set \a -> LamSE NX a \x -> LamSE NY a \y -> eq l a x y
+coeSym l   = LamSI NA Set \a -> LamSI NB Set \b -> LamSE NP (El (eqSet l a b)) \p -> LamSE NX a \x ->
+             coe l a b p x
+symSym l   = LamPI NA Set \a -> LamPI NY a \x -> LamPI NY a \y -> LamPE NP (El (eq l a x y)) \p -> Sym a x y p
+apSym  l   = LamPI NA Set \a -> LamPI NB Set \b -> LamPE NF (funS a b) \f -> LamPI NX a \x -> LamPI NY a \y ->
+             LamPE NP(eq l a x y) \p -> Ap a b f x y p
+transSym l = LamPI NA Set \a -> LamPI NX a \x -> LamPI NY a \y -> LamPI NZ a \z -> LamPE NP (eq l a x y) \p ->
+             LamPE NQ (eq l a y z) \q -> Trans a x y z p q
 
-elCl, reflCl, exfalsoCl :: Val
-elCl      = LamSE NA Prop El
-reflCl    = LamPI NA Set \a -> LamPI NX a \x -> Refl a x
-exfalsoCl = LamSI NA Set \a -> LamSE NP (El Bot) \p -> Exfalso a p
+elSym, reflSym, exfalsoSym :: Val
+elSym      = LamSE NA Prop El
+reflSym    = LamPI NA Set \a -> LamPI NX a \x -> Refl a x
+exfalsoSym = LamSI NA Set \a -> LamSE NP (El Bot) \p -> Exfalso a p
 
 
 eval :: Lvl -> Env -> S.Tm -> Val
@@ -275,17 +283,17 @@ eval l e t =
     S.Let x a t u       -> eval l (EDef e (eval l e t)) u
     S.Set               -> Set
     S.Prop              -> Prop
-    S.El                -> elCl
     S.Top               -> Top
     S.Tt                -> Tt
     S.Bot               -> Bot
-    -- S.Eq                -> eqCl l
-    S.Coe               -> coeCl l
-    S.Refl              -> reflCl
-    S.Sym               -> symCl l
-    S.Trans             -> transCl l
-    S.Ap                -> apCl l
-    S.Exfalso           -> exfalsoCl
+    S.ElSym             -> elSym
+    S.EqSym             -> eqSym l
+    S.CoeSym            -> coeSym l
+    S.ReflSym           -> reflSym
+    S.SymSym            -> symSym l
+    S.TransSym          -> transSym l
+    S.ApSym             -> apSym l
+    S.ExfalsoSym        -> exfalsoSym
     S.Irrelevant        -> Irrelevant
 
 -- Forcing
@@ -297,7 +305,7 @@ unblock x def k = readMeta x >>= \case
   MESolved _ v _ -> k v
 {-# inline unblock #-}
 
--- | Convert a solved head FHMeta to Unfold.
+-- | Eliminate solved flex head metas.
 force :: Lvl -> Val -> IO Val
 force l = \case
   hsp@(Flex h sp) -> forceFlex l hsp h sp
@@ -351,15 +359,6 @@ forceMetasUnfold l = \case
   t                         -> pure t
 
 
--- Conversion
---------------------------------------------------------------------------------
-
-{-
-TODO:
-- remembered Eq is currently not implemented, nor Eq record wrapping.
-- we don't use unfolding control at all
--}
-
 -- Computing types & relevance
 --------------------------------------------------------------------------------
 
@@ -378,17 +377,13 @@ rigidHeadType l = \case
   RHLocalVar _ a      -> pure a
   RHPostulate x       -> postulateType x
   RHCoe a b p t       -> pure $! b
-  RHRefl a t          -> pure $! eq l a t t
-  RHSym a t u p       -> pure $! eq l a u t
-  RHTrans a t u v p q -> pure $! eq l a t v
-  RHAp a b f x y p    -> pure $! eq l b (f `appE` x) (f `appE` y)
   RHExfalso a p       -> pure $! a
 
 projFieldType :: Lvl -> Spine -> (Spine -> Val) -> Ty -> Int -> IO Ty
 projFieldType l sp mkval a n = do
   let go = projFieldType l sp mkval; {-# inline go #-}
   a <- forceAll l a
-  case a // n of
+  case (a, n) of
     (Sg _ x a b     , 0) -> pure a
     (Sg _ x a b     , n) -> go (b $$ mkval (SProjField sp x n)) (n + 1)
     (El (Sg _ _ a b), 0) -> pure $ El a
@@ -468,6 +463,8 @@ rigidRelevance l h sp = do
   ty <- rigidType l h sp
   typeRelevance l ty
 
+
+-- Conversion
 --------------------------------------------------------------------------------
 
 data ConvRes = Same | Diff | BlockOn MetaVar
@@ -486,7 +483,7 @@ convSp :: Lvl -> Spine -> Spine -> IO ()
 convSp l sp sp' = do
   let go   = conv l; {-# inline go #-}
       goSp = convSp l; {-# inline goSp #-}
-  case sp // sp' of
+  case (sp, sp') of
     (SId               , SId                   ) -> pure ()
     (SApp t u i        , SApp t' u' i'         ) -> goSp t t' >> go u u'
     (SProj1 t          , SProj1 t'             ) -> goSp t t'
@@ -522,19 +519,28 @@ convFlexRel l h sp h' sp' = do
     _         -> impossible
 
 -- | Magical rigid coe conversion.
-coeCoe :: Lvl -> Val -> Val -> Val -> Val -> Val -> Val -> Val -> Val -> IO ()
-coeCoe l a b p t a' b' p' t' = _
+convCoe :: Lvl -> Val -> Val -> Val -> Val -> Spine -> Val -> Val -> Val -> Val -> Spine -> IO ()
+convCoe l a b p t sp a' b' p' t' sp' = do
+
+  case (sp, sp') of (SId, SId) -> pure ()
+                    _          -> conv l b b'
+
+  conv l (coe l a a' (Trans Set a b a' p (Sym Set a' b p')) t) t'
+  convSp l sp sp'
+
+convExfalso :: Lvl -> Ty -> Ty -> Spine -> Spine -> IO ()
+convExfalso l a a' sp sp' = case (sp, sp') of
+  (SId, SId) -> pure ()
+  _          -> conv l a a' >> convSp l sp sp'
 
 -- | Compare rigid-s which are known to be relevant.
 convRigidRel :: Lvl -> RigidHead -> Spine -> RigidHead -> Spine -> IO ()
 convRigidRel l h sp h' sp' = case (h, h') of
   (RHLocalVar x _, RHLocalVar x' _   ) -> convEq x x' >> convSp l sp sp'
   (RHPostulate x , RHPostulate x'    ) -> convEq x x' >> convSp l sp sp'
-  (RHCoe a b p t , RHCoe a' b' p' t' ) -> coeCoe l a b p t a' b' p' t' >> convSp l sp sp'
-  (RHExfalso a p , RHExfalso a' p'   ) -> conv l a a' >> convSp l sp sp'
-  (RHRefl a t    , RHRefl a' t'      ) -> conv l a a' >> conv l t t' >> _
-
-
+  (RHCoe a b p t , RHCoe a' b' p' t' ) -> convCoe l a b p t sp a' b' p' t' sp'
+  (RHExfalso a p , RHExfalso a' p'   ) -> convExfalso l a a' sp sp'
+  _                                    -> throwIO Diff
 
 conv :: Lvl -> Val -> Val -> IO ()
 conv l t u = do
@@ -553,7 +559,7 @@ conv l t u = do
 
   t <- forceAll l t
   u <- forceAll l u
-  case t // u of
+  case (t, u) of
 
     -- canonical
     ------------------------------------------------------------
@@ -601,7 +607,6 @@ conv l t u = do
       RBlockOn x -> throwIO $! BlockOn x
       RRel       -> throwIO $! BlockOn (headMeta h)
 
-    -- TODO: fancy coercion conversion!
     (Rigid h sp, Rigid h' sp') -> rigidRelevance l h sp >>= \case
       RIrr       -> pure ()
       RBlockOn x -> throwIO $! BlockOn x
@@ -622,3 +627,82 @@ conv l t u = do
     --------------------------------------------------------------------------------
 
     (a, b) -> throwIO Diff
+
+
+-- Quoting
+--------------------------------------------------------------------------------
+
+quoteSp :: Lvl -> UnfoldOpt -> S.Tm -> Spine -> S.Tm
+quoteSp l opt hd sp = let
+  go         = quote l opt; {-# inline go #-}
+  goSp       = quoteSp l opt hd; {-# inline goSp #-}
+  in case sp of
+    SId               -> hd
+    SApp t u i        -> S.App (goSp t) (go u) i
+    SProj1 t          -> S.Proj1 (goSp t)
+    SProj2 t          -> S.Proj2 (goSp t)
+    SProjField t x n  -> S.ProjField (goSp t) x n
+    SCoeSrc a b p t   -> S.Coe (goSp a) (go b) (go p) (go t)
+    SCoeTgt a b p t   -> S.Coe (go a) (goSp b) (go p) (go t)
+    SCoeTrans a b p t -> S.Coe (go a) (go b) (go p) (goSp t)
+    SEqSet a t u      -> S.Eq (goSp a) (go t) (go u)
+    SEqLhs a t u      -> S.Eq (go a) (goSp t) (go u)
+    SEqRhs a t u      -> S.Eq (go a) (go t) (goSp u)
+
+quote :: Lvl -> UnfoldOpt -> Val -> S.Tm
+quote l opt t = let
+  go         = quote l opt; {-# inline go #-}
+  goSp       = quoteSp l opt; {-# inline goSp #-}
+  goBind a t = quote (l + 1) opt (t $$ Var l a); {-# inline goBind #-}
+
+  goFlexHead = \case
+    FHMeta x            -> S.Meta x
+    FHCoeRefl x a b p t -> S.Coe (go a) (go b) (go p) (go t)
+
+  goRigidHead = \case
+    RHLocalVar x _ -> S.LocalVar (lvlToIx l x)
+    RHPostulate x  -> S.Postulate x
+    RHCoe a b p t  -> S.Coe (go a) (go b) (go p) (go t)
+    RHExfalso a t  -> S.Exfalso (go a) (go t)
+
+  goUnfoldHead ~v = \case
+    UHSolvedMeta x -> S.Meta x
+    UHTopDef x     -> S.TopDef (coerce v) x
+
+  cont :: Val -> S.Tm
+  cont = \case
+    Flex h sp         -> goSp (goFlexHead h) sp
+    Rigid h sp        -> goSp (goRigidHead h) sp
+    Unfold h sp v     -> goSp (goUnfoldHead v h) sp
+    Pair hl t u       -> S.Pair hl (go t) (go u)
+    Lam hl x i a t    -> S.Lam hl x i (go a) (goBind a t)
+    Sg hl x a b       -> S.Sg hl x (go a) (goBind a b)
+    Pi hl x i a b     -> S.Pi hl x i (go a) (goBind a b)
+    Set               -> S.Set
+    Prop              -> S.Prop
+    El a              -> S.El (go a)
+    Top               -> S.Top
+    Tt                -> S.Tt
+    Bot               -> S.Bot
+    Refl a t          -> S.Refl (go a) (go t)
+    Sym a x y p       -> S.Sym (go a) (go x) (go y) (go p)
+    Trans a x y z p q -> S.Trans (go a) (go x) (go y) (go z) (go p) (go q)
+    Ap a b f x y p    -> S.Ap (go a) (go b) (go f) (go x) (go y) (go p)
+    Irrelevant        -> S.Irrelevant
+
+  in case opt of
+    UnfoldAll   -> cont (runIO (forceAll l t))
+    UnfoldMetas -> cont (runIO (forceMetas l t))
+    UnfoldNone  -> cont (runIO (force l t))
+
+eval0 :: S.Tm -> Val
+eval0 = eval 0 ENil
+{-# inline eval0 #-}
+
+quote0 :: UnfoldOpt -> Val -> S.Tm
+quote0 opt = quote 0 opt
+{-# inline quote0 #-}
+
+nf0 :: UnfoldOpt -> S.Tm -> S.Tm
+nf0 opt t = quote0 opt (eval0 t)
+{-# inline nf0 #-}

@@ -6,20 +6,12 @@ import Common
 --------------------------------------------------------------------------------
 
 data RigidHead
-  = RHLocalVar Lvl Ty
+  = RHLocalVar Lvl ~Ty
   | RHPostulate Lvl
-  | RHCoe Val Val Val Val
-  | RHRefl Val Val
-  | RHSym Val Val Val Val
-  | RHTrans Val Val Val Val Val Val
-  | RHAp Val Val Val Val Val Val
+  | RHCoe Val Val Val Val  -- rigid neutral coe (including canonical mismatch)
   | RHExfalso Val Val
 
-pattern Refl a t          = Rigid (RHRefl a t) SId
-pattern Sym a t u p       = Rigid (RHSym a t u p) SId
-pattern Trans a t u v p q = Rigid (RHTrans a t u v p q) SId
-pattern Ap a b f t u p    = Rigid (RHAp a b f t u p) SId
-pattern Exfalso a t       = Rigid (RHExfalso a t) SId
+pattern Exfalso a t = Rigid (RHExfalso a t) SId
 
 data FlexHead
   = FHMeta MetaVar                    -- blocking on meta
@@ -34,7 +26,6 @@ data UnfoldHead
   = UHSolvedMeta MetaVar
   | UHTopDef Lvl
 
--- TODO: Coe/Id blocking is perhaps too fine-grained!
 data Spine
   = SId
   | SApp Spine Val Icit
@@ -95,6 +86,10 @@ data Val
   | Top
   | Tt
   | Bot
+  | Refl Val Val
+  | Sym Val Val Val Val
+  | Trans Val Val Val Val Val Val
+  | Ap Val Val Val Val Val Val
   | Irrelevant
 
 markEq :: Val -> Val -> Val -> Val -> Val

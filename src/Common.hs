@@ -218,7 +218,7 @@ spanToString s = FP.unpackUTF8 (spanToBs s)
 
 data Name
   = NUnused                    -- ^ Unused binder (underscore in surface syntax).
-  | NSpan {-# unpack #-} Span  -- ^ Name which comes from user source.
+  | NName {-# unpack #-} Span  -- ^ Name which comes from user source.
   | NX
   | NY
   | NZ
@@ -240,7 +240,7 @@ instance Show Name where
   showsPrec d NB        acc = 'B':acc
   showsPrec d NF        acc = 'f':acc
   showsPrec d NG        acc = 'g':acc
-  showsPrec d (NSpan x) acc = showsPrec d x acc
+  showsPrec d (NName x) acc = showsPrec d x acc
 
 pick :: Name -> Name -> Name
 pick x y = case x of
@@ -253,6 +253,11 @@ pick x y = case x of
 
 -- Set/Prop
 data SP = S | P deriving (Eq, Show)
+
+--------------------------------------------------------------------------------
+
+data UnfoldOpt = UnfoldMetas | UnfoldAll | UnfoldNone
+  deriving (Eq, Show)
 
 -- Timing
 --------------------------------------------------------------------------------
