@@ -3,8 +3,12 @@
 module Common (
     module Common
   , catch
-  , coerce ) where
+  , coerce
+  , when
+  , unless
+  ) where
 
+import Control.Monad
 import Control.Exception
 import Data.List
 import GHC.Exts

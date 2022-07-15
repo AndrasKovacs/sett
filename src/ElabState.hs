@@ -18,7 +18,7 @@ import qualified Presyntax as P
 type OccursCache = RF.Ref MetaVar
 
 data MetaEntry
-  = MEUnsolved V.Ty                              -- ^ Type
+  = MEUnsolved {-# unpack #-} GTy                -- ^ Type
   | MESolved OccursCache Val {-# unpack #-} GTy  -- ^ Occurs check cache, value, type
 
 type MetaCxt = ADL.Array MetaEntry
@@ -34,7 +34,7 @@ readMeta :: MetaVar -> IO MetaEntry
 readMeta (MkMetaVar i) = ADL.read metaCxt i
 {-# inline readMeta #-}
 
-newMeta :: V.Ty -> IO MetaVar
+newMeta :: GTy -> IO MetaVar
 newMeta a = do
   s <- ADL.size metaCxt
   ADL.push metaCxt (MEUnsolved a)
@@ -55,7 +55,7 @@ solve x tv a = do
 
 data TopEntry
   = TEDef P.Name S.Ty S.Tm MetaVar -- ^ Name, type, definition, marker for frozen metas.
-  | TEPostulate S.Ty V.Ty MetaVar       -- ^ Type, type val, marker for frozen metas.
+  | TEPostulate S.Ty V.GTy MetaVar -- ^ Type, type val, marker for frozen metas.
 
 type TopInfo = ADL.Array TopEntry
 

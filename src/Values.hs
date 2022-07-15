@@ -127,10 +127,11 @@ andP a b = SgP NUnused a \_ -> b
 
 gSet = gjoin Set
 gProp = gjoin Prop
+gEl (G a fa) = G (El a) (El fa); {-# inline gEl #-}
 
 --------------------------------------------------------------------------------
 
-data G    = G {g1, g2 :: Val}
+data G    = G {g1 :: Val, g2 :: ~Val}
 type GTy  = G
 
 gjoin :: Val -> G

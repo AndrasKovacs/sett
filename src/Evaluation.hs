@@ -1,7 +1,6 @@
 
 module Evaluation where
 
-import Control.Monad
 import Control.Exception
 import IO
 
@@ -9,6 +8,12 @@ import Common
 import ElabState
 import Values
 import qualified Syntax as S
+
+--------------------------------------------------------------------------------
+
+-- TODO
+--  - approximate unfoldings, use ConvState
+--  - conversion between field proj and iterated primitive proj
 
 --------------------------------------------------------------------------------
 
@@ -75,8 +80,9 @@ coe l a b p t = case (a, b) of
 
   (El a, El b) -> proj1 p `appE` t
 
-  (Pi _ x i a b, topB@(Pi _ x' i' a' b'))
-    | i /= i' -> Exfalso topB p
+  (topA@(Pi _ x i a b), topB@(Pi _ x' i' a' b'))
+    | i /= i' -> Rigid (RHCoe topA topB p t) SId
+
     | True    -> LamS (pick x x') i a' \x' ->
         let p1 = proj1 p
             p2 = proj2 p
@@ -90,7 +96,7 @@ coe l a b p t = case (a, b) of
         t2' = coe l (b $$ t1) (b' $$ t1') (proj2 p) t2
     in Pair S t1' t2'
 
-  (Set, Set) -> t
+  (Set,  Set ) -> t
   (Prop, Prop) -> t
 
   -- non-canonical
@@ -314,7 +320,7 @@ force l = \case
 
 forceFlex :: Lvl -> Val -> FlexHead -> Spine -> IO Val
 forceFlex l hsp h sp = case h of
-  FHMeta x            -> unblock x hsp \v -> force l $! spine l v sp
+  FHMeta x            -> unblock x hsp \v -> pure $ Unfold (UHSolvedMeta x) sp v
   FHCoeRefl x a b p t -> unblock x hsp \_ -> force l $! coeRefl l a b p t
 {-# noinline forceFlex #-}
 
@@ -362,12 +368,12 @@ forceMetasUnfold l = \case
 -- Computing types & relevance
 --------------------------------------------------------------------------------
 
-postulateType :: Lvl -> IO Ty
+postulateType :: Lvl -> IO GTy
 postulateType x = readTopInfo x >>= \case
   TEDef{}           -> impossible
   TEPostulate _ a _ -> pure a
 
-metaType :: MetaVar -> IO Ty
+metaType :: MetaVar -> IO GTy
 metaType x = readMeta x >>= \case
   MEUnsolved a -> pure a
   _            -> impossible
@@ -375,7 +381,7 @@ metaType x = readMeta x >>= \case
 rigidHeadType :: Lvl -> RigidHead -> IO Ty
 rigidHeadType l = \case
   RHLocalVar _ a      -> pure a
-  RHPostulate x       -> postulateType x
+  RHPostulate x       -> g2 <$!> postulateType x
   RHCoe a b p t       -> pure $! b
   RHExfalso a p       -> pure $! a
 
@@ -417,7 +423,7 @@ spineType l mkval a sp =
 
 flexHeadType :: Lvl -> FlexHead -> IO Ty
 flexHeadType l = \case
-  FHMeta x            -> metaType x
+  FHMeta x            -> g2 <$!> metaType x
   FHCoeRefl x a b p t -> pure b
 
 rigidType :: Lvl -> RigidHead -> Spine -> IO Ty
@@ -599,27 +605,27 @@ conv l t u = do
 
     (Flex h sp, _) -> flexRelevance l h sp >>= \case
       RIrr       -> pure ()
-      RBlockOn x -> throwIO $! BlockOn x
+      RBlockOn x -> throwIO $  BlockOn x
       RRel       -> throwIO $! BlockOn (headMeta h)
 
     (_ , Flex h sp) -> flexRelevance l h sp >>= \case
       RIrr       -> pure ()
-      RBlockOn x -> throwIO $! BlockOn x
+      RBlockOn x -> throwIO $  BlockOn x
       RRel       -> throwIO $! BlockOn (headMeta h)
 
     (Rigid h sp, Rigid h' sp') -> rigidRelevance l h sp >>= \case
       RIrr       -> pure ()
-      RBlockOn x -> throwIO $! BlockOn x
+      RBlockOn x -> throwIO $ BlockOn x
       RRel       -> convRigidRel l h sp h' sp'
 
     (Rigid h sp, _) -> rigidRelevance l h sp >>= \case
       RIrr       -> pure ()
-      RBlockOn x -> throwIO $! BlockOn x
+      RBlockOn x -> throwIO $ BlockOn x
       RRel       -> throwIO Diff
 
     (_, Rigid h' sp') -> rigidRelevance l h' sp' >>= \case
       RIrr       -> pure ()
-      RBlockOn x -> throwIO $! BlockOn x
+      RBlockOn x -> throwIO $ BlockOn x
       RRel       -> throwIO Diff
 
     -- canonical mismatch is always a failure, because we don't yet

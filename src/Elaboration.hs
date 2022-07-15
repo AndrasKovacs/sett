@@ -34,10 +34,11 @@ closeTy ls b = case ls of
   S.LBind ls x a     -> closeTy ls (S.Pi S x Expl a b)
   S.LDefine ls x t a -> closeTy ls (Let x a t b)
 
-freshMeta :: Cxt -> V.Ty -> IO Tm
-freshMeta cxt a = do
-  let ~closed = E.eval0 $ closeTy (_locals cxt) (quote cxt UnfoldNone a)
-  m <- newMeta closed
+freshMeta :: Cxt -> GTy -> IO Tm
+freshMeta cxt (G a fa) = do
+  let closed   = E.eval0 $ closeTy (_locals cxt) (quote cxt UnfoldNone a )
+      ~fclosed = E.eval0 $ closeTy (_locals cxt) (quote cxt UnfoldNone fa)
+  m <- newMeta (G closed fclosed)
   pure $ InsertedMeta m (_locals cxt)
 
 
@@ -51,7 +52,7 @@ insertApps' cxt act = go =<< act where
   go :: Infer -> IO Infer
   go (Infer t (G a fa)) = forceAll cxt fa >>= \case
     V.Pi _ x Impl a b -> do
-      m <- freshMeta cxt a
+      m <- freshMeta cxt (gjoin a)
       let mv = eval cxt m
       let b' = gjoin (b $$ mv)
       go $ Infer (S.App t m Impl) b'
@@ -74,7 +75,7 @@ insertAppsUntilName cxt pt name act = go =<< act where
       if x == NName name then
         pure (Infer t (G a fa))
       else do
-        m <- freshMeta cxt a
+        m <- freshMeta cxt (gjoin a)
         let mv = eval cxt m
         go $ Infer (S.App t m Impl) (gjoin $! (b $$ mv))
     _ ->
@@ -113,7 +114,7 @@ checkEl cxt topt (G topa ftopa) = do
           a <- check cxt a gProp
           pure (a, eval cxt a)
         Nothing -> do
-          a' <- freshMeta cxt V.Prop
+          a' <- freshMeta cxt gProp
           let va' = eval cxt a'
           unify cxt topt (gjoin a) (gjoin va')
           pure (a', va')
@@ -140,7 +141,7 @@ checkEl cxt topt (G topa ftopa) = do
           a <- check cxt a gSet
           pure (a, eval cxt a)
         Nothing -> do
-          a' <- freshMeta cxt V.Set
+          a' <- freshMeta cxt gSet
           let va' = eval cxt a'
           pure (a', va')
       t <- check cxt t (gjoin va)
@@ -149,12 +150,13 @@ checkEl cxt topt (G topa ftopa) = do
       pure $ S.Let (NName x) a t u
 
     (P.Hole _, ftopa) ->
-      freshMeta cxt (V.El topa)
+      freshMeta cxt (gEl (G topa ftopa))
 
     (topt, ftopa) -> do
       Infer t tty <- infer cxt topt
-      subtype cxt topt t (g2 tty) (V.El ftopa)
-
+      -- there's subtyping coercion into El
+      unify cxt topt tty (gEl (G topa ftopa))
+      pure t
 
 check :: Cxt -> P.Tm -> GTy -> IO S.Tm
 check cxt topt (G topa ftopa) = do
@@ -198,7 +200,7 @@ check cxt topt (G topa ftopa) = do
           a <- check cxt a gSet
           pure (a, eval cxt a)
         Nothing -> do
-          a' <- freshMeta cxt V.Set
+          a' <- freshMeta cxt gSet
           let va' = eval cxt a'
           unify cxt topt (gjoin a) (gjoin va')
           pure (a', va')
@@ -225,7 +227,7 @@ check cxt topt (G topa ftopa) = do
           a <- check cxt a gSet
           pure (a, eval cxt a)
         Nothing -> do
-          a' <- freshMeta cxt V.Set
+          a' <- freshMeta cxt gSet
           let va' = eval cxt a'
           pure (a', va')
       t <- check cxt t (gjoin va)
@@ -234,7 +236,7 @@ check cxt topt (G topa ftopa) = do
       pure $ S.Let (NName x) a t u
 
     (P.Hole _, ftopa) ->
-      freshMeta cxt topa
+      freshMeta cxt (G topa ftopa)
 
     (topt, ftopa) -> do
       Infer t tty <- infer cxt topt
@@ -286,7 +288,24 @@ infer cxt topt = case topt of
     elabError cxt topt $ GenericError "can't infer type for pair"
 
   P.ProjField t x -> do
-    uf
+    let fieldName = NName x
+    Infer t ga <- infer cxt topt
+    let ~vt = eval cxt t
+
+    let go (G a fa) ix = forceAll cxt fa >>= \case
+          V.Sg _ x' a b | fieldName == x' -> do
+            pure (ix, a)
+          V.Sg _ x' a b -> do
+            go (gjoin $! (b $$$ E.projField vt fieldName ix)) (ix + 1)
+          V.El (V.Sg _ x' a b) | fieldName == x' -> do
+            pure (ix, V.El a)
+          V.El (V.Sg _ x' a b) -> do
+            go (gjoin $! (b $$$ E.projField vt fieldName ix)) (ix + 1)
+          _ ->
+            elabError cxt topt $ NoSuchField x
+
+    (ix, b) <- go ga 0
+    pure $ Infer (S.ProjField t fieldName ix) (gjoin b)
 
   P.Let _ x ma t u -> do
     (a, va) <- case ma of
@@ -294,7 +313,7 @@ infer cxt topt = case topt of
         a <- check cxt a gSet
         pure (a, eval cxt a)
       Nothing -> do
-        a' <- freshMeta cxt V.Set
+        a' <- freshMeta cxt gSet
         let va' = eval cxt a'
         pure (a', va')
     t <- check cxt t (gjoin va)
