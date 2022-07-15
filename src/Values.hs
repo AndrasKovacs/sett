@@ -14,13 +14,13 @@ data RigidHead
 pattern Exfalso a t = Rigid (RHExfalso a t) SId
 
 data FlexHead
-  = FHMeta MetaVar                    -- blocking on meta
-  | FHCoeRefl MetaVar Val Val Val Val -- coe-refl rule blocked by a meta
+  = FHMeta MetaVar                -- blocking on meta
+  | FHCoe MetaVar Val Val Val Val -- coe rigidly blocked on a meta
 
 headMeta :: FlexHead -> MetaVar
 headMeta = \case
-  FHMeta x            -> x
-  FHCoeRefl x _ _ _ _ -> x
+  FHMeta x        -> x
+  FHCoe x _ _ _ _ -> x
 
 data UnfoldHead
   = UHSolvedMeta MetaVar
@@ -32,15 +32,19 @@ data Spine
 
   | SProj1 Spine
   | SProj2 Spine
-  | SProjField Spine Name Int
+  | SProjField Spine Name Int   -- t : (foo : A) * (bar : B) * Top
+                                -- t.bar
 
-  | SCoeSrc Spine Val Val Val    -- netural source type
-  | SCoeTgt Val Spine Val Val    -- neutral target type
-  | SCoeTrans Val Val Val Spine  -- composition blocking on neutral coerced value
+  -- ISSUE: printed field names can't be re-checked (after reductions)
+  --   solution 1: just recompute type, print field name corresponding to
+  --               Int projection (or maybe the Int itself, if there's no name)
 
-  | SEqSet Spine Val Val  -- neutral eq type
-  | SEqLhs Val Spine Val  -- neutral eq lhs
-  | SEqRhs Val Val Spine  -- neutral eq rhs
+  -- f : Rec → Rec
+  -- f = λ (u : (foo' : A) * (bar' : B) * Top). u
+
+  -- (f t).foo'           --
+  -- (f t).foo'
+  -- t.n  (doesn't check)
 
 --------------------------------------------------------------------------------
 
@@ -55,10 +59,10 @@ Cl f $$ t = f t
 infixl 0 $$
 
 -- | Lazy application
-($$$) :: Closure -> Val -> Val
-Cl f $$$ ~t = f t
-{-# inline ($$$) #-}
-infixl 0 $$$
+($$~) :: Closure -> Val -> Val
+Cl f $$~ ~t = f t
+{-# inline ($$~) #-}
+infixl 0 $$~
 
 --------------------------------------------------------------------------------
 
@@ -76,20 +80,25 @@ data Val
   -- | Eq Val Val Val Val            -- Eq computation to non-Eq type
 
   -- Canonical values
-  | Pair SP Val Val
-  | Lam SP Name Icit Ty Closure
-  | Sg SP Name Ty Closure
   | Pi SP Name Icit Ty Closure
-  | Set
+  | Lam SP Name Icit Ty Closure
+
+  | Sg SP Name Ty Closure
+  | Pair SP Val Val
+
   | Prop
   | El Val
   | Top
   | Tt
   | Bot
+
+  | Set
+
   | Refl Val Val
   | Sym Val Val Val Val
   | Trans Val Val Val Val Val Val
   | Ap Val Val Val Val Val Val
+
   | Irrelevant
 
 markEq :: Val -> Val -> Val -> Val -> Val

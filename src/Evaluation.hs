@@ -108,17 +108,20 @@ coe l a b p t = case (a, b) of
   (Unfold h sp a, b) -> Unfold h (SCoeSrc sp b p t) (coe l a b p t)
   (a, Unfold h sp b) -> Unfold h (SCoeTgt a sp p t) (coe l a b p t)
 
+  -- "early coe-refl" if sides are convertible
   (Flex h sp, Flex h' sp') -> case runConv (convFlexRel l h sp h' sp') of
     Same      -> t
     Diff      -> impossible
     BlockOn _ -> Flex h (SCoeSrc sp b p t)
+
+  -- Rafael: only put in heads, not in spines
+  -- TODO: think about Spine + Head repr
 
   (Flex h sp, b) -> Flex h (SCoeSrc sp b p t)
   (a, Flex h sp) -> Flex h (SCoeTgt a sp p t)
 
   (a@Rigid{}, b) -> coeTrans l a b p t
   (a, b@Rigid{}) -> coeTrans l a b p t
-
 
   -- Canonical mismatch
   -- NOTE: Canonical mismatch can't compute to Exfalso!
@@ -229,12 +232,12 @@ spine l v sp =
     SProj1 t          -> proj1 (go t)
     SProj2 t          -> proj2 (go t)
     SProjField t x n  -> projField (go t) x n
-    SCoeSrc a b p t   -> coe l (go a) b p t
-    SCoeTgt a b p t   -> coe l a (go b) p t
-    SCoeTrans a b p t -> coeTrans l a b p (go t)
-    SEqSet a t u      -> eq l (go a) t u
-    SEqLhs a t u      -> eq l a (go t) u
-    SEqRhs a t u      -> eq l a t (go u)
+    -- SCoeSrc a b p t   -> coe l (go a) b p t
+    -- SCoeTgt a b p t   -> coe l a (go b) p t
+    -- SCoeTrans a b p t -> coeTrans l a b p (go t)
+    -- SEqSet a t u      -> eq l (go a) t u
+    -- SEqLhs a t u      -> eq l a (go t) u
+    -- SEqRhs a t u      -> eq l a t (go u)
 
 maskEnv :: Env -> S.Locals -> Spine
 maskEnv e ls = case (e, ls) of
@@ -250,20 +253,23 @@ insertedMeta l e x ls = runIO do
     MEUnsolved{}   -> pure (Flex (FHMeta x) sp)
     MESolved _ v _ -> pure (Unfold (UHSolvedMeta x) sp (spine l v sp))
 
+
 eqSym, coeSym, symSym, apSym, transSym :: Lvl -> Val
 eqSym  l   = LamSI NA Set \a -> LamSE NX a \x -> LamSE NY a \y -> eq l a x y
 coeSym l   = LamSI NA Set \a -> LamSI NB Set \b -> LamSE NP (El (eqSet l a b)) \p -> LamSE NX a \x ->
              coe l a b p x
 symSym l   = LamPI NA Set \a -> LamPI NY a \x -> LamPI NY a \y -> LamPE NP (El (eq l a x y)) \p -> Sym a x y p
 apSym  l   = LamPI NA Set \a -> LamPI NB Set \b -> LamPE NF (funS a b) \f -> LamPI NX a \x -> LamPI NY a \y ->
-             LamPE NP(eq l a x y) \p -> Ap a b f x y p
+             LamPE NP (eq l a x y) \p -> Ap a b f x y p
 transSym l = LamPI NA Set \a -> LamPI NX a \x -> LamPI NY a \y -> LamPI NZ a \z -> LamPE NP (eq l a x y) \p ->
              LamPE NQ (eq l a y z) \q -> Trans a x y z p q
 
 elSym, reflSym, exfalsoSym :: Val
 elSym      = LamSE NA Prop El
 reflSym    = LamPI NA Set \a -> LamPI NX a \x -> Refl a x
-exfalsoSym = LamSI NA Set \a -> LamSE NP (El Bot) \p -> Exfalso a p
+
+exfalsoSym = LamSI NA Set \l a -> LamSE NP (El Bot) \l' p -> Exfalso a p
+-- only the last level matters in a chain of lambdas!
 
 
 eval :: Lvl -> Env -> S.Tm -> Val
@@ -305,6 +311,9 @@ eval l e t =
 -- Forcing
 --------------------------------------------------------------------------------
 
+-- 3 different forcings (from smalltt)
+--
+
 unblock :: MetaVar -> a -> (Val -> IO a) -> IO a
 unblock x def k = readMeta x >>= \case
   MEUnsolved{}   -> pure def
@@ -323,6 +332,7 @@ forceFlex l hsp h sp = case h of
   FHMeta x            -> unblock x hsp \v -> pure $ Unfold (UHSolvedMeta x) sp v
   FHCoeRefl x a b p t -> unblock x hsp \_ -> force l $! coeRefl l a b p t
 {-# noinline forceFlex #-}
+-- TODO: ensure that we pick a rigidly blocking meta for CoeRefl!
 
 -- | Eliminate all unfoldings from the head.
 forceAll :: Lvl -> Val -> IO Val
@@ -414,12 +424,12 @@ spineType l mkval a sp =
                       El (Sg _ _ _ b) -> pure $! El (b $$ mkval (SProj1 t))
                       _               -> impossible
     SProjField t x n  -> do {a <- go t; projFieldType l t mkval a n}
-    SCoeSrc a b p t   -> pure b
-    SCoeTgt a b p t   -> go b
-    SCoeTrans a b p t -> pure b
-    SEqSet a t u      -> pure Prop
-    SEqLhs a t u      -> pure Prop
-    SEqRhs a t u      -> pure Prop
+    -- SCoeSrc a b p t   -> pure b
+    -- SCoeTgt a b p t   -> go b
+    -- SCoeTrans a b p t -> pure b
+    -- SEqSet a t u      -> pure Prop
+    -- SEqLhs a t u      -> pure Prop
+    -- SEqRhs a t u      -> pure Prop
 
 flexHeadType :: Lvl -> FlexHead -> IO Ty
 flexHeadType l = \case
@@ -495,12 +505,12 @@ convSp l sp sp' = do
     (SProj1 t          , SProj1 t'             ) -> goSp t t'
     (SProj2 t          , SProj2 t'             ) -> goSp t t'
     (SProjField t _ n  , SProjField t' _ n'    ) -> goSp t t' >> convEq n n'
-    (SCoeSrc a b p t   , SCoeSrc a' b' p' t'   ) -> goSp a a' >> go b b' >> go t t'
-    (SCoeTgt a b p t   , SCoeTgt a' b' p' t'   ) -> go a a' >> goSp b b' >> go t t'
-    (SCoeTrans a b p t , SCoeTrans a' b' p' t' ) -> go a a' >> go b b' >> goSp t t'
-    (SEqSet a t u      , SEqSet a' t' u'       ) -> goSp a a' >> go t t' >> go u u'
-    (SEqLhs a t u      , SEqLhs a' t' u'       ) -> go a a' >> goSp t t' >> go u u'
-    (SEqRhs a t u      , SEqRhs a' t' u'       ) -> go a a' >> go t t' >> goSp u u'
+    -- (SCoeSrc a b p t   , SCoeSrc a' b' p' t'   ) -> goSp a a' >> go b b' >> go t t'
+    -- (SCoeTgt a b p t   , SCoeTgt a' b' p' t'   ) -> go a a' >> goSp b b' >> go t t'
+    -- (SCoeTrans a b p t , SCoeTrans a' b' p' t' ) -> go a a' >> go b b' >> goSp t t'
+    -- (SEqSet a t u      , SEqSet a' t' u'       ) -> goSp a a' >> go t t' >> go u u'
+    -- (SEqLhs a t u      , SEqLhs a' t' u'       ) -> go a a' >> goSp t t' >> go u u'
+    -- (SEqRhs a t u      , SEqRhs a' t' u'       ) -> go a a' >> go t t' >> goSp u u'
     _                                            -> throwIO Diff
 
 -- | Compare flex heads which are known to be relevant.
@@ -648,12 +658,12 @@ quoteSp l opt hd sp = let
     SProj1 t          -> S.Proj1 (goSp t)
     SProj2 t          -> S.Proj2 (goSp t)
     SProjField t x n  -> S.ProjField (goSp t) x n
-    SCoeSrc a b p t   -> S.Coe (goSp a) (go b) (go p) (go t)
-    SCoeTgt a b p t   -> S.Coe (go a) (goSp b) (go p) (go t)
-    SCoeTrans a b p t -> S.Coe (go a) (go b) (go p) (goSp t)
-    SEqSet a t u      -> S.Eq (goSp a) (go t) (go u)
-    SEqLhs a t u      -> S.Eq (go a) (goSp t) (go u)
-    SEqRhs a t u      -> S.Eq (go a) (go t) (goSp u)
+    -- SCoeSrc a b p t   -> S.Coe (goSp a) (go b) (go p) (go t)
+    -- SCoeTgt a b p t   -> S.Coe (go a) (goSp b) (go p) (go t)
+    -- SCoeTrans a b p t -> S.Coe (go a) (go b) (go p) (goSp t)
+    -- SEqSet a t u      -> S.Eq (goSp a) (go t) (go u)
+    -- SEqLhs a t u      -> S.Eq (go a) (goSp t) (go u)
+    -- SEqRhs a t u      -> S.Eq (go a) (go t) (goSp u)
 
 quote :: Lvl -> UnfoldOpt -> Val -> S.Tm
 quote l opt t = let
@@ -663,7 +673,7 @@ quote l opt t = let
 
   goFlexHead = \case
     FHMeta x            -> S.Meta x
-    FHCoeRefl x a b p t -> S.Coe (go a) (go b) (go p) (go t)
+    -- FHCoeRefl x a b p t -> S.Coe (go a) (go b) (go p) (go t)
 
   goRigidHead = \case
     RHLocalVar x _ -> S.LocalVar (lvlToIx l x)

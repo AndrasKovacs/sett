@@ -86,7 +86,7 @@ tmErr     = ["a term"]
 
 --------------------------------------------------------------------------------
 
--- todo: get rid of ' parsers, instead write custom cut messages
+-- TODO: get rid of ' parsers, instead write custom cut messages
 
 assign  = $(sym  ":=")
 assign' = $(sym' ":=")
@@ -311,7 +311,7 @@ lamLet' = (do
             (branch colon
               (\_ -> do
                   a <- tm'
-                  assign'
+                  assign `pcut` Lit "\":=\" in let-definition"
                   t <- tm'
                   semi `pcut` Lit "\";\" in let-definition"
                   u <- lamLet'

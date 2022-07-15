@@ -18,6 +18,8 @@ import qualified NameTable as NT
 
 --------------------------------------------------------------------------------
 
+--------------------------------------------------------------------------------
+
 unify :: Cxt -> P.Tm -> G -> G -> IO ()
 unify cxt t l r = do
   Unif.unify (_lvl cxt) USRigid l r `catch` \case

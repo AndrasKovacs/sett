@@ -1,6 +1,10 @@
 
 ## SeTT
 
+-- 2022. 07. 08
+--------------------------------------------------------------------------------
+
+
 **Language**:
   - **Haskell**
   - **Strict (language Strict)**
@@ -229,7 +233,51 @@ Ultra long term:
   - internal/external languages
   - full-fledged metatheory of signatures
 
---------------------------------------------------------------------------------
 
 0th version:
   - Only basic features, no modules, no inductives, no Set/Prop ambiguity
+
+
+
+-- 2022. 07. 15
+--------------------------------------------------------------------------------
+
+- observation:
+  - coe-trans rule + coe->exfalso rule: undecidable
+    - coe-exfalso:  coe a b p t --> exfalso b p
+    - solution: not have coe->exfalso
+	- example: assume inconsistent context (proves ⊥)
+
+      true = coe Bool Bool _ true = coe Nat Bool _ (coe Bool Nat _ true)
+	  = exfalso Bool _
+	  = ...
+	  = false
+
+  - coe-trans rule is quite easy
+
+  - TODO 1: only have coe + Eq in heads, not in spines
+  -      2: in printing, print valid field names based on types
+  -      3: closures get Lvl as additional arg
+  -      4: rename Irrelevant to something (ComputedAway?) (IrrelevantIsh)
+
+ 		   <!-- α x =? const x y -->
+		   <!-- α := λ x. const x Irrelevant -->
+
+  - Prop ≤ Set  (coercion is El)
+  - Design choice: - no Prop/Set ambiguity is allowed in term formers
+                   - in Π, Σ, we prefer to elaborate to Prop inhabitants
+
+	 - infer ((x : A) → B)
+	         ((x : A) * B)    if h-level is unknown, we postpone (or throw error)
+
+	   - f : (x : A) → B       ty := (A → B) type   -->   El (A → B)
+	                           ty := (A → B) type   -->   El A → El B
+							     Id ty foo
+
+     <!-- Id Set (El A → El B) (_ → _) = ...
+     <!-- Id Set (El (A → B)) (El C)   = Id Prop (A → B) ... (by propext) -->
+	     f = .....
+  -- goal : single module, basic type formers, field overloding, implicit args, unification
+
+  -- Can we merge conv and unify implementation? (Should we?)
+    -- on first approx, should be separate
