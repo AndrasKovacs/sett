@@ -52,7 +52,7 @@ prettyError :: Src -> Error -> String
 prettyError src DontUnboxError = impossible
 prettyError src (Error pos e)  =
 
-  let bstr   = srcToByteString src
+  let bstr   = srcToBs src
       ls     = FP.lines bstr
       (l, c) = head $ posLineCols bstr [rawPos pos]
       line   = if 0 <= l && l < length ls then ls !! l else ""
@@ -105,7 +105,7 @@ pcut p exp = do
   cutting p (Error pos (Precise exp)) merge
 
 runParser :: Parser a -> Src -> Result Error a
-runParser p src = FP.runParser p (Env src 0) 0 (srcToByteString src)
+runParser p src = FP.runParser p (Env src 0) 0 (srcToBs src)
 
 -- | Run parser, print pretty error on failure.
 testParser :: Show a => Parser a -> String -> IO ()
@@ -300,7 +300,7 @@ identBase = FP.withSpan scanIdent \_ span@(FP.Span x y) -> do
   fails $ inSpan span anyKw
   ws
   Env src _ <- ask
-  pure $ Name (Span# src x y)
+  pure $ Span# src x y
 
 -- | Parse an identifier.
 ident :: Parser Presyntax.Name
