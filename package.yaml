@@ -64,9 +64,12 @@ executable:
   - CPP
   - ConstraintKinds
   - DerivingVia
+  - FlexibleContexts
+  - KindSignatures
   - LambdaCase
   - MagicHash
   - PatternSynonyms
+  - ScopedTypeVariables
   - Strict
   - TemplateHaskell
   - TupleSections
