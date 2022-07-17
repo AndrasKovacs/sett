@@ -3,15 +3,11 @@ module TopCxt where
 
 import IO
 import qualified Data.Array.Dynamic.L as ADL
-import qualified Data.ByteString      as B
-import qualified Data.HashMap.Strict  as HM
 import qualified Data.Ref.F           as RF
-import qualified Data.Ref.L           as RL
 
 import Common
 import qualified Presyntax as P
 import qualified Syntax    as S
-import qualified Values    as V
 
 --------------------------------------------------------------------------------
 

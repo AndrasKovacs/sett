@@ -1,4 +1,4 @@
-
+{-# language ImplicitParams #-}
 
 module Values where
 
@@ -38,19 +38,19 @@ data Spine
 
 --------------------------------------------------------------------------------
 
-newtype Closure = Cl {unCl :: Lvl -> Val -> Val}
+newtype Closure = Cl {unCl :: LvlArg => Val -> Val}
 
 instance Show Closure where showsPrec _ _ acc = "<closure>" ++ acc
 
 -- | Strict application.
-($$) :: Closure -> (Lvl, Val) -> Val
-Cl f $$ (!l, !t) = f l t
+($$) :: LvlArg => Closure -> Val -> Val
+Cl f $$ t = f t
 {-# inline ($$) #-}
 infixl 0 $$
 
 -- | Lazy application
-($$~) :: Closure -> (Lvl, Val) -> Val
-Cl f $$~ (!l, ~t) = f l t
+($$~) :: LvlArg => Closure -> Val -> Val
+Cl f $$~ ~t = f t
 {-# inline ($$~) #-}
 infixl 0 $$~
 
@@ -95,7 +95,7 @@ data Val
   | Irrelevant
 
 markEq :: Val -> Val -> Val -> Val -> Val
-markEq ~a ~t ~u ~v = v
+markEq ~a ~t ~u ~v = TraceEq a t u v
 {-# inline markEq #-}
 
 pattern Var x ga = Rigid (RHLocalVar x ga) SId
@@ -119,21 +119,21 @@ pattern SgS x a b   = Sg S x a (Cl b)
 pattern SgP x a b   = Sg P x a (Cl b)
 
 funP :: Val -> Val -> Val
-funP a b = PiPE NUnused a \_ _ -> b
+funP a b = PiPE NUnused a \_ -> b
 
 funS :: Val -> Val -> Val
-funS a b = PiSE NUnused a \_ _ -> b
+funS a b = PiSE NUnused a \_ -> b
 
 andP :: Val -> Val -> Val
-andP a b = SgP NUnused a \_ _ -> b
+andP a b = SgP NUnused a \_ -> b
 
-gSet = gjoin Set
-gProp = gjoin Prop
+gSet         = gjoin Set
+gProp        = gjoin Prop
 gEl (G a fa) = G (El a) (El fa); {-# inline gEl #-}
 
 --------------------------------------------------------------------------------
 
-data G    = G {g1 :: Val, g2 :: ~Val}
+data G    = G {g1 :: ~Val, g2 :: ~Val}
 type GTy  = G
 
 gjoin :: Val -> G
@@ -143,3 +143,4 @@ gjoin ~v = G v v
 --------------------------------------------------------------------------------
 
 data Env = ENil | EDef Env ~Val
+type EnvArg = (?env :: Env)

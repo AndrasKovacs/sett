@@ -6,5 +6,5 @@ import Values
 
 -- data UnifyException =
 
-unify :: Lvl -> UnifyState -> G -> G -> IO ()
-unify l st t t' = uf
+unify :: LvlArg => UnifyState -> G -> G -> IO ()
+unify st t t' = uf

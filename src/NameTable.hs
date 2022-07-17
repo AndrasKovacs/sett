@@ -14,7 +14,8 @@ data Entry
   = Top Lvl S.Ty {-# unpack #-} V.GTy V.Val -- ^ Level, type, type val, value
   | Local Lvl {-# unpack #-} V.GTy          -- ^ Level, type val
 
-type NameTable = HM.HashMap B.ByteString Entry
+type NameTable    = HM.HashMap B.ByteString Entry
+type NameTableArg = (?nameTable :: NameTable)
 
 lookup :: Span -> NameTable -> Maybe Entry
 lookup x = HM.lookup (spanToBs x)

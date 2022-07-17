@@ -128,6 +128,8 @@ newtype Ix = Ix {unIx :: Int}
 newtype Lvl = Lvl {unLvl :: Int}
   deriving (Eq, Ord, Show, Num, Enum, Bits, Flat) via Int
 
+type LvlArg = (?lvl :: Lvl)
+
 -- | Ordinary metavariable.
 newtype MetaVar = MkMetaVar Int
   deriving (Eq, Ord, Num, Flat) via Int
@@ -142,8 +144,8 @@ newtype UVar = MkUVar Int
 instance Show UVar where
   showsPrec _ (MkUVar x) acc = '?': showsPrec 0 x acc
 
-lvlToIx :: Lvl -> Lvl -> Ix
-lvlToIx (Lvl envl) (Lvl x) = Ix (envl - x - 1)
+lvlToIx :: LvlArg => Lvl -> Ix
+lvlToIx (Lvl x) = Ix (coerce ?lvl - x - 1)
 {-# inline lvlToIx #-}
 
 
@@ -235,40 +237,37 @@ instance Show Bind where
 
 data Name
   = NUnused                    -- ^ Unused binder (underscore in surface syntax).
-  | NName {-# unpack #-} Span  -- ^ Name which comes from user source.
-  | NX
-  | NY
-  | NZ
-  | NP
-  | NQ
-  | NA
-  | NB
-  | NF
-  | NG
+  | NSpan {-# unpack #-} Span  -- ^ Name which comes from user source.
+  | NLit String                -- ^ Literal string which does not come from source.
   deriving Eq
+
+nx, ny, nz, na, nb, nc, nf, ng, nh :: Name
+nx = NLit "x"
+ny = NLit "y"
+nz = NLit "z"
+np = NLit "p"
+nq = NLit "q"
+na = NLit "A"
+nb = NLit "B"
+nc = NLit "C"
+nf = NLit "f"
+ng = NLit "g"
+nh = NLit "h"
 
 instance Show Name where
   showsPrec d NUnused   acc = '_':acc
-  showsPrec d NX        acc = 'x':acc
-  showsPrec d NY        acc = 'y':acc
-  showsPrec d NZ        acc = 'z':acc
-  showsPrec d NP        acc = 'p':acc
-  showsPrec d NQ        acc = 'q':acc
-  showsPrec d NA        acc = 'A':acc
-  showsPrec d NB        acc = 'B':acc
-  showsPrec d NF        acc = 'f':acc
-  showsPrec d NG        acc = 'g':acc
-  showsPrec d (NName x) acc = showsPrec d x acc
+  showsPrec d (NSpan x) acc = showsPrec d x acc
+  showsPrec d (NLit s)  acc = s ++ acc
 
 bindToName :: Bind -> Name
 bindToName = \case
-  Bind x   -> NName x
+  Bind x   -> NSpan x
   DontBind -> NUnused
 
 pick :: Name -> Name -> Name
 pick x y = case x of
   NUnused -> case y of
-    NUnused -> NX
+    NUnused -> nx
     y -> y
   x -> x
 
@@ -287,7 +286,6 @@ data UnifyState = USRigid | USFlex | USFull | USIrrelevant
 
 data ConvState = CSRigid | CSFlex | CSFull
   deriving (Eq, Show)
-
 
 -- Timing
 --------------------------------------------------------------------------------

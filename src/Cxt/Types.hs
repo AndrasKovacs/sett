@@ -6,9 +6,5 @@ import Syntax
 import Values
 import NameTable
 
-data Cxt = Cxt {
-  _env       :: Env,
-  _lvl       :: Lvl,
-  _locals    :: Locals,
-  _nameTable :: NameTable
-  }
+data Cxt    = Cxt Lvl Env Locals NameTable
+type CxtArg = (LvlArg, EnvArg, LocalsArg, NameTableArg)

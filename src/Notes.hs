@@ -3,19 +3,27 @@
 module Notes where
 
 
--- f :: (?n :: Int) => Int
--- f = ?n
+f :: (?n :: Int) => Int
+f = ?n
 
-newtype F a b = F {unF :: (?arg :: a) => b}
+g :: (?n :: Int) => Int
+g = let ?n = ?n in f
 
-app :: F a b -> a -> b
-app (F f) a = let ?arg = a in f
+app :: ((?n :: Int) => Int) -> Int -> Int
+app f x = let ?n = x in f
 
-f :: F Int (F Int (F Int Int))
-f = F (F (F ?arg))
+-- newtype F a b = F {unF :: (?arg :: a) => b}
 
-g :: Int
-g = f `app` 0 `app` 1 `app` 20
+-- app :: F a b -> a -> b
+-- app (F f) a = let ?arg = a in f
+
+-- f :: F Int (F Int (F Int Int))
+-- f = F (F (F ?arg))
+
+-- g :: Int
+-- g = f `app` 0 `app` 1 `app` 20
+
+
 
 
 -- newtype F = F {unF :: ((?n :: Int) => Int)}

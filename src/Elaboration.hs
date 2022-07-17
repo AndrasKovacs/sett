@@ -1,15 +1,16 @@
 
 module Elaboration where
 
+import Control.Exception
+
 import Common
 import Cxt
 import Errors
 import Syntax
 import Values
-import InCxt
 import ElabState
+import Evaluation
 
-import qualified Evaluation as E
 import qualified Presyntax as P
 import qualified Unification as Unif
 import qualified Syntax as S
@@ -18,307 +19,309 @@ import qualified NameTable as NT
 
 --------------------------------------------------------------------------------
 
---------------------------------------------------------------------------------
+elabError :: LocalsArg => P.Tm -> Error -> IO a
+elabError t err = throwIO $ ErrorInCxt ?locals t err
 
-unify :: Cxt -> P.Tm -> G -> G -> IO ()
-unify cxt t l r = do
-  Unif.unify (_lvl cxt) USRigid l r `catch` \case
-    (e :: UnifyEx) -> elabError cxt t (UnifyError (g1 l) (g1 r))
-
-newVar :: Cxt -> V.Ty -> V.Val
-newVar cxt a = V.Var (_lvl cxt) a
+unify :: CxtArg => P.Tm -> G -> G -> IO ()
+unify t l r = do
+  Unif.unify USRigid l r `catch` \case
+    (e :: UnifyEx) -> elabError t (UnifyError (g1 l) (g1 r))
 
 data Infer = Infer Tm {-# unpack #-} GTy
 
-closeTy :: Locals -> S.Ty -> S.Ty
-closeTy ls b = case ls of
-  S.LEmpty           -> b
-  S.LBind ls x a     -> closeTy ls (S.Pi S x Expl a b)
-  S.LDefine ls x t a -> closeTy ls (Let x a t b)
+closeTy :: LocalsArg => S.Ty -> S.Ty
+closeTy b = go ?locals b where
+  go ls b = case ls of
+    S.LEmpty           -> b
+    S.LBind ls x a     -> go ls (S.Pi S x Expl a b)
+    S.LDefine ls x t a -> go ls (Let x a t b)
 
-freshMeta :: Cxt -> GTy -> IO Tm
-freshMeta cxt (G a fa) = do
-  let closed   = E.eval0 $ closeTy (_locals cxt) (quote cxt UnfoldNone a )
-      ~fclosed = E.eval0 $ closeTy (_locals cxt) (quote cxt UnfoldNone fa)
+freshMeta :: (LvlArg, LocalsArg) => GTy -> IO Tm
+freshMeta (G a fa) = do
+  let closed   = eval0 $ closeTy $ quote UnfoldNone a
+  let ~fclosed = eval0 $ closeTy $ quote UnfoldNone fa
   m <- newMeta (G closed fclosed)
-  pure $ InsertedMeta m (_locals cxt)
-
+  pure $! InsertedMeta m ?locals
 
 -- Insertion
 --------------------------------------------------------------------------------
 
-
 -- | Insert fresh implicit applications.
-insertApps' :: Cxt -> IO Infer -> IO Infer
-insertApps' cxt act = go =<< act where
+insertApps' :: (LvlArg, EnvArg, LocalsArg) => IO Infer -> IO Infer
+insertApps' act = go =<< act where
   go :: Infer -> IO Infer
-  go (Infer t (G a fa)) = forceAll cxt fa >>= \case
+  go (Infer t (G a fa)) = forceAll fa >>= \case
     V.Pi _ x Impl a b -> do
-      m <- freshMeta cxt (gjoin a)
-      let mv = eval cxt m
+      m <- freshMeta (gjoin a)
+      let mv = eval m
       let b' = gjoin (b $$ mv)
       go $ Infer (S.App t m Impl) b'
     fa -> pure $ Infer t (G a fa)
 
 -- | Insert fresh implicit applications to a term which is not
 --   an implicit lambda (i.e. neutral).
-insertApps :: Cxt -> IO Infer -> IO Infer
-insertApps cxt act = act >>= \case
+insertApps :: (LvlArg, EnvArg, LocalsArg) => IO Infer -> IO Infer
+insertApps act = act >>= \case
   inf@(Infer (S.Lam _ _ Impl _ _) _) -> pure inf
-  inf                                -> insertApps' cxt (pure inf)
+  inf                                -> insertApps' (pure inf)
 
 -- | Insert fresh implicit applications until we hit a Pi with
 --   a particular binder name.
-insertAppsUntilName :: Cxt -> P.Tm -> P.Name -> IO Infer -> IO Infer
-insertAppsUntilName cxt pt name act = go =<< act where
+insertAppsUntilName :: (LvlArg, EnvArg, LocalsArg) => P.Tm -> P.Name -> IO Infer -> IO Infer
+insertAppsUntilName pt name act = go =<< act where
   go :: Infer -> IO Infer
-  go (Infer t (G a fa)) = forceAll cxt fa >>= \case
+  go (Infer t (G a fa)) = forceAll fa >>= \case
     fa@(V.Pi _ x Impl a b) -> do
-      if x == NName name then
+      if x == NSpan name then
         pure (Infer t (G a fa))
       else do
-        m <- freshMeta cxt (gjoin a)
-        let mv = eval cxt m
-        go $ Infer (S.App t m Impl) (gjoin $! (b $$ mv))
+        m <- freshMeta (gjoin a)
+        let mv = eval m
+        go $! Infer (S.App t m Impl) (gjoin $! (b $$ mv))
     _ ->
-      elabError cxt pt $ NoNamedImplicitArg name
-
+      elabError pt $ NoNamedImplicitArg name
 
 --------------------------------------------------------------------------------
 
-subtype :: Cxt -> P.Tm -> S.Tm -> V.Ty -> V.Ty -> IO S.Tm
-subtype cxt pt t a b = do
-  fa <- forceAll cxt a
-  fb <- forceAll cxt b
+subtype :: CxtArg => P.Tm -> S.Tm -> V.Ty -> V.Ty -> IO S.Tm
+subtype pt t a b = do
+  fa <- forceAll a
+  fb <- forceAll b
   case (fa, fb) of
     (V.Prop, V.Set) -> do
       pure (S.El t)
     (fa, fb) -> do
-      unify cxt pt (G a fa) (G b fb)
+      unify pt (G a fa) (G b fb)
       pure t
-
 
 -- Check
 --------------------------------------------------------------------------------
 
-checkEl :: Cxt -> P.Tm -> GTy -> IO S.Tm
-checkEl cxt topt (G topa ftopa) = do
-  ftopa <- forceAll cxt ftopa
+checkEl :: CxtArg => P.Tm -> GTy -> IO S.Tm
+checkEl topt (G topa ftopa) = do
+  ftopa <- forceAll ftopa
   case (topt, ftopa) of
 
     -- go under lambda
     (P.Lam _ x' inf ma t, V.Pi _ x i a b)
       | (case inf of P.NoName i' -> i == i'
-                     P.Named x'  -> NName x' == x && i == Impl) -> do
+                     P.Named x'  -> NSpan x' == x && i == Impl) -> do
 
       (a, va) <- case ma of
         Just a  -> do
-          a <- check cxt a gProp
-          pure (a, eval cxt a)
+          a <- check a gProp
+          pure (a, eval a)
         Nothing -> do
-          a' <- freshMeta cxt gProp
-          let va' = eval cxt a'
-          unify cxt topt (gjoin a) (gjoin va')
+          a' <- freshMeta gProp
+          let va' = eval a'
+          unify topt (gjoin a) (gjoin va')
           pure (a', va')
 
-      let cxt' = Cxt.bind x' (S.El a) (gjoin (V.El va)) cxt
-      t <- check cxt' t $! (gjoin $! V.El (b $$ newVar cxt va))
-      pure $ S.Lam P (bindToName x') i a t
+      bind x' (S.El a) (gjoin (V.El va)) \var ->
+        S.Lam P (bindToName x') i a <$!> (check t $! gjoin $! V.El (b $$ var))
 
     -- insert implicit lambda
     (t, V.Pi _ x Impl a b) -> do
-      let qa   = quote cxt UnfoldNone a
-      let cxt' = Cxt.insert qa (gjoin (V.El a)) cxt
-      t <- check cxt' t $! (gjoin $! V.El (b $$ V.Var (_lvl cxt) a))
-      pure $ S.Lam P x Impl qa t
+      let qa = quote UnfoldNone a
+      insertBinder qa (gjoin (V.El a)) \var ->
+        S.Lam P x Impl qa <$!> (check t $! gjoin $! V.El (b $$ var))
 
     (P.Pair t u, V.Sg _ x a b) -> do
-      t <- check cxt t (gjoin (V.El a))
-      u <- check cxt u (gjoin $! V.El (b $$$ eval cxt t))
+      t <- check t (gjoin (V.El a))
+      u <- check u (gjoin (V.El (b $$~ eval t)))
       pure $ S.Pair S t u
 
     (P.Let _ x ma t u, ftopa) -> do
+
       (a, va) <- case ma of
         Just a  -> do
-          a <- check cxt a gSet
-          pure (a, eval cxt a)
+          a <- check a gSet
+          pure (a, eval a)
         Nothing -> do
-          a' <- freshMeta cxt gSet
-          let va' = eval cxt a'
+          a' <- freshMeta gSet
+          let va' = eval a'
           pure (a', va')
-      t <- check cxt t (gjoin va)
-      let ~vt = eval cxt t
-      u <- checkEl (define x a (gjoin va) t vt cxt) u (G topa ftopa)
-      pure $ S.Let (NName x) a t u
+
+      t <- check t (gjoin va)
+
+      define x a (gjoin va) t (eval t) do
+        u <- checkEl u (G topa ftopa)
+        pure $ S.Let (NSpan x) a t u
 
     (P.Hole _, ftopa) ->
-      freshMeta cxt (gEl (G topa ftopa))
+      freshMeta (gEl (G topa ftopa))
 
     (topt, ftopa) -> do
-      Infer t tty <- infer cxt topt
-      -- there's subtyping coercion into El
-      unify cxt topt tty (gEl (G topa ftopa))
+      Infer t tty <- infer topt
+      -- there's no subtyping coercion into El
+      unify topt tty (gEl (G topa ftopa))
       pure t
 
-check :: Cxt -> P.Tm -> GTy -> IO S.Tm
-check cxt topt (G topa ftopa) = do
-  ftopa <- forceAll cxt ftopa
+
+check :: CxtArg => P.Tm -> GTy -> IO S.Tm
+check topt (G topa ftopa) = do
+  ftopa <- forceAll ftopa
   case (topt, ftopa) of
 
     (P.Pi _ x i a b, V.Set) -> do
-      a <- check cxt a gSet
-      let ~va = eval cxt a
-      b <- check (bind x a (gjoin va) cxt) b gSet
-      pure $ S.Pi S (bindToName x) i a b
+      a <- check a gSet
+      bind x a (gjoin (eval a)) \_ ->
+        S.Pi S (bindToName x) i a <$!> check b gSet
 
     (P.Sg _ x a b, V.Set) -> do
-      a <- check cxt a gSet
-      let ~va = eval cxt a
-      b <- check (bind x a (gjoin va) cxt) b gSet
-      pure $ S.Sg S (bindToName x) a b
+      a <- check a gSet
+      bind x a (gjoin (eval a)) \_ ->
+        S.Sg S (bindToName x) a <$!> check b gSet
 
     (P.Pi _ x i a b, V.Prop) -> do
-      a <- check cxt a gProp
-      let ~va = eval cxt a
-      b <- check (bind x a (gjoin (V.El va)) cxt) b gProp
-      pure $ S.Pi P (bindToName x) i a b
+      a <- check a gSet
+      bind x a (gjoin (eval a)) \_ ->
+        S.Pi P (bindToName x) i a <$!> check b gProp
 
     (P.Sg _ x a b, V.Prop) -> do
-      a <- check cxt a gProp
-      let ~va = eval cxt a
-      b <- check (bind x a (gjoin (V.El va)) cxt) b gProp
-      pure $ S.Sg P (bindToName x) a b
+      a <- check a gProp
+      bind x a (gEl (gjoin (eval a))) \_ ->
+        S.Sg P (bindToName x) a <$!> check b gProp
 
     (t, V.El a) ->
-      checkEl cxt t (gjoin a)
+      checkEl t (gjoin a)
 
     -- go under lambda
     (P.Lam _ x' inf ma t, V.Pi _ x i a b)
       | (case inf of P.NoName i' -> i == i'
-                     P.Named x'  -> NName x' == x && i == Impl) -> do
+                     P.Named x'  -> NSpan x' == x && i == Impl) -> do
 
       (a, va) <- case ma of
         Just a  -> do
-          a <- check cxt a gSet
-          pure (a, eval cxt a)
+          a <- check a gSet
+          pure (a, eval a)
         Nothing -> do
-          a' <- freshMeta cxt gSet
-          let va' = eval cxt a'
-          unify cxt topt (gjoin a) (gjoin va')
+          a' <- freshMeta gSet
+          let va' = eval a'
+          unify topt (gjoin a) (gjoin va')
           pure (a', va')
 
-      let cxt' = Cxt.bind x' a (gjoin va) cxt
-      t <- check cxt' t $! (gjoin $! (b $$ newVar cxt va))
-      pure $ S.Lam S (bindToName x') i a t
+      bind x' a (gjoin va) \var ->
+        S.Lam S (bindToName x') i a <$!> check t (gjoin $! (b $$ var))
 
     -- insert implicit lambda
     (t, V.Pi _ x Impl a b) -> do
-      let qa   = quote cxt UnfoldNone a
-      let cxt' = Cxt.insert qa (gjoin a) cxt
-      t <- check cxt' t $! (gjoin $! (b $$ V.Var (_lvl cxt) a))
-      pure $ S.Lam S x Impl qa t
+      let qa = quote UnfoldNone a
+      insertBinder qa (gjoin a) \var ->
+        S.Lam S x Impl qa <$!> check t (gjoin $! (b $$ var))
 
     (P.Pair t u, V.Sg _ x a b) -> do
-      t <- check cxt t (gjoin a)
-      u <- check cxt u (gjoin $! (b $$$ eval cxt t))
+      t <- check t (gjoin a)
+      u <- check u (gjoin (b $$~ eval t))
       pure $ S.Pair S t u
 
     (P.Let _ x ma t u, ftopa) -> do
       (a, va) <- case ma of
         Just a  -> do
-          a <- check cxt a gSet
-          pure (a, eval cxt a)
+          a <- check a gSet
+          pure (a, eval a)
         Nothing -> do
-          a' <- freshMeta cxt gSet
-          let va' = eval cxt a'
+          a' <- freshMeta gSet
+          let va' = eval a'
           pure (a', va')
-      t <- check cxt t (gjoin va)
-      let ~vt = eval cxt t
-      u <- check (define x a (gjoin va) t vt cxt) u (G topa ftopa)
-      pure $ S.Let (NName x) a t u
+      t <- check t (gjoin va)
+      define x a (gjoin va) t (eval t) do
+        u <- check u (G topa ftopa)
+        pure $ S.Let (NSpan x) a t u
 
     (P.Hole _, ftopa) ->
-      freshMeta cxt (G topa ftopa)
+      freshMeta (G topa ftopa)
 
     (topt, ftopa) -> do
-      Infer t tty <- infer cxt topt
-      subtype cxt topt t (g2 tty) ftopa
+      Infer t tty <- infer topt
+      subtype topt t (g2 tty) ftopa
 
 -- infer
 --------------------------------------------------------------------------------
 
-infer :: Cxt -> P.Tm -> IO Infer
-infer cxt topt = case topt of
+infer :: CxtArg => P.Tm -> IO Infer
+infer topt = case topt of
 
-  P.Var x -> case NT.lookup x (_nameTable cxt) of
+  P.Var x -> case NT.lookup x ?nameTable of
     Nothing ->
-      elabError cxt topt $ NameNotInScope x
+      elabError topt $ NameNotInScope x
     Just (NT.Top x a ga v) ->
       pure $ Infer (S.TopDef (coerce v) x) ga
     Just (NT.Local x ga) ->
-      pure $ Infer (S.LocalVar (lvlToIx (_lvl cxt) x)) ga
+      pure $ Infer (S.LocalVar (lvlToIx x)) ga
+
+  P.Pi _ x i a b -> do
+    a <- check a gSet
+    uf
+
+  P.Sg _ x a b -> do
+    uf
+
 
   P.App topt topu i -> do
     (i, t, a, fa) <- case i of
       P.NoName Impl -> do
-        Infer t (G a fa) <- infer cxt topt
+        Infer t (G a fa) <- infer topt
         pure (Impl, t, a, fa)
       P.NoName Expl -> do
-        Infer t (G a fa) <- insertApps' cxt $ infer cxt topt
+        Infer t (G a fa) <- insertApps' $ infer topt
         pure (Expl, t, a, fa)
       P.Named x -> do
-        Infer t (G a fa) <- insertAppsUntilName cxt topt x $ infer cxt topt
+        Infer t (G a fa) <- insertAppsUntilName topt x $ infer topt
         pure (Impl, t, a , fa)
 
-    forceAll cxt fa >>= \case
+    forceAll fa >>= \case
 
       V.Pi _ x _ a b -> do
-        u <- check cxt topu (gjoin a)
-        pure $ Infer (S.App t u i) (gjoin $! (b $$$ eval cxt u))
+        u <- check topu (gjoin a)
+        pure $ Infer (S.App t u i) (gjoin (b $$~ eval u))
 
       V.El (V.Pi _ x i a b) -> do
-        u <- check cxt topu (gjoin $ V.El a)
-        pure $ Infer (S.App t u i) (gjoin $! V.El (b $$$ eval cxt u))
+        u <- check topu (gjoin $ V.El a)
+        pure $ Infer (S.App t u i) (gjoin (V.El (b $$~ eval u)))
 
       fa ->
-        elabError cxt topt $ ExpectedFunOrForall a
+        elabError topt $ ExpectedFunOrForall a
 
   P.Lam{} ->
-    elabError cxt topt $ GenericError "can't infer type for lambda"
+    elabError topt $ GenericError "can't infer type for lambda"
 
   P.Pair{} ->
-    elabError cxt topt $ GenericError "can't infer type for pair"
+    elabError topt $ GenericError "can't infer type for pair"
 
   P.ProjField t x -> do
-    let fieldName = NName x
-    Infer t ga <- infer cxt topt
-    let ~vt = eval cxt t
+    let fieldName = NSpan x
+    Infer t ga <- infer topt
+    let ~vt = eval t
 
-    let go (G a fa) ix = forceAll cxt fa >>= \case
+    let go a ix = forceAll a >>= \case
           V.Sg _ x' a b | fieldName == x' -> do
             pure (ix, a)
           V.Sg _ x' a b -> do
-            go (gjoin $! (b $$$ E.projField vt fieldName ix)) (ix + 1)
+            go (b $$ projField vt ix) (ix + 1)
           V.El (V.Sg _ x' a b) | fieldName == x' -> do
             pure (ix, V.El a)
           V.El (V.Sg _ x' a b) -> do
-            go (gjoin $! (b $$$ E.projField vt fieldName ix)) (ix + 1)
+            go (b $$ projField vt ix) (ix + 1)
           _ ->
-            elabError cxt topt $ NoSuchField x
+            elabError topt $ NoSuchField x
 
-    (ix, b) <- go ga 0
-    pure $ Infer (S.ProjField t fieldName ix) (gjoin b)
+    (ix, b) <- go (g2 ga) 0
+    pure $ Infer (S.ProjField t ix) (gjoin b)
 
   P.Let _ x ma t u -> do
+
     (a, va) <- case ma of
       Just a  -> do
-        a <- check cxt a gSet
-        pure (a, eval cxt a)
+        a <- check a gSet
+        pure (a, eval a)
       Nothing -> do
-        a' <- freshMeta cxt gSet
-        let va' = eval cxt a'
+        a' <- freshMeta gSet
+        let va' = eval a'
         pure (a', va')
-    t <- check cxt t (gjoin va)
-    let ~vt = eval cxt t
-    Infer u uty <- infer (define x a (gjoin va) t vt cxt) u
-    pure $ Infer (S.Let (NName x) a t u) uty
+
+    t <- check t (gjoin va)
+
+    define x a (gjoin va) t (eval t) do
+      Infer u uty <- infer u
+      pure $ Infer (S.Let (NSpan x) a t u) uty

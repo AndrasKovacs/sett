@@ -9,29 +9,45 @@ import qualified NameTable as N
 import qualified Syntax as S
 import qualified Values as V
 
-empty :: Cxt
-empty = Cxt V.ENil 0 S.LEmpty mempty
+-- | Add a bound variable to the context. We bring the new variable into scope.
+bind :: CxtArg => Bind -> S.Ty -> V.GTy -> (CxtArg => Val -> a) -> a
+bind x a ga k =
+  let v          = V.Var ?lvl (g2 ga)
+  in
+  let ?lvl       = ?lvl + 1
+      ?env       = V.EDef ?env v
+      ?locals    = S.LBind ?locals (bindToName x) a
+      ?nameTable = N.insert x (N.Local ?lvl ga) ?nameTable
+  in k v
+{-# inline bind #-}
 
--- | Insert a bound variable.
-bind :: Bind -> S.Ty -> V.GTy -> Cxt -> Cxt
-bind x a ga (Cxt e l ls tbl) =
-  Cxt (V.EDef e (V.Var l (g2 ga)))
-      (l + 1)
-      (S.LBind ls (bindToName x) a)
-      (N.insert x (N.Local l ga) tbl)
+-- | Add a definition to the context.
+define :: CxtArg => Span -> S.Ty -> V.GTy -> S.Tm -> V.Val -> (CxtArg => a) -> a
+define x a ga t ~vt k =
+  let ?lvl = ?lvl + 1
+      ?env = V.EDef ?env vt
+      ?locals = S.LDefine ?locals (NSpan x) a t
+      ?nameTable = N.insert (Bind x) (N.Local ?lvl ga) ?nameTable
+  in k
+{-# inline define #-}
 
--- | Insert a definition.
-define :: Span -> S.Ty -> V.GTy -> S.Tm -> V.Val -> Cxt -> Cxt
-define x a ga t vt (Cxt e l ls tbl) =
-  Cxt (V.EDef e vt)
-      (l + 1)
-      (S.LDefine ls (NName x) a t)
-      (N.insert (Bind x) (N.Local l ga) tbl)
+-- | Add a bound variable which does not exist in the source.
+insertBinder :: CxtArg => S.Ty -> V.GTy -> (CxtArg => Val -> a) -> a
+insertBinder a ga k =
+  let v          = V.Var ?lvl (g2 ga)
+  in
+  let ?lvl       = ?lvl + 1
+      ?env       = V.EDef ?env v
+      ?locals    = S.LBind ?locals NUnused a
+  in k v
+{-# inline insertBinder #-}
 
--- | Insert a bound variable which does not exist in the source.
-insert :: S.Ty -> V.GTy -> Cxt -> Cxt
-insert a ga (Cxt e l ls tbl) =
-  Cxt (V.EDef e (V.Var l (g2 ga)))
-      (l + 1)
-      (S.LBind ls NUnused a)
-      tbl
+-- | Run starting with the empty context.
+withEmptyCxt :: (CxtArg => a) -> a
+withEmptyCxt k =
+  let ?lvl       = 0 :: Lvl
+      ?env       = ENil
+      ?locals    = S.LEmpty
+      ?nameTable = mempty :: N.NameTable
+  in k
+{-# inline withEmptyCxt #-}

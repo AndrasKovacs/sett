@@ -13,6 +13,8 @@ data Locals
   | LBind Locals Name Ty
   deriving Show
 
+type LocalsArg = (?locals :: Locals)
+
 data Tm
   = LocalVar Ix
   | TopDef ~(Hide Val) Lvl
@@ -21,7 +23,7 @@ data Tm
   | App Tm Tm Icit
 
   | Pair SP Tm Tm
-  | ProjField Tm Name Int
+  | ProjField Tm Int
   | Proj1 Tm
   | Proj2 Tm
 
