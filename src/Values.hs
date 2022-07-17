@@ -1,4 +1,5 @@
 
+
 module Values where
 
 import Common
@@ -8,14 +9,15 @@ import Common
 data RigidHead
   = RHLocalVar Lvl ~Ty
   | RHPostulate Lvl
-  | RHCoe Val Val Val Val  -- rigid neutral coe (including canonical mismatch)
   | RHExfalso Val Val
+  | RHCoe Val Val Val Val  -- rigid neutral coe
 
 pattern Exfalso a t = Rigid (RHExfalso a t) SId
+pattern Coe a b p t = Rigid (RHCoe a b p t) SId
 
 data FlexHead
-  = FHMeta MetaVar                -- blocking on meta
-  | FHCoe MetaVar Val Val Val Val -- coe rigidly blocked on a meta
+  = FHMeta MetaVar                 -- blocking on meta
+  | FHCoe MetaVar Val Val Val Val  -- coe rigidly blocked on a meta
 
 headMeta :: FlexHead -> MetaVar
 headMeta = \case
@@ -25,42 +27,30 @@ headMeta = \case
 data UnfoldHead
   = UHSolvedMeta MetaVar
   | UHTopDef Lvl
+  | UHCoe Val Val Val Val  -- at least 1 Unfold
 
 data Spine
   = SId
   | SApp Spine Val Icit
-
   | SProj1 Spine
   | SProj2 Spine
-  | SProjField Spine Name Int   -- t : (foo : A) * (bar : B) * Top
-                                -- t.bar
-
-  -- ISSUE: printed field names can't be re-checked (after reductions)
-  --   solution 1: just recompute type, print field name corresponding to
-  --               Int projection (or maybe the Int itself, if there's no name)
-
-  -- f : Rec → Rec
-  -- f = λ (u : (foo' : A) * (bar' : B) * Top). u
-
-  -- (f t).foo'           --
-  -- (f t).foo'
-  -- t.n  (doesn't check)
+  | SProjField Spine Int  -- we display field projections based on computed types
 
 --------------------------------------------------------------------------------
 
-newtype Closure = Cl {unCl :: Val -> Val}
+newtype Closure = Cl {unCl :: Lvl -> Val -> Val}
 
 instance Show Closure where showsPrec _ _ acc = "<closure>" ++ acc
 
 -- | Strict application.
-($$) :: Closure -> Val -> Val
-Cl f $$ t = f t
+($$) :: Closure -> (Lvl, Val) -> Val
+Cl f $$ (!l, !t) = f l t
 {-# inline ($$) #-}
 infixl 0 $$
 
 -- | Lazy application
-($$~) :: Closure -> Val -> Val
-Cl f $$~ ~t = f t
+($$~) :: Closure -> (Lvl, Val) -> Val
+Cl f $$~ (!l, ~t) = f l t
 {-# inline ($$~) #-}
 infixl 0 $$~
 
@@ -71,15 +61,21 @@ type Ty = Val
 data Val
   -- Rigidly stuck values
   = Rigid RigidHead Spine
+  | RigidEq Val Val Val           -- at least 1 Val is rigid
 
   -- Flexibly stuck values
   | Flex FlexHead Spine
+  | FlexEq Val Val Val            -- at least 1 Val is flex
 
   -- Traced reductions
   | Unfold UnfoldHead Spine ~Val  -- unfolding choice (top/meta)
-  -- | Eq Val Val Val Val            -- Eq computation to non-Eq type
+  | TraceEq Val Val Val ~Val      -- trace Eq reduction to non-Eq proposition
+  | UnfoldEq Val Val Val ~Val     -- at least 1 Val is Unfold
 
   -- Canonical values
+  | Set
+  | El Val
+
   | Pi SP Name Icit Ty Closure
   | Lam SP Name Icit Ty Closure
 
@@ -87,12 +83,9 @@ data Val
   | Pair SP Val Val
 
   | Prop
-  | El Val
   | Top
   | Tt
   | Bot
-
-  | Set
 
   | Refl Val Val
   | Sym Val Val Val Val
@@ -126,13 +119,13 @@ pattern SgS x a b   = Sg S x a (Cl b)
 pattern SgP x a b   = Sg P x a (Cl b)
 
 funP :: Val -> Val -> Val
-funP a b = PiPE NUnused a \_ -> b
+funP a b = PiPE NUnused a \_ _ -> b
 
 funS :: Val -> Val -> Val
-funS a b = PiSE NUnused a \_ -> b
+funS a b = PiSE NUnused a \_ _ -> b
 
 andP :: Val -> Val -> Val
-andP a b = SgP NUnused a \_ -> b
+andP a b = SgP NUnused a \_ _ -> b
 
 gSet = gjoin Set
 gProp = gjoin Prop
