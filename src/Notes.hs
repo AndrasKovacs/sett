@@ -1,39 +1,52 @@
-{-# language ImplicitParams #-}
+{-# language DataKinds, FunctionalDependencies #-}
+
 
 module Notes where
 
+import Data.Kind
+import GHC.TypeLits
+import Unsafe.Coerce
 
-f :: (?n :: Int) => Int
-f = ?n
+class IP (s :: Symbol) (a :: Type) | s -> a where
+  get :: a
 
-g :: (?n :: Int) => Int
-g = let ?n = ?n in f
+newtype Abs s a b = Abs (IP s a => b)
 
-app :: ((?n :: Int) => Int) -> Int -> Int
-app f x = let ?n = x in f
+def :: forall s a b. a -> Abs s a b -> b
+def a f = (unsafeCoerce f :: a -> b) a
+{-# inline def #-}
 
--- newtype F a b = F {unF :: (?arg :: a) => b}
+type IntArg = IP "lvl" Int
 
--- app :: F a b -> a -> b
--- app (F f) a = let ?arg = a in f
+f :: IntArg => Int
+f = get @"lvl" + 300
+{-# noinline f #-}
 
--- f :: F Int (F Int (F Int Int))
--- f = F (F (F ?arg))
-
--- g :: Int
--- g = f `app` 0 `app` 1 `app` 20
-
+g :: Int -> Int
+g x = def @"lvl" x $ Abs f
+{-# noinline g #-}
 
 
+f2 :: Int -> Int
+f2 x = x + 300
+{-# noinline f2 #-}
 
--- newtype F = F {unF :: ((?n :: Int) => Int)}
+g2 :: Int -> Int
+g2 x = let y = x in f2 y
+{-# noinline g2 #-}
 
--- app :: F -> Int -> Int
--- app f n = let ?n = n; ?n = 0 in unF f
+f3 :: (?lvl::Int) => Int
+f3 = ?lvl + 300
+{-# noinline f3 #-}
 
--- f = F ?n
+g3 :: Int -> Int
+g3 x = let ?lvl = x in f3
+{-# noinline g3 #-}
 
--- g :: Int
--- g = let
---   ?n = 100
---   in f
+f4 :: (?lvl::Int, ?mallac::Int) => Int
+f4 = ?lvl + 300
+{-# noinline f4 #-}
+
+g4 :: Int -> Int -> Int
+g4 x y = let ?lvl = x; ?mallac = y in f4
+{-# noinline g4 #-}

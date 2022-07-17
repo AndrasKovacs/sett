@@ -130,6 +130,14 @@ newtype Lvl = Lvl {unLvl :: Int}
 
 type LvlArg = (?lvl :: Lvl)
 
+forceLvl :: LvlArg => a -> a
+forceLvl x = seq ?lvl x
+{-# inline forceLvl #-}
+
+-- forceLvl :: a -> a
+-- forceLvl x = x
+-- {-# inline forceLvl #-}
+
 -- | Ordinary metavariable.
 newtype MetaVar = MkMetaVar Int
   deriving (Eq, Ord, Num, Flat) via Int
@@ -319,3 +327,5 @@ timedPure_ ~a = do
     let diff = diffUTCTime t2 t1
     pure diff
 {-# noinline timedPure_ #-}
+
+--------------------------------------------------------------------------------

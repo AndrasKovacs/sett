@@ -144,3 +144,7 @@ gjoin ~v = G v v
 
 data Env = ENil | EDef Env ~Val
 type EnvArg = (?env :: Env)
+
+forceEnv :: EnvArg => a -> a
+forceEnv x = let !_ = ?env in x
+{-# inline forceEnv #-}

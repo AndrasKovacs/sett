@@ -1,5 +1,5 @@
 
-name:        setoidtt
+name:        sett
 version:     0.0.1.0
 license:     MIT
 category:    Language
@@ -52,6 +52,7 @@ executable:
   - containers
   - dynamic-array
   - flatparse
+  - ghc-prim
   - primdata
   - template-haskell
   - time
@@ -70,7 +71,9 @@ executable:
   - LambdaCase
   - MagicHash
   - MonoLocalBinds
+  - MultiParamTypeClasses
   - PatternSynonyms
+  - RankNTypes
   - ScopedTypeVariables
   - Strict
   - TemplateHaskell
