@@ -13,7 +13,7 @@ import qualified Data.Set as S
 import Data.Char
 import Language.Haskell.TH
 
-import Common
+import Common hiding (lvl)
 import Presyntax
 
 import qualified Data.ByteString.Char8 as B

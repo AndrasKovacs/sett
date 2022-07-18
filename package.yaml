@@ -65,7 +65,9 @@ executable:
   - CPP
   - ConstraintKinds
   - DerivingVia
+  - DataKinds
   - FlexibleContexts
+  - FunctionalDependencies
   - ImplicitParams
   - KindSignatures
   - LambdaCase

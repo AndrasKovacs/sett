@@ -15,6 +15,10 @@ data Locals
 
 type LocalsArg = (?locals :: Locals)
 
+locals :: (LocalsArg => a) -> (LocalsArg => a)
+locals a = seq ?locals a
+{-# inline locals #-}
+
 data Tm
   = LocalVar Ix
   | TopDef ~(Hide Val) Lvl

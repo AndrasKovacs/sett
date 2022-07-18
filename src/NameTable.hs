@@ -17,6 +17,10 @@ data Entry
 type NameTable    = HM.HashMap B.ByteString Entry
 type NameTableArg = (?nameTable :: NameTable)
 
+nameTable :: (NameTableArg => a) -> (NameTableArg => a)
+nameTable a = seq ?nameTable a
+{-# inline nameTable #-}
+
 lookup :: Span -> NameTable -> Maybe Entry
 lookup x = HM.lookup (spanToBs x)
 

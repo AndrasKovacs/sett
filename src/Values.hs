@@ -1,8 +1,8 @@
-{-# language ImplicitParams #-}
 
 module Values where
 
 import Common
+import GHC.Exts
 
 --------------------------------------------------------------------------------
 
@@ -38,7 +38,17 @@ data Spine
 
 --------------------------------------------------------------------------------
 
-newtype Closure = Cl {unCl :: LvlArg => Val -> Val}
+newtype Closure = Cl# {unCl# :: Int# -> Val -> Val}
+newtype Wrap# = Wrap# (LvlArg => Val -> Val)
+
+pattern Cl :: (LvlArg => Val -> Val) -> Closure
+pattern Cl f <- ((\(Cl# f) -> Wrap# \v -> case ?lvl of Lvl (I# l) -> f l v) -> Wrap# f) where
+  Cl f = Cl# \l v -> let ?lvl = Lvl (I# l) in f v
+{-# complete Cl #-}
+
+unCl :: Closure -> LvlArg => Val -> Val
+unCl (Cl f) = f
+{-# inline unCl #-}
 
 instance Show Closure where showsPrec _ _ acc = "<closure>" ++ acc
 
@@ -145,6 +155,6 @@ gjoin ~v = G v v
 data Env = ENil | EDef Env ~Val
 type EnvArg = (?env :: Env)
 
-forceEnv :: EnvArg => a -> a
-forceEnv x = let !_ = ?env in x
-{-# inline forceEnv #-}
+env :: (EnvArg => a) -> (EnvArg => a)
+env x = seq ?env x
+{-# inline env #-}

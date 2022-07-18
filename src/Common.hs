@@ -15,6 +15,7 @@ import GHC.Exts
 import Data.Bits
 import Data.Flat
 import Data.Time.Clock
+import GHC.Classes
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
@@ -130,13 +131,9 @@ newtype Lvl = Lvl {unLvl :: Int}
 
 type LvlArg = (?lvl :: Lvl)
 
-forceLvl :: LvlArg => a -> a
-forceLvl x = seq ?lvl x
-{-# inline forceLvl #-}
-
--- forceLvl :: a -> a
--- forceLvl x = x
--- {-# inline forceLvl #-}
+lvl :: (LvlArg => a) -> (LvlArg => a)
+lvl x = seq ?lvl x
+{-# inline lvl #-}
 
 -- | Ordinary metavariable.
 newtype MetaVar = MkMetaVar Int
