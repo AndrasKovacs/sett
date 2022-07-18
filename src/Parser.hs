@@ -340,7 +340,7 @@ tyAnnot :: Parser Tm
 tyAnnot = tm `cut` ["a type annotation"]
 
 topLevel :: Parser TopLevel
-topLevel = branch (exactLvl 0)
+topLevel = branch (exactLvl 0 >> lookahead (fails eof))
 
   (\_ -> do
       x <- ident'
