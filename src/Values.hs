@@ -19,8 +19,8 @@ data FlexHead
   = FHMeta MetaVar                 -- blocking on meta
   | FHCoe MetaVar Val Val Val Val  -- coe rigidly blocked on a meta
 
-headMeta :: FlexHead -> MetaVar
-headMeta = \case
+flexHeadMeta :: FlexHead -> MetaVar
+flexHeadMeta = \case
   FHMeta x        -> x
   FHCoe x _ _ _ _ -> x
 
@@ -38,6 +38,11 @@ data Spine
 
 --------------------------------------------------------------------------------
 
+-- | A closure abstract over the `Int#` which marks the next fresh variable.
+--   Since it is impossible for GHC to unbox this argument, and we want to make
+--   the argument implicit, and only lifted types can be implicit, we unbox it
+--   by hand, and define `Cl` as a pattern synonym with the more convenient
+--   type.
 newtype Closure = Cl# {unCl# :: Int# -> Val -> Val}
 newtype Wrap# = Wrap# (LvlArg => Val -> Val)
 
@@ -75,7 +80,7 @@ data Val
 
   -- Flexibly stuck values
   | Flex FlexHead Spine
-  | FlexEq Val Val Val            -- at least 1 Val is flex
+  | FlexEq MetaVar Val Val Val    -- at least 1 Val is flex
 
   -- Traced reductions
   | Unfold UnfoldHead Spine ~Val  -- unfolding choice (top/meta)
@@ -154,7 +159,3 @@ gjoin ~v = G v v
 
 data Env = ENil | EDef Env ~Val
 type EnvArg = (?env :: Env)
-
-env :: (EnvArg => a) -> (EnvArg => a)
-env x = seq ?env x
-{-# inline env #-}

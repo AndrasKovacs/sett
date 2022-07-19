@@ -7,6 +7,7 @@ import Syntax
 import Common
 import Values
 import qualified Presyntax as P
+import qualified Values as V
 
 data UnifyEx = CantUnify | FrozenSolution | FlexSolution
   deriving (Eq, Show)
@@ -19,9 +20,10 @@ data Error
   | NoNamedImplicitArg P.Name
   | IcitMismatch Icit Icit
   | NoNamedLambdaInference
-  | ExpectedSg Tm
-  | ExpectedFunOrForall Val -- inferred type
+  | ExpectedSg V.Ty          -- inferred type
+  | ExpectedFunOrForall V.Ty -- inferred type
   | GenericError String
+  | AmbiguousUniverse
 
 data ErrorInCxt = ErrorInCxt Locals P.Tm Error
 

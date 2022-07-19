@@ -54,6 +54,7 @@ executable:
   - flatparse
   - ghc-prim
   - primdata
+  - strict-impl-params
   - template-haskell
   - time
   - unordered-containers
@@ -98,3 +99,4 @@ executable:
   - -Wno-missing-pattern-synonym-signatures
   - -fmax-relevant-binds=0
   - -fmax-valid-hole-fits=0
+  - -fplugin StrictImplParams

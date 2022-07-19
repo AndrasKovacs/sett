@@ -86,10 +86,9 @@ tmErr     = ["a term"]
 
 --------------------------------------------------------------------------------
 
--- TODO: get rid of ' parsers, instead write custom cut messages
+-- TODO: get rid of ' parsers, instead write custom cut messages in situ
 
 assign  = $(sym  ":=")
-assign' = $(sym' ":=")
 colon   = token  ($(FP.string ":") `notFollowedBy` $(FP.string "="))
 colon'  = token' ($(FP.string ":") `notFollowedBy` $(FP.string "="))
 semi    = $(sym  ";")
@@ -346,7 +345,7 @@ topLevel = branch (exactLvl 0 >> lookahead (fails eof))
       x <- ident'
       localIndentation 1 do
         ma <- optional (colon *> tyAnnot)
-        assign'
+        assign `pcut` Lit "\":=\" in top-level definition"
         rhs <- tm `cut` ["a top-level definition"]
         top <- localIndentation 0 topLevel
         pure $ Define x ma rhs top

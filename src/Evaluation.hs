@@ -2,7 +2,7 @@
 module Evaluation (
     app, appE, appI, proj1, proj2, projField
   , eval, quote, eval0, quote0, nf, nf0, spine, coe, eq
-  , force, forceAll, forceMetas
+  , force, forceAll, forceMetas, eqSet
   ) where
 
 import Control.Exception
@@ -15,10 +15,23 @@ import Values
 import qualified Syntax as S
 
 --------------------------------------------------------------------------------
+{-
+NOTE
+ - We immediately block on metas. E.g. we don't try to conversion check
+   flex-flex. The reason is the following. Assume flex-flex conversion. If
+   we block on a meta when we have different flex-flex heads, that meta is not a
+   rigid blocker, because the other meta could be solved to it, which makes the
+   sides convertible.
 
--- TODO
---  - approximate unfoldings, use ConvState
---  - conversion between field proj and iterated primitive proj
+ - TODO (alternative design): we block on a disjunction of multiple metas. In
+   this case we can just grab all offending metas, and during forcing retry
+   computation if either is solved.
+
+
+TODO
+ - use approximate unfoldings including TraceEq, use ConvState
+ - handle conversion between field proj and iterated primitive proj
+-}
 
 --------------------------------------------------------------------------------
 
@@ -36,7 +49,7 @@ meta x = runIO do
 {-# inline meta #-}
 
 app :: LvlArg => Val -> Val -> Icit -> Val
-app t u i = lvl case t of
+app t u i = case t of
   Lam hl x i a t -> t $$ u
   Rigid h sp     -> Rigid h (SApp sp u i)
   Flex h sp      -> Flex h (SApp sp u i)
@@ -79,7 +92,7 @@ projField t n = case t of
   _              -> impossible
 
 coe :: LvlArg => Val -> Val -> Val -> Val -> Val
-coe a b p t = lvl case (a, b) of
+coe a b p t = case (a, b) of
 
   -- canonical
   ------------------------------------------------------------
@@ -115,14 +128,8 @@ coe a b p t = lvl case (a, b) of
   (ua@(Unfold h sp a), b) -> Unfold (UHCoe ua b p t) SId (coe a b p t)
   (a, ub@(Unfold h sp b)) -> Unfold (UHCoe a ub p t) SId (coe a b p t)
 
-  -- "early coe-refl" if sides are convertible
-  (a@(Flex h sp), b@(Flex h' sp')) -> case runConv (convFlexRel h sp h' sp') of
-    Same      -> t
-    Diff      -> impossible
-    BlockOn _ -> Flex (FHCoe (headMeta h) a b p t) SId
-
-  (a@(Flex h sp), b) -> Flex (FHCoe (headMeta h) a b p t) SId
-  (a, b@(Flex h sp)) -> Flex (FHCoe (headMeta h) a b p t) SId
+  (a@(Flex h sp), b) -> Flex (FHCoe (flexHeadMeta h) a b p t) SId
+  (a, b@(Flex h sp)) -> Flex (FHCoe (flexHeadMeta h) a b p t) SId
 
   (a@Rigid{}, b) -> coeTrans a b p t
   (a, b@Rigid{}) -> coeTrans a b p t
@@ -131,24 +138,26 @@ coe a b p t = lvl case (a, b) of
   -- NOTE: Canonical mismatch can't compute to Exfalso!
   --       That + coe-trans causes conversion to be undecidable.
   --       If Bot is provable, then every canonical type is irrelevant.
-  --       E.g.    true
-  --             = coe Bool Bool _ true
-  --             = coe Nat Bool _ (coe Bool Nat _ true)
+  --       E.g.    True
+  --             = coe Bool Bool _ True
+  --             = coe Nat Bool _ (coe Bool Nat _ True)
   --             = Exfalso Bool _
+  --             = ...
+  --             = False
 
   (a, b) -> Rigid (RHCoe a b p t) SId
 
 
 coeTrans :: LvlArg => Val -> Val -> Val -> Val -> Val
-coeTrans a b p t = lvl case t of
-  t@(Flex h sp)                -> Flex (FHCoe (headMeta h) a b p t) SId
+coeTrans a b p t = case t of
+  t@(Flex h sp)                -> Flex (FHCoe (flexHeadMeta h) a b p t) SId
   t@(Unfold h sp ft)           -> Unfold (UHCoe a b p t) SId (coeTrans a b p ft)
   Rigid (RHCoe a' _ p' t') SId -> coe a' b (Trans Set a' a b p' p) t'
   Irrelevant                   -> Irrelevant
   t                            -> coeRefl a b p t
 
 coeRefl :: LvlArg => Val -> Val -> Val -> Val -> Val
-coeRefl a b p t = lvl case runConv (conv a b) of
+coeRefl a b p t = case runConv (conv a b) of
   Same      -> t
   Diff      -> Rigid (RHCoe a b p t) SId
   BlockOn x -> Flex (FHCoe x a b p t) SId
@@ -158,7 +167,7 @@ coeRefl a b p t = lvl case runConv (conv a b) of
 --------------------------------------------------------------------------------
 
 eq :: LvlArg => Val -> Val -> Val -> Val
-eq a t u = lvl case a of
+eq a t u = case a of
   Set  -> eqSet t u
   Prop -> eqProp t u
   El a -> markEq (El a) t u Top
@@ -183,13 +192,13 @@ eq a t u = lvl case a of
               u2
 
   a@Rigid{}          -> RigidEq a t u
-  a@Flex{}           -> FlexEq a t u
+  a@(FlexEq x _ _ _) -> FlexEq x a t u
   a@(Unfold h sp fa) -> UnfoldEq a t u (eq fa t u)
   Irrelevant         -> Irrelevant
   _                  -> impossible
 
 eqSet :: LvlArg => Val -> Val -> Val
-eqSet a b = lvl case (a, b) of
+eqSet a b = case (a, b) of
 
   -- canonical
   ------------------------------------------------------------
@@ -219,10 +228,10 @@ eqSet a b = lvl case (a, b) of
   (a@(Unfold h sp fa), b) -> UnfoldEq Set a b (eqSet fa b)
   (a, b@(Unfold h sp fb)) -> UnfoldEq Set a b (eqSet a fb)
 
-  (a@Flex{}, b)  -> FlexEq Set a b
-  (a, b@Flex{})  -> FlexEq Set a b
-  (a@Rigid{}, b) -> RigidEq Set a b
-  (a, b@Rigid{}) -> RigidEq Set a b
+  (a@(Flex h _), b) -> FlexEq (flexHeadMeta h) Set a b
+  (a, b@(Flex h _)) -> FlexEq (flexHeadMeta h) Set a b
+  (a@Rigid{}, b)    -> RigidEq Set a b
+  (a, b@Rigid{})    -> RigidEq Set a b
 
   -- canonical mismatch
   ------------------------------------------------------------
@@ -234,7 +243,7 @@ eqProp a b = markEq Prop a b (andP (funP a b) (funP b a))
 --------------------------------------------------------------------------------
 
 spine :: LvlArg => Val -> Spine -> Val
-spine v sp = lvl
+spine v sp =
   let go = spine v; {-# inline go #-}
   in case sp of
     SId            -> v
@@ -250,8 +259,8 @@ maskEnv e ls = case (e, ls) of
   (EDef e v, S.LBind ls x _    ) -> SApp (maskEnv e ls) v Expl
   _                              -> impossible
 
-insertedMeta :: (LvlArg, EnvArg) => MetaVar -> S.Locals -> Val
-insertedMeta x ls = lvl $ env $ runIO do
+insertedMeta :: LvlArg => EnvArg => MetaVar -> S.Locals -> Val
+insertedMeta x ls = runIO do
   let sp = maskEnv ?env ls
   readMeta x >>= \case
     MEUnsolved{}   -> pure (Flex (FHMeta x) sp)
@@ -279,11 +288,10 @@ elSym      = LamSE na Prop El
 reflSym    = LamPI na Set \a -> LamPI nx a \x -> Refl a x
 exfalsoSym = LamSI na Set \a -> LamSE np (El Bot) \p -> Exfalso a p
 
-eval :: (LvlArg, EnvArg) => S.Tm -> Val
-eval t = lvl $ env
-
-  let go t     = eval t;                                               {-# inline go #-}
-      goBind t = Cl \u -> let ?env = EDef ?env u in seq ?env (eval t); {-# inline goBind #-}
+eval :: LvlArg => EnvArg => S.Tm -> Val
+eval t =
+  let go t     = eval t; {-# inline go #-}
+      goBind t = Cl \u -> let ?env = EDef ?env u in eval t; {-# inline goBind #-}
 
   in case t of
     S.LocalVar x        -> localVar x
@@ -299,7 +307,7 @@ eval t = lvl $ env
     S.Postulate x       -> Rigid (RHPostulate x) SId
     S.InsertedMeta x ls -> insertedMeta x ls
     S.Meta x            -> meta x
-    S.Let x a t u       -> let ?env = EDef ?env (eval t) in (eval u)
+    S.Let x a t u       -> let ?env = EDef ?env (eval t) in eval u
     S.Set               -> Set
     S.Prop              -> Prop
     S.Top               -> Top
@@ -326,54 +334,55 @@ unblock x def k = readMeta x >>= \case
 
 -- | Eliminate solved flex head metas.
 force :: LvlArg => Val -> IO Val
-force v =  lvl case v of
+force v = case v of
   hsp@(Flex h sp) -> forceFlex hsp h sp
   v               -> pure v
 {-# inline force #-}
 
 forceFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
-forceFlex hsp h sp =  lvl case h of
+forceFlex hsp h sp = case h of
   FHMeta x        -> unblock x hsp \v -> pure $ Unfold (UHSolvedMeta x) sp v
   FHCoe x a b p t -> unblock x hsp \_ -> force $! coeRefl a b p t
 {-# noinline forceFlex #-}
--- TODO: ensure that we pick a rigidly blocking meta for CoeRefl!
 
 -- | Eliminate all unfoldings from the head.
 forceAll :: LvlArg => Val -> IO Val
-forceAll v = lvl case v of
+forceAll v = case v of
   hsp@(Flex h sp) -> forceAllFlex hsp h sp
   Unfold _ _ v    -> forceAllUnfold v
+  TraceEq _ _ _ v -> forceAllUnfold v
   t               -> pure t
 {-# inline forceAll #-}
 
 forceAllFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
-forceAllFlex hsp h sp = lvl case h of
+forceAllFlex hsp h sp = case h of
   FHMeta x        -> unblock x hsp \v -> forceAll $! spine v sp
   FHCoe x a b p t -> unblock x hsp \_ -> forceAll $! coeRefl a b p t
 {-# noinline forceAllFlex #-}
 
 forceAllUnfold :: LvlArg => Val -> IO Val
-forceAllUnfold v = lvl case v of
+forceAllUnfold v = case v of
   hsp@(Flex h sp) -> forceAllFlex hsp h sp
   Unfold _ _ v    -> forceAllUnfold v
+  TraceEq _ _ _ v -> forceAllUnfold v
   t               -> pure t
 
 -- | Eliminate all meta unfoldings from the head.
 forceMetas :: LvlArg => Val -> IO Val
-forceMetas v = lvl case v of
+forceMetas v = case v of
   hsp@(Flex h sp)           -> forceMetasFlex hsp h sp
   Unfold UHSolvedMeta{} _ v -> forceMetasUnfold v
   t                         -> pure t
 {-# inline forceMetas #-}
 
 forceMetasFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
-forceMetasFlex hsp h sp = lvl case h of
+forceMetasFlex hsp h sp = case h of
   FHMeta x        -> unblock x hsp \v -> forceMetas $! spine v sp
   FHCoe x a b p t -> unblock x hsp \_ -> forceMetas $! coeRefl a b p t
 {-# noinline forceMetasFlex #-}
 
 forceMetasUnfold :: LvlArg => Val -> IO Val
-forceMetasUnfold v = lvl case v of
+forceMetasUnfold v = case v of
   hsp@(Flex h sp)           -> forceMetasFlex hsp h sp
   Unfold UHSolvedMeta{} _ v -> forceMetasUnfold v
   t                         -> pure t
@@ -399,7 +408,7 @@ rigidHeadType = \case
   RHExfalso a p       -> pure $! a
 
 projFieldType :: LvlArg => Spine -> (Spine -> Val) -> Ty -> Int -> IO Ty
-projFieldType sp mkval a n =  lvl do
+projFieldType sp mkval a n = do
   let go = projFieldType sp mkval; {-# inline go #-}
   a <- forceAll a
   case (a, n) of
@@ -410,7 +419,7 @@ projFieldType sp mkval a n =  lvl do
     _                    -> impossible
 
 spineType :: LvlArg => (Spine -> Val) -> Ty -> Spine -> IO Ty
-spineType mkval a sp = lvl
+spineType mkval a sp =
   let go = spineType mkval a; {-# inline go #-}
   in case sp of
     SId             -> pure a
@@ -430,17 +439,17 @@ spineType mkval a sp = lvl
 
 
 flexHeadType :: LvlArg => FlexHead -> IO Ty
-flexHeadType h = lvl case h of
+flexHeadType h = case h of
   FHMeta x        -> g2 <$!> metaType x
   FHCoe x a b p t -> pure b
 
 rigidType :: LvlArg => RigidHead -> Spine -> IO Ty
-rigidType h sp = lvl do
+rigidType h sp = do
   hty <- rigidHeadType h
   spineType (Rigid h) hty sp
 
 flexType :: LvlArg => FlexHead -> Spine -> IO Ty
-flexType h sp = lvl do
+flexType h sp = do
   hty <- flexHeadType h
   spineType (Flex h) hty sp
 
@@ -454,10 +463,9 @@ instance Semigroup Relevance where
   {-# inline (<>) #-}
 
 typeRelevance :: LvlArg => Ty -> IO Relevance
-typeRelevance a = lvl do
+typeRelevance a = do
   let go         = typeRelevance; {-# inline go #-}
-      goBind a b = let v = Var ?lvl a in let ?lvl = ?lvl+1
-                   in typeRelevance (b $$ v); {-# inline goBind #-}
+      goBind a b = newVar a \v -> typeRelevance (b $$ v); {-# inline goBind #-}
   forceAll a >>= \case
     El _         -> pure RIrr
     Set          -> pure RRel
@@ -466,18 +474,26 @@ typeRelevance a = lvl do
     Pi _ _ _ a b -> goBind a b
     Sg _ _ a b   -> go a <> goBind a b
     Rigid h sp   -> pure RRel
-    Flex h sp    -> pure $! RBlockOn (headMeta h)
+    Flex h sp    -> pure $! RBlockOn (flexHeadMeta h)
     _            -> impossible
 
 flexRelevance :: LvlArg => FlexHead -> Spine -> IO Relevance
-flexRelevance h sp = lvl $ typeRelevance =<< flexType h sp
+flexRelevance h sp = typeRelevance =<< flexType h sp
 
 rigidRelevance :: LvlArg => RigidHead -> Spine -> IO Relevance
-rigidRelevance h sp = lvl $ typeRelevance =<< rigidType h sp
+rigidRelevance h sp = typeRelevance =<< rigidType h sp
 
 
 -- Conversion
 --------------------------------------------------------------------------------
+
+-- | Bump the `Lvl` and get a fresh variable.
+newVar :: Ty -> (LvlArg => Val -> a) -> LvlArg => a
+newVar a cont =
+  let v = Var ?lvl a in
+  let ?lvl = ?lvl + 1 in
+  seq ?lvl (cont v)
+{-# inline newVar #-}
 
 data ConvRes = Same | Diff | BlockOn MetaVar
   deriving Show
@@ -492,7 +508,7 @@ convEq x y = when (x /= y) $ throwIO Diff
 {-# inline convEq #-}
 
 convSp :: LvlArg => Spine -> Spine -> IO ()
-convSp sp sp' = lvl do
+convSp sp sp' = do
   let go   = conv; {-# inline go #-}
       goSp = convSp; {-# inline goSp #-}
   case (sp, sp') of
@@ -503,30 +519,11 @@ convSp sp sp' = lvl do
     (SProjField t n , SProjField t' n') -> goSp t t' >> convEq n n'
     _                                   -> throwIO Diff
 
--- | Compare flex heads which are known to be relevant.
-convFlexHeadRel :: LvlArg => FlexHead -> FlexHead -> IO MetaVar
-convFlexHeadRel h h' =  lvl case (h, h') of
- (FHMeta x, FHMeta x') -> x <$ (when (x /= x') $ throwIO $ BlockOn x)
- (FHMeta x, _        ) -> throwIO $ BlockOn x
- (_       , FHMeta x ) -> throwIO $ BlockOn x
- (FHCoe x a b p t, FHCoe x' a' b' p' t') -> do
-   when (x /= x') $ throwIO $ BlockOn x
-   conv a a' >> conv b b' >> conv t t'
-   pure x
-
--- | Compare flex-es which are known to be relevant.
-convFlexRel :: LvlArg => FlexHead -> Spine -> FlexHead -> Spine -> IO ()
-convFlexRel h sp h' sp' =  lvl do
-  x <- convFlexHeadRel h h'
-  convSp sp sp' `catch` \case
-    Diff      -> throwIO $ BlockOn x
-    BlockOn _ -> throwIO $ BlockOn x
-    _         -> impossible
-
 -- | Magical rigid coe conversion.
 convCoe :: LvlArg => Val -> Val -> Val -> Val -> Spine -> Val -> Val -> Val -> Val -> Spine -> IO ()
-convCoe a b p t sp a' b' p' t' sp' = lvl do
+convCoe a b p t sp a' b' p' t' sp' = do
 
+  -- if spines are empty, then by assumption we know that target types are the same
   case (sp, sp') of (SId, SId) -> pure ()
                     _          -> conv b b'
 
@@ -534,13 +531,13 @@ convCoe a b p t sp a' b' p' t' sp' = lvl do
   convSp sp sp'
 
 convExfalso :: LvlArg => Ty -> Ty -> Spine -> Spine -> IO ()
-convExfalso a a' sp sp' =  lvl case (sp, sp') of
+convExfalso a a' sp sp' = case (sp, sp') of
   (SId, SId) -> pure ()
   _          -> conv a a' >> convSp sp sp'
 
 -- | Compare rigid-s which are known to be relevant.
 convRigidRel :: LvlArg => RigidHead -> Spine -> RigidHead -> Spine -> IO ()
-convRigidRel h sp h' sp' =  lvl case (h, h') of
+convRigidRel h sp h' sp' = case (h, h') of
   (RHLocalVar x _, RHLocalVar x' _   ) -> convEq x x' >> convSp sp sp'
   (RHPostulate x , RHPostulate x'    ) -> convEq x x' >> convSp sp sp'
   (RHCoe a b p t , RHCoe a' b' p' t' ) -> convCoe a b p t sp a' b' p' t' sp'
@@ -548,7 +545,7 @@ convRigidRel h sp h' sp' =  lvl case (h, h') of
   _                                    -> throwIO Diff
 
 conv :: LvlArg => Val -> Val -> IO ()
-conv t u =  lvl do
+conv t u = do
   let go = conv
       {-# inline go #-}
 
@@ -585,8 +582,13 @@ conv t u =  lvl do
     (El a , El b ) -> go a b
     (Tt   , Tt   ) -> pure ()
 
+    (RigidEq a t u  , RigidEq a' t' u') -> go a a' >> go t t' >> go u u'
     (Lam hl _ _ _ t , Lam _ _ _ a t'  ) -> guardP hl $ goBind a t t'
     (Pair hl t u    , Pair _ t' u'    ) -> guardP hl $ go t t' >> go u u'
+
+    -- eta
+    --------------------------------------------------------------------------------
+
     (Lam hl _ i a t , t'              ) -> guardP hl $ goBind a t (Cl \u -> app t' u i)
     (t              , Lam hl _ i a t' ) -> guardP hl $ goBind a (Cl \u -> app t u i) t'
     (Pair hl t u    , t'              ) -> guardP hl $ go t (proj1 t') >> go u (proj2 t')
@@ -598,20 +600,16 @@ conv t u =  lvl do
     (Irrelevant , _         ) -> pure ()
     (_          , Irrelevant) -> pure ()
 
-    (Flex h sp, Flex h' sp') -> flexRelevance h sp >>= \case
-      RIrr       -> pure ()
-      RBlockOn x -> throwIO $ BlockOn x
-      RRel       -> convFlexRel h sp h' sp'
-
     (Flex h sp, _) -> flexRelevance h sp >>= \case
       RIrr       -> pure ()
-      RBlockOn x -> throwIO $  BlockOn x
-      RRel       -> throwIO $! BlockOn (headMeta h)
+      _          -> throwIO $ BlockOn (flexHeadMeta h)
 
-    (_ , Flex h sp) -> flexRelevance h sp >>= \case
+    (_, Flex h sp) -> flexRelevance h sp >>= \case
       RIrr       -> pure ()
-      RBlockOn x -> throwIO $  BlockOn x
-      RRel       -> throwIO $! BlockOn (headMeta h)
+      _          -> throwIO $ BlockOn (flexHeadMeta h)
+
+    (FlexEq x _ _ _, _) -> throwIO $ BlockOn x
+    (_, FlexEq x _ _ _) -> throwIO $ BlockOn x
 
     (Rigid h sp, Rigid h' sp') -> rigidRelevance h sp >>= \case
       RIrr       -> pure ()
@@ -639,7 +637,7 @@ conv t u =  lvl do
 --------------------------------------------------------------------------------
 
 quoteSp :: LvlArg => UnfoldOpt -> S.Tm -> Spine -> S.Tm
-quoteSp opt hd sp = lvl let
+quoteSp opt hd sp = let
   go         = quote opt; {-# inline go #-}
   goSp       = quoteSp opt hd; {-# inline goSp #-}
   in case sp of
@@ -650,15 +648,14 @@ quoteSp opt hd sp = lvl let
     SProjField t n -> S.ProjField (goSp t) n
 
 quote :: LvlArg => UnfoldOpt -> Val -> S.Tm
-quote opt t = lvl let
+quote opt t = let
   go         = quote opt; {-# inline go #-}
   goSp       = quoteSp opt; {-# inline goSp #-}
-  goBind a t = let v = Var ?lvl a in let ?lvl = ?lvl+1 in quote opt (t $$ v);
-               {-# inline goBind #-}
+  goBind a t = newVar a \v -> quote opt (t $$ v); {-# inline goBind #-}
 
   goFlexHead = \case
-    FHMeta x            -> S.Meta x
-    FHCoe x a b p t     -> S.Coe (go a) (go b) (go p) (go t)
+    FHMeta x        -> S.Meta x
+    FHCoe x a b p t -> S.Coe (go a) (go b) (go p) (go t)
 
   goRigidHead = \case
     RHLocalVar x _ -> S.LocalVar (lvlToIx x)
@@ -674,12 +671,12 @@ quote opt t = lvl let
   cont :: Val -> S.Tm
   cont = \case
     Flex h sp         -> goSp (goFlexHead h) sp
-    FlexEq a t u      -> S.Eq (go a) (go t) (go u)
+    FlexEq x a t u    -> S.Eq (go a) (go t) (go u)
     Rigid h sp        -> goSp (goRigidHead h) sp
     RigidEq a t u     -> S.Eq (go a) (go t) (go u)
     Unfold h sp v     -> goSp (goUnfoldHead v h) sp
     UnfoldEq a t u v  -> S.Eq (go a) (go t) (go u)
-    TraceEq a t u _   -> S.Eq (go a) (go t) (go u)
+    TraceEq a t u v   -> go v
     Pair hl t u       -> S.Pair hl (go t) (go u)
     Lam hl x i a t    -> S.Lam hl x i (go a) (goBind a t)
     Sg hl x a b       -> S.Sg hl x (go a) (goBind a b)

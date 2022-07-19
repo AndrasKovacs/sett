@@ -1,8 +1,16 @@
 
 module Notes where
 
--- import Data.Kind
--- import GHC.TypeLits
+
+import GHC.Classes
+import GHC.Exts
+import Data.Kind
+import GHC.TypeLits
+
+-- class IP "lvl" Int => LvlArg where
+--   dummyA :: proxy#
+--   dummyB :: proxy#
+
 -- import Unsafe.Coerce
 
 -- f :: (?lvl :: Bool, ?foo :: Bool) => Bool
@@ -14,8 +22,15 @@ module Notes where
 -- g ~x ~y = let ?foo = x; ?lvl = y in f
 -- {-# noinline g #-}
 
-abs :: ((?x :: Int, ?y :: Int) => Int) -> ((?x :: Int, ?y :: Int) => Int)
-abs f = seq ?x (seq ?y f)
+-- foo :: LvlArg => Int -> Int
+-- foo x = x + 10
+
+-- abs :: ((?x :: Int, ?y :: Int) => Int) -> ((?x :: Int, ?y :: Int) => Int)
+-- abs f = seq ?x (seq ?y f)
+
+mallac :: Int -> Int
+mallac ~x = seq x x
+
 
 
 -- h :: ((?x :: Int, ?y :: Int) => Int) -> Int -> Int

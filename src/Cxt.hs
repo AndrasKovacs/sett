@@ -7,6 +7,6 @@ module Cxt (
 import Cxt.Types
 import Cxt.Extension
 
-askCxt :: CxtArg => Cxt
+askCxt :: CxtArg Cxt
 askCxt = Cxt ?lvl ?env ?locals ?nameTable
 {-# inline askCxt #-}

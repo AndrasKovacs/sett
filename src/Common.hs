@@ -15,7 +15,6 @@ import GHC.Exts
 import Data.Bits
 import Data.Flat
 import Data.Time.Clock
-import GHC.Classes
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
@@ -130,10 +129,6 @@ newtype Lvl = Lvl {unLvl :: Int}
   deriving (Eq, Ord, Show, Num, Enum, Bits, Flat) via Int
 
 type LvlArg = (?lvl :: Lvl)
-
-lvl :: (LvlArg => a) -> (LvlArg => a)
-lvl x = seq ?lvl x
-{-# inline lvl #-}
 
 -- | Ordinary metavariable.
 newtype MetaVar = MkMetaVar Int
@@ -285,6 +280,8 @@ data SP = S | P deriving (Eq, Show)
 
 data UnfoldOpt = UnfoldMetas | UnfoldAll | UnfoldNone
   deriving (Eq, Show)
+
+type UnfoldOptArg = (?unfoldOpt :: UnfoldOpt)
 
 data UnifyState = USRigid | USFlex | USFull | USIrrelevant
   deriving (Eq, Show)
