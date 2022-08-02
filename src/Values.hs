@@ -7,13 +7,16 @@ import GHC.Exts
 --------------------------------------------------------------------------------
 
 data RigidHead
-  = RHLocalVar Lvl ~Ty
-  | RHPostulate Lvl
+  = RHLocalVar Lvl
+  | RHPostulate Lvl ~Ty
   | RHExfalso Val Val
   | RHCoe Val Val Val Val  -- rigid neutral coe
 
-pattern Exfalso a t = Rigid (RHExfalso a t) SId
-pattern Coe a b p t = Rigid (RHCoe a b p t) SId
+pattern Exfalso a t <- Rigid (RHExfalso a t) SId _ where
+  Exfalso a t = Rigid (RHExfalso a t) SId a
+
+pattern Coe a b p t <- Rigid (RHCoe a b p t) SId _ where
+  Coe a b p t = Rigid (RHCoe a b p t) SId b
 
 data FlexHead
   = FHMeta MetaVar                 -- blocking on meta
@@ -26,7 +29,7 @@ flexHeadMeta = \case
 
 data UnfoldHead
   = UHSolvedMeta MetaVar
-  | UHTopDef Lvl
+  | UHTopDef Lvl ~Val ~Ty
   | UHCoe Val Val Val Val  -- at least 1 Unfold
 
 data Spine
@@ -34,7 +37,8 @@ data Spine
   | SApp Spine Val Icit
   | SProj1 Spine
   | SProj2 Spine
-  | SProjField Spine ~Ty Int  -- we display field projections based on computed types
+  | SProjField Spine ~Ty Int  -- field name can be computed from the type
+                              -- of the projected value
 
 --------------------------------------------------------------------------------
 
@@ -75,17 +79,17 @@ type Ty = Val
 
 data Val
   -- Rigidly stuck values
-  = Rigid RigidHead Spine
-  | RigidEq Val Val Val           -- at least 1 Val is rigid
+  = Rigid RigidHead Spine ~Ty
+  | RigidEq Ty Val Val           -- at least 1 Val is rigid
 
   -- Flexibly stuck values
-  | Flex FlexHead Spine
+  | Flex FlexHead Spine ~Ty
   | FlexEq MetaVar Val Val Val    -- at least 1 Val is flex
 
   -- Traced reductions
-  | Unfold UnfoldHead Spine ~Val  -- unfolding choice (top/meta)
-  | TraceEq Val Val Val ~Val      -- trace Eq reduction to non-Eq proposition
-  | UnfoldEq Val Val Val ~Val     -- at least 1 Val is Unfold
+  | Unfold UnfoldHead Spine ~Val ~Ty  -- unfolding choice (top/meta)
+  | TraceEq Val Val Val ~Val          -- trace Eq reduction to non-Eq proposition
+  | UnfoldEq Val Val Val ~Val         -- at least 1 Val is Unfold
 
   -- Canonical values
   | Set
@@ -113,7 +117,7 @@ markEq :: Val -> Val -> Val -> Val -> Val
 markEq ~a ~t ~u ~v = TraceEq a t u v
 {-# inline markEq #-}
 
-pattern Var x ga = Rigid (RHLocalVar x ga) SId
+pattern Var x a = Rigid (RHLocalVar x) SId a
 
 pattern LamP x i a t = Lam P x i a (Cl t)
 pattern LamS x i a t = Lam S x i a (Cl t)

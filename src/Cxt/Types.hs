@@ -6,7 +6,7 @@ import Syntax
 import Values
 import NameTable
 
-type CxtArg a =
+type InCxt a =
      LvlArg
   => EnvArg
   => LocalsArg
@@ -14,6 +14,6 @@ type CxtArg a =
   => PruningArg
   => a
 
-forceCxt :: CxtArg a -> CxtArg a
+forceCxt :: InCxt a -> InCxt a
 forceCxt a = seq ?lvl (seq ?env (seq ?locals (seq ?nameTable (seq ?pruning a))))
 {-# inline forceCxt #-}

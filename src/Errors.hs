@@ -20,7 +20,7 @@ data Error
   | ExpectedFunOrForall V.Ty -- inferred type
   | GenericError String
   | AmbiguousUniverse
-  | ExpectedType
+  | ExpectedSetProp
 
 data ErrorInCxt = ErrorInCxt Locals P.Tm Error
 

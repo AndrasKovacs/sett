@@ -3,6 +3,7 @@ module Syntax where
 
 import Common
 import Values (Val)
+import qualified Values as V
 
 -- Pruning
 --------------------------------------------------------------------------------
@@ -42,20 +43,20 @@ type Ty = Tm
 
 data Tm
   = LocalVar Ix
-  | TopDef ~(Hide Val) Lvl
+  | HideTopDef Lvl ~(Hide Val) ~(Hide V.Ty)
 
   | Lam SP Name Icit Ty Tm
   | App Tm Tm Icit
 
   | Pair SP Tm Tm
-  | ProjField Tm Ty Int
+  | HideProjField Tm ~(Hide V.Ty) Int
   | Proj1 Tm
   | Proj2 Tm
 
   | Pi Name Icit Ty Ty
   | Sg Name Ty Ty
 
-  | Postulate Lvl
+  | HidePostulate Lvl ~(Hide V.Ty)
   | InsertedMeta MetaVar Pruning
   | AppPruning Tm Pruning
   | Meta MetaVar
@@ -78,6 +79,24 @@ data Tm
 
   | Irrelevant
   deriving Show
+
+pattern TopDef :: Lvl -> Val -> V.Ty -> Tm
+pattern TopDef x t a <- HideTopDef x (coerce -> t) (coerce -> a) where
+  TopDef x ~t ~a = HideTopDef x (coerce t) (coerce a)
+
+pattern Postulate :: Lvl -> V.Ty -> Tm
+pattern Postulate x a <- HidePostulate x (coerce -> a) where
+  Postulate x ~a = HidePostulate x (coerce a)
+
+pattern ProjField :: Tm -> V.Ty -> Int -> Tm
+pattern ProjField t a n <- HideProjField t (coerce -> a) n where
+  ProjField t ~a n = HideProjField t (coerce a) n
+
+{-# complete
+  LocalVar, TopDef, Lam, App, Pair, ProjField, Proj1, Proj2, Pi, Sg, Postulate,
+  InsertedMeta, AppPruning, Meta, Let, Set, Prop, Top, Tt, Bot, ElSym, EqSym,
+  CoeSym, ReflSym, SymSym, TransSym, ApSym, ExfalsoSym, Irrelevant
+  #-}
 
 pattern AppE t u = App t u Expl
 pattern AppI t u = App t u Impl

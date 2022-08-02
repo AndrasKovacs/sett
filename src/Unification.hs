@@ -1,17 +1,17 @@
 
 module Unification where
 
-import IO
+-- import IO
 import Control.Exception
 
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
-import qualified Data.Ref.F as RF
+-- import qualified Data.Ref.F as RF
 
 import Common
 import Values
 import Evaluation
-import Errors
+-- import Errors
 import qualified Syntax as S
 
 -- first round:
@@ -43,9 +43,6 @@ import qualified Syntax as S
 --                   - Success with postponed constraints
 --                   - Fail
 
-
-
-
 --------------------------------------------------------------------------------
 
 data UnifyEx = CantUnify | CantSolveFrozenMeta | CantSolveFlexMeta
@@ -69,70 +66,88 @@ forceCS cs v = case cs of
 
 --------------------------------------------------------------------------------
 
-data PartialSub = PSub {
-    occ :: Maybe MetaVar   -- optional occurs check
-  , dom :: Lvl             -- size of Γ
-  , cod :: Lvl             -- size of Δ
-  , sub :: IM.IntMap Val}  -- mapping from Δ vars to Γ values
+-- data PartialSub = PSub {
+--     occ :: Maybe MetaVar   -- optional occurs check
+--   , dom :: Lvl             -- size of Γ
+--   , cod :: Lvl             -- size of Δ
+--   , sub :: IM.IntMap Val}  -- mapping from Δ vars to Γ values
 
--- | lift : (σ : Psub Γ Δ) → Psub (Γ, x : A[σ]) (Δ, x : A)
-lift :: PartialSub -> Ty -> PartialSub
-lift (PSub occ dom cod sub) a =
-  PSub occ (dom + 1) (cod + 1) (IM.insert (unLvl cod) (Var dom a) sub)
+-- -- | lift : (σ : Psub Γ Δ) → Psub (Γ, x : A[σ]) (Δ, x : A)
+-- lift :: PartialSub -> Ty -> IO PartialSub
+-- lift sigma@(PSub occ dom cod sub) a = do
+--   a' <- psubst sigma a
+--   pure $! PSub occ (dom + 1) (cod + 1) (IM.insert (unLvl cod) (Var dom a') sub)
 
--- | skip : Psub Γ Δ → Psub Γ (Δ, x : A)
-skip :: PartialSub -> PartialSub
-skip (PSub occ dom cod sub) =
-  PSub occ dom (cod + 1) sub
+-- -- | (σ : PSub Γ Δ) → (A : Ty) → (t : Val Γ A[σ]) → PSub (Γ, x : A[σ]) (Δ, x : A)
+-- extend :: PartialSub -> Ty -> Val -> IO PartialSub
+-- extend sigma@(PSub occ dom cod sub) a t = do
+--   a' <- psubst sigma a
+--   pure $! PSub occ (dom + 1) (cod + 1) (IM.insert (unLvl cod) (Var dom a') sub)
+
+-- -- | skip : PSub Γ Δ → PSub Γ (Δ, x : A)
+-- skip :: PartialSub -> PartialSub
+-- skip (PSub occ dom cod sub) = PSub occ dom (cod + 1) sub
 
 --------------------------------------------------------------------------------
 
--- | invert : (Γ : Cxt) → (spine : Sub Δ Γ) → Psub Γ Δ
---   Optionally returns a pruning of nonlinear spine entries, if there's any.
-invert :: Lvl -> Spine -> IO (PartialSub, Maybe S.Pruning)
-invert gamma sp = do
+-- | Spine inversion helper data type, to help unboxing and forcing. Contains: spine
+--   length, set of domain vars, inverse substitution, pruning of nonlinear
+--   entries, flag indicating linearity
+data Invert = Invert Lvl IS.IntSet (IM.IntMap Val) S.Pruning Bool
 
-  let go :: Spine -> IO (Lvl, IS.IntSet, IM.IntMap Val, S.Pruning, Bool)
-      go SId           = pure (0, mempty, mempty, [], True)
-      go (SApp sp t i) = do
-        (!dom, !domvars, !sub, !pr, !isLinear) <- go sp
+-- -- | invert : (Γ : Cxt) → (spine : Sub Δ Γ) → Psub Γ Δ
+-- --   Optionally returns a pruning of nonlinear spine entries, if there's any.
+-- invert :: Lvl -> Spine -> IO (PartialSub, Maybe S.Pruning)
+-- invert gamma sp = do
 
-        let invertVal x invx = case IS.member x domvars of
-              True  -> pure (dom + 1, domvars,             IM.delete x sub     , Nothing : pr, False   )
-              False -> pure (dom + 1, IS.insert x domvars, IM.insert x invx sub, Just i  : pr, isLinear)
+--   let go :: Spine -> IO Invert
+--       go SId           = pure (Invert 0 mempty mempty [] True)
+--       go (SApp sp t i) = do
+--         Invert dom domvars sub pr isLinear <- go sp
 
-        let ?lvl = dom
-        forceAll t >>= \case
-          Var (Lvl x) a -> invertVal x (Var dom uf)
-          _             -> throwIO CantUnify
+--         let invertVal x invx = case IS.member x domvars of
+--               True  -> pure $! Invert (dom + 1) domvars (IM.delete x sub) (Nothing : pr) False
+--               False -> pure $! Invert (dom + 1) (IS.insert x domvars) (IM.insert x invx sub) (Just i  : pr) isLinear
 
-      go SProj1{}     = impossible
-      go SProj2{}     = impossible
-      go SProjField{} = impossible
+--         let ?lvl = dom
 
-  (dom, domvars, sub, pr, isLinear) <- go sp
-  pure (PSub Nothing dom gamma sub, pr <$ guard isLinear)
+--         -- TODO: sigma inversions
+--         forceAll t >>= \case
+--           Var (Lvl x) a -> invertVal x (Var dom uf)
+--           _             -> throwIO CantUnify
+
+--       go SProj1{}     = impossible
+--       go SProj2{}     = impossible
+--       go SProjField{} = impossible
+
+--   Invert dom domvars sub pr isLinear <- go sp
+--   pure (PSub Nothing dom gamma sub, pr <$ guard isLinear)
 
 -- -- | Remove some arguments from a closed iterated Pi type.
 -- pruneTy :: S.RevPruning -> Ty -> IO S.Ty
 -- pruneTy (S.RevPruning# pr) a = go pr (PSub Nothing 0 0 mempty) a where
 --   go :: S.Pruning -> PartialSub -> Ty -> IO S.Ty
 --   go pr psub a = do
---     let ?lvl = dom psub
---     fa <- forceAll a
---     case (pr, fa) of
---       ([]          , a           ) -> psubst psub a
---       (Just{}  : pr, Pi _ x i a b) -> S.Pi S x i <$!> psubst psub a
---                                                  <*!> go pr (lift psub a) (b $$ Var (cod psub) a)
---       (Nothing : pr, Pi _ x i a b) -> go pr (skip psub) (b $$ Var (cod psub) a)
---       _                            -> impossible
+--     a <- forceAll a
+--     case (pr, a) of
+--       ([]          , a         ) -> psubst psub a
+--       (Just{}  : pr, Pi x i a b) -> do
+--         a' <- evalLvl (cod psub) <$!> psubst psub a
+--         let var = Var (cod psub) a'
+--         psub' <- extend psub _ _
+--         Pi x i a' <$!> go pr psub' (b $$ var)
+--         -- Pi x i <$!> psubst psub a
+--         --                                    <*!> go pr (lift psub) (b $ Var (cod psub) _)
+--       (Nothing : pr, Pi x i a b) -> _
+--         -- go pr (skip psub) (b $ Var (cod psub) _)
+--       _                          -> impossible
 
 psubst :: PartialSub -> Val -> IO S.Tm
 psubst = uf
 --------------------------------------------------------------------------------
 
--- unify :: LvlArg => UnifyState -> G -> G -> IO ()
--- unify st t t' =
+unify :: LvlArg => UnifyState -> G -> G -> IO ()
+unify st t t' = uf
 
 -- unify :: LvlArg => Val -> Val -> IO ()
 -- unify t u = do

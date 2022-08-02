@@ -3,6 +3,7 @@ module Cxt.Extension where
 
 import Common
 import Cxt.Types
+import Evaluation
 import Values
 
 import qualified NameTable as N
@@ -10,7 +11,7 @@ import qualified Syntax as S
 import qualified Values as V
 
 -- | Add a bound variable to the context. We bring the new variable into scope.
-bind :: CxtArg (Bind -> S.Ty -> V.GTy -> (CxtArg (Val -> a)) -> a)
+bind :: InCxt (Bind -> S.Ty -> V.GTy -> InCxt (Val -> a) -> a)
 bind x a ga k =
   let v          = V.Var ?lvl (g2 ga)
   in
@@ -22,8 +23,14 @@ bind x a ga k =
   in forceCxt (k v)
 {-# inline bind #-}
 
+-- | Add a bound variable to the context, where we only have a syntactic
+--   representation of the binder type.
+bindWithTy :: InCxt (Bind -> S.Ty -> InCxt (Val -> a) -> a)
+bindWithTy x a k = bind x a (gjoin (eval a)) k
+{-# inline bindWithTy #-}
+
 -- | Add a definition to the context.
-define :: CxtArg (Span -> S.Ty -> V.GTy -> S.Tm -> V.Val -> CxtArg a -> a)
+define :: InCxt (Span -> S.Ty -> V.GTy -> S.Tm -> V.Val -> InCxt a -> a)
 define x a ga t ~vt k =
   let ?lvl       = ?lvl + 1
       ?env       = V.EDef ?env vt
@@ -34,7 +41,7 @@ define x a ga t ~vt k =
 {-# inline define #-}
 
 -- | Add a bound variable which does not exist in the source.
-insertBinder :: CxtArg (S.Ty -> V.GTy -> CxtArg (Val -> a) -> a)
+insertBinder :: InCxt (S.Ty -> V.GTy -> InCxt (Val -> a) -> a)
 insertBinder a ga k =
   let v          = V.Var ?lvl (g2 ga)
   in
@@ -46,7 +53,7 @@ insertBinder a ga k =
 {-# inline insertBinder #-}
 
 -- | Run starting with the empty context.
-withEmptyCxt :: CxtArg a -> a
+withEmptyCxt :: InCxt a -> a
 withEmptyCxt k =
   let ?lvl       = 0 :: Lvl
       ?env       = ENil

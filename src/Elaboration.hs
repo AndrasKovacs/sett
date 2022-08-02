@@ -31,11 +31,10 @@ TODO
 elabError :: LocalsArg => P.Tm -> Error -> IO a
 elabError t err = throwIO $ ErrorInCxt ?locals t err
 
-unify :: CxtArg (P.Tm -> G -> G -> IO ())
-unify t l r = do
-  uf
-  -- Unif.unify USRigid l r `catch` \case
-  --   (e :: UnifyEx) -> elabError t (UnifyError (g1 l) (g1 r))
+unify :: LvlArg => LocalsArg => P.Tm -> G -> G -> IO ()
+unify t l r =
+  Unif.unify USRigid l r `catch` \case
+    (e :: Unif.UnifyEx) -> elabError t (UnifyError (g1 l) (g1 r))
 
 data Infer = Infer Tm {-# unpack #-} GTy
 
@@ -46,18 +45,18 @@ closeTy b = go ?locals b where
     S.LBind ls x a     -> go ls (S.Pi x Expl a b)
     S.LDefine ls x t a -> go ls (Let x a t b)
 
-freshMeta :: LvlArg => LocalsArg => GTy -> IO Tm
+freshMeta :: LvlArg => LocalsArg => PruningArg => GTy -> IO Tm
 freshMeta (G a fa) = do
   let closed   = eval0 $ closeTy $ quote UnfoldNone a
   let ~fclosed = eval0 $ closeTy $ quote UnfoldNone fa
   m <- newMeta (G closed fclosed)
-  pure $! InsertedMeta m ?locals
+  pure $ InsertedMeta m ?pruning
 
 -- Insertion
 --------------------------------------------------------------------------------
 
 -- | Insert fresh implicit applications.
-insertApps' :: LvlArg => EnvArg => LocalsArg => IO Infer -> IO Infer
+insertApps' :: LvlArg => EnvArg => LocalsArg => PruningArg => IO Infer -> IO Infer
 insertApps' act = go =<< act where
   go :: Infer -> IO Infer
   go (Infer t (G a fa)) = forceAll fa >>= \case
@@ -71,7 +70,7 @@ insertApps' act = go =<< act where
 
 -- | Insert fresh implicit applications to a term which is not
 --   an implicit lambda (i.e. neutral).
-insertApps :: LvlArg => EnvArg => LocalsArg => IO Infer -> IO Infer
+insertApps :: LvlArg => EnvArg => LocalsArg => PruningArg => IO Infer -> IO Infer
 insertApps act = act >>= \case
   inf@(Infer (S.Lam _ _ Impl _ _) _) -> pure inf
   inf                                -> insertApps' (pure inf)
@@ -79,7 +78,7 @@ insertApps act = act >>= \case
 
 -- | Insert fresh implicit applications until we hit a Pi with
 --   a particular binder name.
-insertAppsUntilName :: LvlArg => EnvArg => LocalsArg => P.Tm -> P.Name -> IO Infer -> IO Infer
+insertAppsUntilName :: LvlArg => EnvArg => LocalsArg => PruningArg => P.Tm -> P.Name -> IO Infer -> IO Infer
 insertAppsUntilName pt name act = go =<< act where
   go :: Infer -> IO Infer
   go (Infer t (G a fa)) = forceAll fa >>= \case
@@ -96,7 +95,7 @@ insertAppsUntilName pt name act = go =<< act where
 
 --------------------------------------------------------------------------------
 
-subtype :: CxtArg (P.Tm -> S.Tm -> V.Ty -> V.Ty -> IO S.Tm)
+subtype :: InCxt (P.Tm -> S.Tm -> V.Ty -> V.Ty -> IO S.Tm)
 subtype pt t a b = do
   fa <- forceAll a
   fb <- forceAll b
@@ -110,7 +109,7 @@ subtype pt t a b = do
 -- Check
 --------------------------------------------------------------------------------
 
-checkEl :: CxtArg (P.Tm -> GTy -> IO S.Tm)
+checkEl :: InCxt (P.Tm -> GTy -> IO S.Tm)
 checkEl topt (G topa ftopa) = do
   ftopa <- forceAll ftopa
   case (topt, ftopa) of
@@ -171,29 +170,19 @@ checkEl topt (G topa ftopa) = do
       pure t
 
 
-check :: CxtArg (P.Tm -> GTy -> IO S.Tm)
+check :: InCxt (P.Tm -> GTy -> IO S.Tm)
 check topt (G topa ftopa) = do
   ftopa <- forceAll ftopa
   case (topt, ftopa) of
 
-    -- (P.Pi _ x i a b, V.Set) -> do
-    --   a <- check a gSet
-    --   bind x a (gjoin (eval a)) \_ ->
-    --     S.Pi S (bindToName x) i a <$!> check b gSet
-
-    -- (P.Sg _ x a b, V.Set) -> do
-    --   a <- check a gSet
-    --   bind x a (gjoin (eval a)) \_ ->
-    --     S.Sg S (bindToName x) a <$!> check b gSet
-
     (P.Pi _ x i a b, V.Prop) -> do
       a <- check a gSet
-      bind x a (gjoin (eval a)) \_ ->
+      bindWithTy x a \_ ->
         S.Pi (bindToName x) i a <$!> check b gProp
 
     (P.Sg _ x a b, V.Prop) -> do
       a <- check a gProp
-      bind x a (gEl (gjoin (eval a))) \_ ->
+      bindWithTy x (S.El a) \_ ->
         S.Sg (bindToName x) a <$!> check b gProp
 
     (t, V.El a) ->
@@ -252,41 +241,42 @@ check topt (G topa ftopa) = do
 -- infer
 --------------------------------------------------------------------------------
 
-ensureType :: CxtArg (P.Tm -> V.Ty -> IO SP)
-ensureType topt a = forceAll a >>= \case
+-- | Ensure that a type is Set or Prop.
+ensureSP :: InCxt (P.Tm -> V.Ty -> IO SP)
+ensureSP topt a = forceAll a >>= \case
   V.Set  -> pure S
   V.Prop -> pure P
   Flex{} -> elabError topt AmbiguousUniverse
-  _      -> elabError topt ExpectedType
+  _      -> elabError topt ExpectedSetProp
 
-infer :: CxtArg (P.Tm -> IO Infer)
+infer :: InCxt (P.Tm -> IO Infer)
 infer topt = case topt of
 
   P.Var x -> case NT.lookup x ?nameTable of
     Nothing ->
-      elabError topt $! NameNotInScope x
+      elabError topt $ NameNotInScope x
     Just (NT.Top x a ga v) ->
-      pure $! Infer (S.TopDef (coerce v) x) ga
+      pure $! Infer (S.TopDef x v (g2 ga)) ga
     Just (NT.Local x ga) ->
       pure $! Infer (S.LocalVar (lvlToIx x)) ga
 
   P.Pi _ x i topa topb -> do
     a <- check topa gSet
-    bind x a (gjoin (eval a)) \_ -> do
+    bindWithTy x a \_ -> do
       Infer b (G bty fbty) <- infer topb
-      sp <- ensureType topb fbty
+      sp <- ensureSP topb fbty
       pure $! Infer (S.Pi (bindToName x) i a b) (gU sp)
 
   P.Sg _ x topa topb -> do
     Infer a (G aty faty) <- infer topa
-    bind x a (gjoin (eval a)) \_ -> do
-      ensureType topa faty >>= \case
+    bindWithTy x a \_ -> do
+      ensureSP topa faty >>= \case
         S -> do
           b <- check topb gSet
           pure $! Infer (S.Sg (bindToName x) a b) gSet
         P -> do
           Infer b (G bty fbty) <- infer topb
-          sp <- ensureType topb fbty
+          sp <- ensureSP topb fbty
           pure $! Infer (S.Sg (bindToName x) (S.El a) b) (gU sp)
 
   P.Set _ ->
@@ -420,7 +410,7 @@ infer topt = case topt of
             elabError topt $ NoSuchField x
 
     (ix, b) <- go (g2 ga) 0
-    pure $! Infer (S.ProjField t ix) (gjoin b)
+    pure $! Infer (S.ProjField t (coerce (g2 ga)) ix) (gjoin b)
 
   P.Let _ x ma t u -> do
 
