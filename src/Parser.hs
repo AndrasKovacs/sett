@@ -339,10 +339,9 @@ tyAnnot :: Parser Tm
 tyAnnot = tm `cut` ["a type annotation"]
 
 topLevel :: Parser TopLevel
-topLevel = branch (exactLvl 0 >> lookahead (fails eof))
+topLevel = branch (exactLvl 0 >> ident)
 
-  (\_ -> do
-      x <- ident'
+  (\x -> do
       localIndentation 1 do
         ma <- optional (colon *> tyAnnot)
         assign `pcut` Lit "\":=\" in top-level definition"
@@ -360,7 +359,7 @@ topLevel = branch (exactLvl 0 >> lookahead (fails eof))
 parseFile :: FilePath -> IO (Src, TopLevel)
 parseFile path = do
   src <- File path <$!> B.readFile path
-  case runParser topLevel src of
+  case runParser (ws *> topLevel) src of
     OK a _ _ -> pure (src, a)
     Fail     -> impossible
     Err e    -> putStrLn (prettyError src e) >> error "parse error"
@@ -368,7 +367,7 @@ parseFile path = do
 parseString :: String -> IO (Src, TopLevel)
 parseString str = do
   let src = Interactive (packUTF8 str)
-  case runParser topLevel src of
+  case runParser (ws *> topLevel) src of
     OK a _ _ -> pure (src, a)
     Fail     -> impossible
     Err e    -> putStrLn (prettyError src e) >> error "parse error"
