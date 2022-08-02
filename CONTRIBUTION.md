@@ -14,3 +14,12 @@
 - András: how I build & install
   1. install stack with ghcup
   2. build with "stack build"  or: "stack build --fast"
+
+### Implicit parameters
+
+- There's a plugin for making implicit params strict, but it can only handle
+  curried implicit arguments, like `Arg1 => Arg2 => Arg3 => a -> b`. So we want
+  to avoid implicit params tupled up.
+- If you use an implicit param in a function, write it out in the type signatures.
+- The plugin also works on top definitions.
+- TODO: make the plugin smarter.

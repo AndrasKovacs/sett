@@ -34,7 +34,7 @@ data Spine
   | SApp Spine Val Icit
   | SProj1 Spine
   | SProj2 Spine
-  | SProjField Spine Int  -- we display field projections based on computed types
+  | SProjField Spine ~Ty Int  -- we display field projections based on computed types
 
 --------------------------------------------------------------------------------
 
@@ -91,10 +91,10 @@ data Val
   | Set
   | El Val
 
-  | Pi SP Name Icit Ty Closure
+  | Pi Name Icit Ty Closure
   | Lam SP Name Icit Ty Closure
 
-  | Sg SP Name Ty Closure
+  | Sg Name Ty Closure
   | Pair SP Val Val
 
   | Prop
@@ -122,16 +122,16 @@ pattern LamPI x a t = Lam P x Impl a (Cl t)
 pattern LamSE x a t = Lam S x Expl a (Cl t)
 pattern LamSI x a t = Lam S x Impl a (Cl t)
 
-pattern PiS x i a b = Pi S x i a (Cl b)
-pattern PiSE x a b = Pi S x Expl a (Cl b)
-pattern PiSI x a b = Pi S x Impl a (Cl b)
+pattern PiS x i a b = Pi x i a (Cl b)
+pattern PiSE x a b = Pi x Expl a (Cl b)
+pattern PiSI x a b = Pi x Impl a (Cl b)
 
-pattern PiP x i a b = Pi P x i a (Cl b)
-pattern PiPE x a b = Pi P x Expl a (Cl b)
-pattern PiPI x a b = Pi P x Impl a (Cl b)
+pattern PiP x i a b = Pi x i a (Cl b)
+pattern PiPE x a b = Pi x Expl a (Cl b)
+pattern PiPI x a b = Pi x Impl a (Cl b)
 
-pattern SgS x a b   = Sg S x a (Cl b)
-pattern SgP x a b   = Sg P x a (Cl b)
+pattern SgS x a b   = Sg x a (Cl b)
+pattern SgP x a b   = Sg x a (Cl b)
 
 funP :: Val -> Val -> Val
 funP a b = PiPE NUnused a \_ -> b
@@ -142,12 +142,18 @@ funS a b = PiSE NUnused a \_ -> b
 andP :: Val -> Val -> Val
 andP a b = SgP NUnused a \_ -> b
 
+gU :: SP -> GTy
+gU S = gjoin Set
+gU P = gjoin Prop
+
 gSet         = gjoin Set
 gProp        = gjoin Prop
 gEl (G a fa) = G (El a) (El fa); {-# inline gEl #-}
 
 --------------------------------------------------------------------------------
 
+-- | @g1@ is minimally computed and @g2@ is maximally computed.
+--   The two values are definitionally equal.
 data G    = G {g1 :: ~Val, g2 :: ~Val}
 type GTy  = G
 

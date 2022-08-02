@@ -18,16 +18,18 @@ bind x a ga k =
       ?env       = V.EDef ?env v
       ?locals    = S.LBind ?locals (bindToName x) a
       ?nameTable = N.insert x (N.Local ?lvl ga) ?nameTable
-  in forceCxt $ k v
+      ?pruning   = Just Expl : ?pruning
+  in forceCxt (k v)
 {-# inline bind #-}
 
 -- | Add a definition to the context.
 define :: CxtArg (Span -> S.Ty -> V.GTy -> S.Tm -> V.Val -> CxtArg a -> a)
 define x a ga t ~vt k =
-  let ?lvl = ?lvl + 1
-      ?env = V.EDef ?env vt
-      ?locals = S.LDefine ?locals (NSpan x) a t
+  let ?lvl       = ?lvl + 1
+      ?env       = V.EDef ?env vt
+      ?locals    = S.LDefine ?locals (NSpan x) a t
       ?nameTable = N.insert (Bind x) (N.Local ?lvl ga) ?nameTable
+      ?pruning   = Nothing : ?pruning
   in forceCxt k
 {-# inline define #-}
 
@@ -39,7 +41,8 @@ insertBinder a ga k =
   let ?lvl       = ?lvl + 1
       ?env       = V.EDef ?env v
       ?locals    = S.LBind ?locals NUnused a
-  in forceCxt $ k v
+      ?pruning   = Just Expl : ?pruning
+  in forceCxt (k v)
 {-# inline insertBinder #-}
 
 -- | Run starting with the empty context.
@@ -49,5 +52,6 @@ withEmptyCxt k =
       ?env       = ENil
       ?locals    = S.LEmpty
       ?nameTable = mempty :: N.NameTable
+      ?pruning   = []
   in k
 {-# inline withEmptyCxt #-}

@@ -4,7 +4,24 @@ module Syntax where
 import Common
 import Values (Val)
 
-type Ty = Tm
+-- Pruning
+--------------------------------------------------------------------------------
+
+-- | A `Pruning` represents a spine of variables, which contains a subsequence
+--   of all variables in scope. A `Just` represents application to a var, a `Nothing`
+--   skips over a var.
+type Pruning = [Maybe Icit]
+
+type PruningArg = (?pruning :: Pruning)
+
+-- | A reversed pruning. Used for pruning Pi domains, where we have to iterate
+--   inside-out.
+newtype RevPruning = RevPruning# Pruning
+
+revPruning :: Pruning -> RevPruning
+revPruning = RevPruning# . reverse
+
+--------------------------------------------------------------------------------
 
 -- | Description of the local scope.
 data Locals
@@ -19,6 +36,10 @@ locals :: (LocalsArg => a) -> (LocalsArg => a)
 locals a = seq ?locals a
 {-# inline locals #-}
 
+--------------------------------------------------------------------------------
+
+type Ty = Tm
+
 data Tm
   = LocalVar Ix
   | TopDef ~(Hide Val) Lvl
@@ -27,15 +48,16 @@ data Tm
   | App Tm Tm Icit
 
   | Pair SP Tm Tm
-  | ProjField Tm Int
+  | ProjField Tm Ty Int
   | Proj1 Tm
   | Proj2 Tm
 
-  | Pi SP Name Icit Ty Ty
-  | Sg SP Name Ty Ty
+  | Pi Name Icit Ty Ty
+  | Sg Name Ty Ty
 
   | Postulate Lvl
-  | InsertedMeta MetaVar Locals
+  | InsertedMeta MetaVar Pruning
+  | AppPruning Tm Pruning
   | Meta MetaVar
   | Let Name Ty Tm Tm
 

@@ -2,10 +2,9 @@
 
 module Common (
     module Common
+  , module Control.Monad
   , catch
   , coerce
-  , when
-  , unless
   ) where
 
 import Control.Monad
@@ -83,14 +82,6 @@ ctzInt (I# n) = I# (word2Int# (ctz# (int2Word# n)))
 ($$!) f x = f x
 infixl 0 $$!
 {-# inline ($$!) #-}
-
--- | Strict `fmap`.
-(<$!>) :: Monad f => (a -> b) -> f a -> f b
-(<$!>) f fa = do
-  a <- fa
-  pure $! f a
-infixl 4 <$!>
-{-# inline (<$!>) #-}
 
 -- | Strict `(<*>)`.
 (<*!>) :: Monad f => f (a -> b) -> f a -> f b

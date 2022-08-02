@@ -9,10 +9,6 @@ import Values
 import qualified Presyntax as P
 import qualified Values as V
 
-data UnifyEx = CantUnify | FrozenSolution | FlexSolution
-  deriving (Eq, Show)
-instance Exception UnifyEx
-
 data Error
   = UnifyError Val Val
   | NameNotInScope P.Name
@@ -24,6 +20,7 @@ data Error
   | ExpectedFunOrForall V.Ty -- inferred type
   | GenericError String
   | AmbiguousUniverse
+  | ExpectedType
 
 data ErrorInCxt = ErrorInCxt Locals P.Tm Error
 

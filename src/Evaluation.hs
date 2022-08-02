@@ -81,13 +81,20 @@ proj2 t = case t of
   Irrelevant    -> Irrelevant
   _             -> impossible
 
-projField :: Val -> Int -> Val
-projField t n = case t of
+-- | Input: type of (t, u)
+--   output: type of second projections
+proj2Type :: LvlArg => Ty -> Val -> Ty
+proj2Type pairTy proj1val = runIO $ forceAll pairTy >>= \case
+  Sg _ a b -> pure $! (b $$ proj1val)
+  _        -> impossible
+
+projField :: LvlArg => Val -> Ty -> Int -> Val
+projField t ~a n = case t of
   Pair _ t u     -> case n of 0 -> t
-                              n -> projField u (n - 1)
-  Rigid h sp     -> Rigid  h (SProjField sp n)
-  Flex h sp      -> Flex   h (SProjField sp n)
-  Unfold h sp t  -> Unfold h (SProjField sp n) (projField t n)
+                              n -> projField u (proj2Type a t) (n - 1)
+  Rigid h sp     -> Rigid  h (SProjField sp a n)
+  Flex h sp      -> Flex   h (SProjField sp a n)
+  Unfold h sp t  -> Unfold h (SProjField sp a n) (projField t a n)
   Irrelevant     -> Irrelevant
   _              -> impossible
 
@@ -99,17 +106,17 @@ coe a b p t = case (a, b) of
 
   (El a, El b) -> proj1 p `appE` t
 
-  (topA@(Pi _ x i a b), topB@(Pi _ x' i' a' b'))
+  (topA@(Pi x i a b), topB@(Pi x' i' a' b'))
     | i /= i' -> Rigid (RHCoe topA topB p t) SId
 
-    | True    ->
+    | True ->
         let p1 = proj1 p
             p2 = proj2 p
         in LamS (pick x x') i a' \x' ->
             let x = coe a' a (Sym Set a a' p1) x'
             in coe (b $$ x) (b' $$ x') (p2 `appE` x) (app t x i)
 
-  (Sg _ x a b, Sg _ x' a' b') ->
+  (Sg x a b, Sg x' a' b') ->
     let t1  = proj1 t
         t2  = proj2 t
         t1' = coe a a' (proj1 p) t1
@@ -172,10 +179,10 @@ eq a t u = case a of
   Prop -> eqProp t u
   El a -> markEq (El a) t u Top
 
-  topA@(Pi _ x i a b) -> markEq topA t u $!
+  topA@(Pi x i a b) -> markEq topA t u $!
     PiSE x a \x -> eq (b $$ x) (app t x i) (app u x i)
 
-  topA@(Sg _ x a b) ->
+  topA@(Sg x a b) ->
     let t1  = proj1 t
         u1  = proj1 u
         t2  = proj2 t
@@ -206,7 +213,7 @@ eqSet a b = case (a, b) of
   (Prop, Prop) -> markEq Set Prop Prop Top
   (El a, El b) -> eqProp a b
 
-  (topA@(Pi _ x i a b), topB@(Pi _ x' i' a' b'))
+  (topA@(Pi x i a b), topB@(Pi x' i' a' b'))
     | i /= i' -> markEq Set topA topB Bot
     | True    ->
       let name = pick x x'
@@ -214,7 +221,7 @@ eqSet a b = case (a, b) of
         SgP np (eqSet a a') \p ->
         PiPE name a \x -> eqSet (b $$ x) (b' $$ coe a a' p x)
 
-  (topA@(Sg _ x a b), topB@(Sg _ x' a' b')) ->
+  (topA@(Sg x a b), topB@(Sg x' a' b')) ->
       let name = pick x x'
       in markEq Set topA topB $!
         SgP np (eqSet a a') \p ->
@@ -246,26 +253,25 @@ spine :: LvlArg => Val -> Spine -> Val
 spine v sp =
   let go = spine v; {-# inline go #-}
   in case sp of
-    SId            -> v
-    SApp t u i     -> app (go t) u i
-    SProj1 t       -> proj1 (go t)
-    SProj2 t       -> proj2 (go t)
-    SProjField t n -> projField (go t) n
+    SId              -> v
+    SApp t u i       -> app (go t) u i
+    SProj1 t         -> proj1 (go t)
+    SProj2 t         -> proj2 (go t)
+    SProjField t a n -> projField (go t) a n
 
-maskEnv :: Env -> S.Locals -> Spine
-maskEnv e ls = case (e, ls) of
-  (ENil,     S.LEmpty          ) -> SId
-  (EDef e _, S.LDefine ls _ _ _) -> maskEnv e ls
-  (EDef e v, S.LBind ls x _    ) -> SApp (maskEnv e ls) v Expl
-  _                              -> impossible
+pruneEnv :: Env -> S.Pruning -> Spine
+pruneEnv e ls = case (e, ls) of
+  (ENil,     []          ) -> SId
+  (EDef e _, Nothing : pr) -> pruneEnv e ls
+  (EDef e v, Just _  : pr) -> SApp (pruneEnv e ls) v Expl
+  _                        -> impossible
 
-insertedMeta :: LvlArg => EnvArg => MetaVar -> S.Locals -> Val
-insertedMeta x ls = runIO do
-  let sp = maskEnv ?env ls
+insertedMeta :: LvlArg => EnvArg => MetaVar -> S.Pruning -> Val
+insertedMeta x pr = runIO do
+  let sp = pruneEnv ?env pr
   readMeta x >>= \case
     MEUnsolved{}   -> pure (Flex (FHMeta x) sp)
     MESolved _ v _ -> pure (Unfold (UHSolvedMeta x) sp (spine v sp))
-
 
 eqSym, coeSym, symSym, apSym, transSym, elSym, reflSym, exfalsoSym :: Val
 eqSym      = LamSI na Set \a -> LamSE nx a \x -> LamSE ny a \y -> eq a x y
@@ -299,13 +305,14 @@ eval t =
     S.Lam hl x i a t    -> Lam hl x i (go a) (goBind t)
     S.App t u i         -> app (go t) (go u) i
     S.Pair hl t u       -> Pair hl (go t) (go u)
-    S.ProjField t n     -> projField (go t) n
+    S.ProjField t a n   -> projField (go t) (go a) n
     S.Proj1 t           -> proj1 (go t)
     S.Proj2 t           -> proj2 (go t)
-    S.Pi hl x i a b     -> Pi hl x i (go a) (goBind b)
-    S.Sg hl x a b       -> Sg hl x (go a) (goBind b)
+    S.Pi x i a b        -> Pi x i (go a) (goBind b)
+    S.Sg x a b          -> Sg x (go a) (goBind b)
     S.Postulate x       -> Rigid (RHPostulate x) SId
-    S.InsertedMeta x ls -> insertedMeta x ls
+    S.InsertedMeta x pr -> insertedMeta x pr
+    S.AppPruning t pr   -> spine (go t) (pruneEnv ?env pr)
     S.Meta x            -> meta x
     S.Let x a t u       -> let ?env = EDef ?env (eval t) in eval u
     S.Set               -> Set
@@ -407,36 +414,43 @@ rigidHeadType = \case
   RHCoe a b p t       -> pure $! b
   RHExfalso a p       -> pure $! a
 
-projFieldType :: LvlArg => Spine -> (Spine -> Val) -> Ty -> Int -> IO Ty
-projFieldType sp mkval a n = do
-  let go = projFieldType sp mkval; {-# inline go #-}
-  a <- forceAll a
-  case (a, n) of
-    (Sg _ x a b     , 0) -> pure a
-    (Sg _ x a b     , n) -> go (b $$ mkval (SProjField sp n)) (n + 1)
-    (El (Sg _ _ a b), 0) -> pure $ El a
-    (El (Sg _ x a b), n) -> go (El (b $$ mkval (SProjField sp n))) (n + 1)
-    _                    -> impossible
+projFieldType :: LvlArg => Val -> Ty -> Int -> IO Ty
+projFieldType val topa topn = do
+
+  let go :: Ty -> Int -> IO Ty
+      go a ix = do
+        a <- forceAll a
+        if ix == topn then
+          case a of
+            Sg _ a b      -> pure a
+            El (Sg _ a b) -> pure $ El a
+            _             -> impossible
+        else
+          case a of
+            Sg _ a b      -> go (b $$ projField val topa ix) (ix + 1)
+            El (Sg _ a b) -> go (b $$ projField val topa ix) (ix + 1)
+            _             -> impossible
+
+  go topa 0
 
 spineType :: LvlArg => (Spine -> Val) -> Ty -> Spine -> IO Ty
 spineType mkval a sp =
   let go = spineType mkval a; {-# inline go #-}
   in case sp of
-    SId             -> pure a
-    SApp t u i      -> (go t >>= forceAll) >>= \case
-                         Pi _ _ _ _ b      -> pure $! (b $$ u)
-                         El (Pi _ _ _ _ b) -> pure $! El (b $$ u)
-                         _                 -> impossible
-    SProj1 t        -> (go t >>= forceAll) >>= \case
-                         Sg _ _ a _      -> pure a
-                         El (Sg _ _ a _) -> pure (El a)
-                         _               -> impossible
-    SProj2 t        -> (go t >>= forceAll) >>= \case
-                         Sg _ _ _ b      -> pure $! (b $$ mkval (SProj1 t))
-                         El (Sg _ _ _ b) -> pure $! El (b $$ mkval (SProj1 t))
-                         _               -> impossible
-    SProjField t n  -> do {a <- go t; projFieldType t mkval a n}
-
+    SId               -> pure a
+    SApp t u i        -> (go t >>= forceAll) >>= \case
+                           Pi _ _ _ b      -> pure $! (b $$ u)
+                           El (Pi _ _ _ b) -> pure $! El (b $$ u)
+                           _               -> impossible
+    SProj1 t          -> (go t >>= forceAll) >>= \case
+                           Sg _ a _      -> pure a
+                           El (Sg _ a _) -> pure (El a)
+                           _             -> impossible
+    SProj2 t          -> (go t >>= forceAll) >>= \case
+                           Sg _ _ b      -> pure $! (b $$ mkval (SProj1 t))
+                           El (Sg _ _ b) -> pure $! El (b $$ mkval (SProj1 t))
+                           _             -> impossible
+    SProjField t a n  -> projFieldType (mkval t) a n
 
 flexHeadType :: LvlArg => FlexHead -> IO Ty
 flexHeadType h = case h of
@@ -471,8 +485,8 @@ typeRelevance a = do
     Set          -> pure RRel
     Prop         -> pure RRel
     Irrelevant   -> pure RIrr
-    Pi _ _ _ a b -> goBind a b
-    Sg _ _ a b   -> go a <> goBind a b
+    Pi _ _ a b   -> goBind a b
+    Sg _ a b     -> go a <> goBind a b
     Rigid h sp   -> pure RRel
     Flex h sp    -> pure $! RBlockOn (flexHeadMeta h)
     _            -> impossible
@@ -512,12 +526,12 @@ convSp sp sp' = do
   let go   = conv; {-# inline go #-}
       goSp = convSp; {-# inline goSp #-}
   case (sp, sp') of
-    (SId            , SId             ) -> pure ()
-    (SApp t u i     , SApp t' u' i'   ) -> goSp t t' >> go u u'
-    (SProj1 t       , SProj1 t'       ) -> goSp t t'
-    (SProj2 t       , SProj2 t'       ) -> goSp t t'
-    (SProjField t n , SProjField t' n') -> goSp t t' >> convEq n n'
-    _                                   -> throwIO Diff
+    (SId              , SId               ) -> pure ()
+    (SApp t u i       , SApp t' u' i'     ) -> goSp t t' >> go u u'
+    (SProj1 t         , SProj1 t'         ) -> goSp t t'
+    (SProj2 t         , SProj2 t'         ) -> goSp t t'
+    (SProjField t _ n , SProjField t' _ n') -> goSp t t' >> convEq n n'
+    _                                       -> throwIO Diff
 
 -- | Magical rigid coe conversion.
 convCoe :: LvlArg => Val -> Val -> Val -> Val -> Spine -> Val -> Val -> Val -> Val -> Spine -> IO ()
@@ -549,10 +563,7 @@ conv t u = do
   let go = conv
       {-# inline go #-}
 
-      goBind a t u = do
-        let v = Var ?lvl a
-        let ?lvl = ?lvl + 1
-        conv (t $$ v) (u $$ v)
+      goBind a t u = newVar a \v -> conv (t $$ v) (u $$ v)
       {-# inline goBind #-}
 
       guardP hl (cont :: IO ()) = case hl of
@@ -566,12 +577,12 @@ conv t u = do
 
     -- canonical
     ------------------------------------------------------------
-    (Pi _ x i a b, Pi _ x' i' a' b') -> do
+    (Pi x i a b, Pi x' i' a' b') -> do
       unless (i == i') $ throwIO Diff
       go a a'
       goBind a b b'
 
-    (Sg _ x a b, Sg _ x' a' b') -> do
+    (Sg x a b, Sg x' a' b') -> do
       go a a'
       goBind a b b
 
@@ -632,6 +643,13 @@ conv t u = do
 
     (a, b) -> throwIO Diff
 
+-- coe : (foo : Nat)*Top -> (bar : Nat)*Top
+-- coe = \x. x
+
+-- x : (foo : Nat)*Top
+-- (coe t).bar : Nat
+-- x.bar  ERROR
+
 
 -- Quoting
 --------------------------------------------------------------------------------
@@ -641,11 +659,11 @@ quoteSp opt hd sp = let
   go         = quote opt; {-# inline go #-}
   goSp       = quoteSp opt hd; {-# inline goSp #-}
   in case sp of
-    SId            -> hd
-    SApp t u i     -> S.App (goSp t) (go u) i
-    SProj1 t       -> S.Proj1 (goSp t)
-    SProj2 t       -> S.Proj2 (goSp t)
-    SProjField t n -> S.ProjField (goSp t) n
+    SId              -> hd
+    SApp t u i       -> S.App (goSp t) (go u) i
+    SProj1 t         -> S.Proj1 (goSp t)
+    SProj2 t         -> S.Proj2 (goSp t)
+    SProjField t a n -> S.ProjField (goSp t) (go a) n
 
 quote :: LvlArg => UnfoldOpt -> Val -> S.Tm
 quote opt t = let
@@ -679,8 +697,8 @@ quote opt t = let
     TraceEq a t u v   -> go v
     Pair hl t u       -> S.Pair hl (go t) (go u)
     Lam hl x i a t    -> S.Lam hl x i (go a) (goBind a t)
-    Sg hl x a b       -> S.Sg hl x (go a) (goBind a b)
-    Pi hl x i a b     -> S.Pi hl x i (go a) (goBind a b)
+    Sg x a b          -> S.Sg x (go a) (goBind a b)
+    Pi x i a b        -> S.Pi x i (go a) (goBind a b)
     Set               -> S.Set
     Prop              -> S.Prop
     El a              -> S.El (go a)
