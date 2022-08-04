@@ -604,10 +604,10 @@ conv t u = do
 -- Quoting
 --------------------------------------------------------------------------------
 
-quoteSp :: LvlArg => UnfoldOpt -> (Spine -> Val) -> S.Tm -> Spine -> S.Tm
-quoteSp opt mkval hd sp = let
+quoteSp :: LvlArg => UnfoldOpt -> S.Tm -> Spine -> S.Tm
+quoteSp opt hd sp = let
   go         = quote opt; {-# inline go #-}
-  goSp       = quoteSp opt mkval hd; {-# inline goSp #-}
+  goSp       = quoteSp opt hd; {-# inline goSp #-}
   in case sp of
     SId              -> hd
     SApp t u i       -> S.App (goSp t) (go u) i
@@ -638,11 +638,11 @@ quote opt t = let
 
   cont :: Val -> S.Tm
   cont = \case
-    Flex h sp a         -> goSp (\sp -> Flex h sp a) (goFlexHead h) sp
+    Flex h sp a         -> goSp (goFlexHead h) sp
     FlexEq x a t u      -> S.Eq (go a) (go t) (go u)
-    Rigid h sp a        -> goSp (\sp -> Rigid h sp a) (goRigidHead h) sp
+    Rigid h sp a        -> goSp (goRigidHead h) sp
     RigidEq a t u       -> S.Eq (go a) (go t) (go u)
-    Unfold h sp v a     -> goSp (\sp -> Unfold h sp v a) (goUnfoldHead v h) sp
+    Unfold h sp v a     -> goSp (goUnfoldHead v h) sp
     UnfoldEq a t u v    -> S.Eq (go a) (go t) (go u)
     TraceEq a t u v     -> go v
     Pair hl t u         -> S.Pair hl (go t) (go u)

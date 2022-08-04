@@ -38,13 +38,6 @@ unify t l r =
 
 data Infer = Infer Tm {-# unpack #-} GTy
 
-closeTy :: LocalsArg => S.Ty -> S.Ty
-closeTy b = go ?locals b where
-  go ls b = case ls of
-    S.LEmpty           -> b
-    S.LBind ls x a     -> go ls (S.Pi x Expl a b)
-    S.LDefine ls x t a -> go ls (Let x a t b)
-
 freshMeta :: LvlArg => LocalsArg => PruningArg => GTy -> IO Tm
 freshMeta (G a fa) = do
   let closed   = eval0 $ closeTy $ quote UnfoldNone a

@@ -49,6 +49,10 @@ solve x tv a = do
       cache <- RF.new (-1)
       ADL.write metaCxt (coerce x) (MESolved cache tv a)
 
+unsolvedMetaType :: MetaVar -> IO V.Ty
+unsolvedMetaType x = readMeta x >>= \case
+  MEUnsolved (G _ a) -> pure a
+  _                  -> impossible
 
 -- Top-level elaboration context
 --------------------------------------------------------------------------------

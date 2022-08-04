@@ -53,6 +53,7 @@ executable:
   - dynamic-array
   - flatparse
   - ghc-prim
+  - microlens-platform
   - primdata
   - strict-impl-params
   - template-haskell

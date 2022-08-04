@@ -37,6 +37,13 @@ locals :: (LocalsArg => a) -> (LocalsArg => a)
 locals a = seq ?locals a
 {-# inline locals #-}
 
+closeTy :: LocalsArg => Ty -> Ty
+closeTy b = go ?locals b where
+  go ls b = case ls of
+    LEmpty           -> b
+    LBind ls x a     -> go ls (Pi x Expl a b)
+    LDefine ls x t a -> go ls (Let x a t b)
+
 --------------------------------------------------------------------------------
 
 type Ty = Tm
