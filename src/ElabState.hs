@@ -41,11 +41,11 @@ newMeta a = do
   pure (MkMetaVar s)
 {-# inline newMeta #-}
 
-solve :: MetaVar -> V.Val -> V.GTy -> IO ()
-solve x tv a = do
+solve :: MetaVar -> V.Val -> IO ()
+solve x tv = do
   ADL.unsafeRead metaCxt (coerce x) >>= \case
     MESolved{} -> impossible
-    MEUnsolved mask -> do
+    MEUnsolved a -> do
       cache <- RF.new (-1)
       ADL.write metaCxt (coerce x) (MESolved cache tv a)
 
@@ -79,3 +79,8 @@ readFrozen = RF.read frozen
 
 writeFrozen :: MetaVar -> IO ()
 writeFrozen = RF.write frozen
+
+isFrozen :: MetaVar -> IO Bool
+isFrozen x = do
+  frz <- readFrozen
+  pure $! x < frz

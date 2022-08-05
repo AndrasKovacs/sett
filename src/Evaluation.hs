@@ -3,7 +3,7 @@ module Evaluation (
     app, appE, appI, proj1, proj2, projField
   , eval, quote, eval0, quote0, nf, nf0, spine, coe, eq
   , force, forceAll, forceMetas, eqSet
-  , projFieldName
+  , projFieldName, typeRelevance, Relevance(..)
   ) where
 
 import Control.Exception
@@ -124,12 +124,11 @@ projField :: LvlArg => Val -> Int -> Val
 projField topt n = case topt of
   Pair _ t u      -> case n of 0 -> t
                                n -> projField u (n - 1)
-  Rigid h sp a    -> Rigid  h (SProjField sp a n) (projFieldTy topt a n)
-  Flex h sp a     -> Flex   h (SProjField sp a n) (projFieldTy topt a n)
-  Unfold h sp t a -> Unfold h (SProjField sp a n) (projField t n) (projFieldTy topt a n)
+  Rigid h sp a    -> Rigid  h (SProjField sp (projFieldName topt a n) n) (projFieldTy topt a n)
+  Flex h sp a     -> Flex   h (SProjField sp (projFieldName topt a n) n) (projFieldTy topt a n)
+  Unfold h sp t a -> Unfold h (SProjField sp (projFieldName topt a n) n) (projField t n) (projFieldTy topt a n)
   Irrelevant      -> Irrelevant
   _               -> impossible
-
 
 coe :: LvlArg => Val -> Val -> Val -> Val -> Val
 coe a b p t = case (a, b) of
@@ -604,6 +603,7 @@ conv t u = do
 -- Quoting
 --------------------------------------------------------------------------------
 
+
 quoteSp :: LvlArg => UnfoldOpt -> S.Tm -> Spine -> S.Tm
 quoteSp opt hd sp = let
   go         = quote opt; {-# inline go #-}
@@ -613,7 +613,7 @@ quoteSp opt hd sp = let
     SApp t u i       -> S.App (goSp t) (go u) i
     SProj1 t         -> S.Proj1 (goSp t)
     SProj2 t         -> S.Proj2 (goSp t)
-    SProjField t a n -> S.ProjField (goSp t) a n
+    SProjField t x n -> S.ProjField (goSp t) x n
 
 quote :: LvlArg => UnfoldOpt -> Val -> S.Tm
 quote opt t = let

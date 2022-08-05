@@ -1,18 +1,18 @@
 
 module Unification where
 
-import IO
+-- import IO
 import Control.Exception
 
 import qualified Data.IntMap as IM
-import qualified Data.IntSet as IS
+-- import qualified Data.IntSet as IS
 -- import qualified Data.Ref.F as RF
 import Lens.Micro.Platform
 
 import Common
 import Values
 import Evaluation
-import ElabState
+import qualified ElabState as ES
 -- import Errors
 import qualified Syntax as S
 
@@ -91,6 +91,10 @@ INVERSION & PRUNING DESIGN
     We don't have to do "forcing" in partial sub, nor do we have to use
     fresh variable generation.
 
+
+TODO: in solving, grab a precise bundle of info about the spine
+      args (S/P, type, name), don't recompute the same things.
+
 -}
 
 
@@ -100,14 +104,6 @@ INVERSION & PRUNING DESIGN
 data UnifyEx = CantUnify | CantSolveFrozenMeta | CantSolveFlexMeta
   deriving (Eq, Show)
 instance Exception UnifyEx
-
--- | Bump the `Lvl` and get a fresh variable.
-newVar :: Ty -> (LvlArg => Val -> a) -> LvlArg => a
-newVar a cont =
-  let v = Var ?lvl a in
-  let ?lvl = ?lvl + 1 in
-  seq ?lvl (cont v)
-{-# inline newVar #-}
 
 -- | Forcing depending on conversion state.
 forceCS :: LvlArg => ConvState -> Val -> IO Val
@@ -121,7 +117,7 @@ freshMeta :: LvlArg => S.LocalsArg => S.PruningArg => GTy -> IO S.Tm
 freshMeta (G a fa) = do
   let closed   = eval0 $ S.closeTy $ quote UnfoldNone a
   let ~fclosed = eval0 $ S.closeTy $ quote UnfoldNone fa
-  m <- newMeta (G closed fclosed)
+  m <- ES.newMeta (G closed fclosed)
   pure $ S.InsertedMeta m ?pruning
 
 
@@ -133,6 +129,7 @@ freshMeta (G a fa) = do
 --   of a pairing is always undefined (i.e. a "scope error" value).
 data PSVal
   = PSVar Lvl ~Ty
+  | PSNonlinearEntry       -- error corresponding to nonlinear spine entry
   | PSProj1 PSVal
   | PSProj2 PSVal
   | PSProjField PSVal ~Ty Int
@@ -141,140 +138,96 @@ data PSVal
   | PSPairN PSVal Int      -- pairing whose N-th field projection is defined, and undefined elsewhere
 
 data PartialSub = PSub {
-    partialSubDomIdEnv :: Env             -- Identity env from Γ to Γ, serves as the list of Γ types.
-                                          -- We need this when we want to evaluate the result term of
-                                          -- partial substitution, which is in Γ.
-  , partialSubOcc      :: Maybe MetaVar   -- optional occurs check
-  , partialSubDom      :: Lvl             -- size of Γ
-  , partialSubCod      :: Lvl             -- size of Δ
-  , partialSubSub      :: IM.IntMap PSVal -- Partial map from Δ vars to Γ values. A var which is not
-                                          -- in the map is mapped to a scope error, but note that
-                                          -- PSVal-s can contain scope errors as well.
+    partialSubDomVars      :: Vars            -- Identity env from Γ to Γ, serves as the list of Γ types.
+                                              -- We need this when we want to evaluate the result term of
+                                              -- partial substitution.
+  , partialSubOcc          :: Maybe MetaVar   -- optional occurs check
+  , partialSubDom          :: Lvl             -- size of Γ
+  , partialSubCod          :: Lvl             -- size of Δ
+  , partialSubSub          :: IM.IntMap PSVal -- Partial map from Δ vars to Γ values. A var which is not
+                                              -- in the map is mapped to a scope error, but note that
+                                              -- PSVal-s can contain scope errors as well.
+  , partialSubIsLinear     :: Bool            -- Does the sub contain PSNonlinearEntry.
+  , partialSubAllowPruning :: Bool            -- Is pruning allowed during partial substitution.
   }
-
 makeFields ''PartialSub
+
+type CanPrune = (?canPrune :: Bool)
 
 -- | lift : (σ : PSub Γ Δ) → PSub (Γ, x : A[σ]) (Δ, x : A)
 --   Note: gets A[σ] as Ty input, not A!
 lift :: PartialSub -> Ty -> PartialSub
-lift (PSub idenv occ dom cod sub) asub =
+lift (PSub idenv occ dom cod sub linear allowpr) asub =
   let psvar = PSVar dom asub
       var   = Var dom asub
-  in PSub (EDef idenv var) occ (dom + 1) (cod + 1) (IM.insert (coerce cod) psvar sub)
+  in PSub (EDef idenv var) occ (dom + 1) (cod + 1) (IM.insert (coerce cod) psvar sub) linear allowpr
 
 -- | skip : PSub Γ Δ → PSub Γ (Δ, x : A)
 skip :: PartialSub -> PartialSub
-skip (PSub idenv occ dom cod sub) = PSub idenv occ dom (cod + 1) sub
+skip psub = psub & cod +~ 1
 
 --------------------------------------------------------------------------------
 
-solve :: LvlArg => MetaVar -> Spine -> Val -> IO ()
-solve = uf
-
-solve' :: MetaVar -> (PartialSub, Maybe S.Pruning) -> Val -> IO ()
-solve' m (psub, pruneNonLinear) = do
-  uf
-
-
--- | Spine inversion helper data type, to help unboxing and forcing. Contains:
---   spine length, set of domain vars, inverse substitution, pruning of
---   nonlinear entries, flag indicating linearity.
-data Inversion = Invert {
-    inversionSpineLen :: Lvl
-  , inversionDomVars  :: IS.IntSet
-  , inversionSub      :: IM.IntMap Val
-  , inversionIsLinear :: Bool
-  }
-
-makeFields ''Inversion
-
-
-invertRigid :: RigidHead -> Spine -> Ty -> Inversion -> PSVal -> IO Inversion
+invertRigid :: LvlArg => RigidHead -> Spine -> Ty -> PartialSub -> PSVal -> IO PartialSub
 invertRigid rh sp a psub psval = do
   let go sp psval = invertRigid rh sp a psub psval; {-# inline go #-}
   case sp of
-
-    -- if relevant, handle linearity, else just update psub
     SId -> case rh of
-      RHLocalVar (Lvl x) -> _
-
+      RHLocalVar (Lvl x) -> do
+        typeRelevance a >>= \case
+          RIrr -> do
+            pure $! psub & sub %~ IM.insert x psval
+          _ ->
+            pure $! psub & sub %~ IM.insertWithKey (\_ _ _ -> PSNonlinearEntry) x psval
+      _ ->
+        throwIO CantUnify
 
     SProj1 sp         -> go sp (PSPair1 psval)
     SProj2 sp         -> go sp (PSPair2 psval)
     SProjField sp _ n -> go sp (PSPairN psval n)
     _                 -> throwIO CantUnify
 
+invertVal :: LvlArg => Val -> PartialSub -> PSVal -> IO PartialSub
+invertVal v psub psval = forceAll v >>= \case
+  Rigid rh sp a -> do
+    invertRigid rh sp a psub psval
+  Pair _ t u -> do
+    psub <- invertVal t psub (PSProj1 psval)
+    invertVal u psub (PSProj2 psval)
+  _ ->
+    throwIO CantUnify
 
-invertVal :: LvlArg => Val -> Inversion -> PSVal -> IO Inversion
-invertVal v psub psval = do
-
-  forceAll v >>= \case
-
-    Rigid rh sp a -> do
-      invertRigid rh sp a psub psval
-
-    Pair _ t u -> do
-      psub <- invertVal t psub (PSProj1 psval)
-      invertVal u psub (PSProj2 psval)
-
+invertSpine :: LvlArg => CanPrune => Vars -> Spine -> IO PartialSub
+invertSpine vars sp = do
+  let go = invertSpine; {-# inline go #-}
+  case (vars, sp) of
+    (_, SId) ->
+       pure $! PSub ENil Nothing 0 0 mempty True ?canPrune
+    (EDef vars a, SApp sp t i) -> do
+       psub <- go vars sp
+       let psub' = psub & dom +~ 1 & domVars .~ EDef vars a
+       invertVal t psub' (PSVar (psub^.dom) a)
     _ ->
-      throwIO CantUnify
-
-
--- | Input: a projection-free spine.
---   Inverts the spine and returns a pruning of non-linear entries. Does not yet
---   return a PartialSub! We still need the domain idEnv, and we compute that in
---   the next step, when pruning the meta type.
-preInvertSpine :: LvlArg => Spine -> IO Inversion
-preInvertSpine sp = do
-  let go sp = preInvertSpine sp; {-# inline go #-}
-  case sp of
-    SId         -> pure (Invert 0 mempty mempty True)
-    SApp sp t i -> do
-      psub <- go sp
-      invertVal t (psub & spineLen +~ 1) (PSVar (psub^.spineLen) _) -- Need meta arg types!
-
-
-        -- let invertVal x invx = case IS.member x domvars of
-        --       True  -> pure $! Invert (dom + 1) domvars
-        --                                  (IM.delete x sub) (Nothing : pr) False
-
-        --       False -> pure $! Invert (dom + 1) (IS.insert x domvars)
-        --                                  (IM.insert x invx sub) (Just i : pr) isLinear
-
-
-
-        -- let ?lvl = dom
-
-        -- -- TODO: sigma inversions
-        -- forceAll t >>= \case
-        --   Var (Lvl x) a -> invertVal x (Var dom uf)
-        --   _             -> throwIO CantUnify
-
-    SProj1{}     -> impossible
-    SProj2{}     -> impossible
-    SProjField{} -> impossible
-
+      impossible
 
 -- | Remove some arguments from a closed iterated (Set) Pi type. Return the pruned type
 --   + the identity environment containing the variables with the binder types.
-pruneTy :: S.RevPruning -> Ty -> IO (S.Ty, Env)
-pruneTy (S.RevPruning# pr) a = go pr (PSub ENil Nothing 0 0 mempty) a where
+pruneTy :: CanPrune => S.RevPruning -> Ty -> IO S.Ty
+pruneTy (S.RevPruning# pr) a = go pr (PSub ENil Nothing 0 0 mempty True ?canPrune) a where
 
-  go :: S.Pruning -> PartialSub -> Ty -> IO (S.Ty, Env)
+  go :: S.Pruning -> PartialSub -> Ty -> IO S.Ty
   go pr psub a = do
     let ?lvl = psub^.cod
     a <- forceAll a
     case (pr, a) of
 
-      ([], a) -> do
-        a <- psubst psub a
-        pure $! (a // psub^.domIdEnv)
+      ([], a) ->
+        psubst psub a
 
       (Just{} : pr, Pi x i a b) -> do
         (a', va') <- psubst' psub a
-        (t, idenv) <- go pr (lift psub va') (b $$ Var (psub^.cod) va')
-        pure (S.Pi x i a' t, idenv)
+        t <- go pr (lift psub va') (b $$ Var (psub^.cod) va')
+        pure (S.Pi x i a' t)
 
       (Nothing : pr, Pi x i a b) -> do
         (_, va') <- psubst' psub a
@@ -282,19 +235,14 @@ pruneTy (S.RevPruning# pr) a = go pr (PSub ENil Nothing 0 0 mempty) a where
 
       (Just{} : pr, El (Pi x i a b)) -> do
         (a', El -> va') <- psubst' psub a
-        (t, idenv) <- go pr (lift psub va') (b $$ Var (psub^.cod) va')
-        pure (S.Pi x i a' t, idenv)
+        t <- go pr (lift psub va') (b $$ Var (psub^.cod) va')
+        pure (S.Pi x i a' t)
 
       (Nothing : pr, El (Pi x i a b)) -> do
         (_, El -> va') <- psubst' psub a
         go pr (skip psub) (b $$ Var (psub^.cod) va')
 
       _ -> impossible
-
--- | Invert a spine.
--- invertSpine :: LvlArg => MetaVar -> Spine -> IO PartialSub
--- invertSpine m sp = do
---   uf
 
 
 -- Eta expansion of metas
@@ -308,7 +256,7 @@ type WithExpansion a = LvlArg => S.LocalsArg => S.PruningArg => EnvArg => a
 --   expanded along the given spine.
 expansionOfMeta :: MetaVar -> Spine -> IO Val
 expansionOfMeta meta sp = do
-  a <- unsolvedMetaType meta
+  a <- ES.unsolvedMetaType meta
   let ?lvl = 0; ?locals = S.LEmpty; ?pruning = []; ?env = ENil
   eval0 <$!> freshExpandedTm sp a
 
@@ -363,120 +311,251 @@ freshExpandedTm sp a = do
     _ -> impossible
 
 
--- partial substitution
 --------------------------------------------------------------------------------
 
-flexPSubst :: PartialSub -> Val -> IO S.Tm
+approxOccursInSolution :: MetaVar -> MetaVar -> IO Bool
+approxOccursInSolution occ x = uf
+
+approxOccurs :: MetaVar -> S.Tm -> IO Bool
+approxOccurs x t = uf
+
+newtype FlexPS a = FlexPS {unFlexPS :: IO (a, Bool)} deriving (Functor)
+
+instance Applicative FlexPS where
+  pure a = FlexPS (pure (a, True))
+  (<*>) (FlexPS !f) (FlexPS !a) = FlexPS do
+    (!f, !fv) <- f
+    (!a, !av) <- a
+    let v' = fv && av
+        b  = f a
+    pure (b, v')
+
+instance Monad FlexPS where
+  return = pure
+  FlexPS a >>= f = FlexPS do
+    (!a, !av) <- a
+    (!b, !bv) <- unFlexPS (f a)
+    let v' = av && bv
+    pure (b, v')
+
+flexPSubstSp :: PartialSub -> S.Tm -> Spine -> FlexPS S.Tm
+flexPSubstSp = uf
+
+flexPSubst :: PartialSub -> Val -> FlexPS S.Tm -- IO (S.Tm, Bool)
 flexPSubst = uf
 
+rigidPSubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
+rigidPSubstSp psub hd sp = do
+  let goSp = rigidPSubstSp psub hd; {-# inline goSp #-}
+      go   = rigidPSubst psub; {-# inline go #-}
+  case sp of
+    SId              -> pure hd
+    SApp t u i       -> S.App <$!> goSp t <*!> go u <*!> pure i
+    SProj1 t         -> S.Proj1 <$!> goSp t
+    SProj2 t         -> S.Proj2 <$!> goSp t
+    SProjField t x n -> S.ProjField <$!> goSp t <*!> pure x <*!> pure n
+
 rigidPSubst :: PartialSub -> Val -> IO S.Tm
-rigidPSubst = uf
+rigidPSubst psub topt = do
+
+  let ?lvl = psub^.cod
+
+  let goSp       = rigidPSubstSp psub; {-# inline goSp #-}
+      goSpFlex   = flexPSubstSp psub; {-# inline goSpFlex #-}
+      goFlex     = flexPSubst psub; {-# inline goFlex #-}
+      go         = rigidPSubst psub; {-# inline go #-}
+      goBind a t = rigidPSubst (lift psub a) (t $$ Var (psub^.cod) a); {-# inline goBind #-}
+
+      goLocalVar x sp = uf
+
+      runFlexPS fullval act = do
+        (t, tv) <- unFlexPS act
+        unless tv $ fullPSubst psub fullval
+        pure t
+      {-# inline runFlexPS #-}
+
+  topt <- force topt
+  case topt of
+
+    Rigid h sp a -> case h of
+      RHLocalVar x    -> goLocalVar x sp
+      RHPostulate x a -> goSp (S.Postulate x a) sp
+      RHExfalso a p   -> do {a <- go a; p <- go p; goSp (S.Exfalso a p) sp}
+      RHCoe a b p t   -> do {a <- go a; b <- go b; p <- go p; t <- go t; goSp (S.Coe a b p t) sp}
+
+    RigidEq a t u ->
+      S.Eq <$!> go a <*!> go t <*!> go u
+
+    Flex h sp a -> case h of
+
+      FHMeta x -> do
+        if Just x == psub^.occ then
+          throwIO CantUnify
+        else
+          uf -- pruning
+
+      FHCoe x a b p t -> do
+        hd <- S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
+        goSp hd sp
+
+    FlexEq x a t u -> do
+      S.Eq <$!> go a <*!> go t <*!> go u
+
+    Unfold h sp unf a -> runFlexPS unf do
+      hd <- case h of
+        UHTopDef x v a ->
+          pure (S.TopDef x v a)
+
+        UHSolvedMeta x -> FlexPS do
+          xValid <- case psub^.occ of
+            Just occ -> approxOccursInSolution occ x
+            Nothing  -> pure True
+          pure (S.Meta x // xValid)
+
+        UHCoe a b p t -> do
+          S.Coe <$> goFlex a <*> goFlex b <*> goFlex p <*> goFlex t
+
+      goSpFlex hd sp
+
+    TraceEq a t u unf -> runFlexPS unf do
+      S.Eq <$> goFlex a <*> goFlex t <*> goFlex u
+
+    UnfoldEq a t u unf -> runFlexPS unf do
+      S.Eq <$> goFlex a <*> goFlex t <*> goFlex u
+
+    Set               -> pure S.Set
+    El a              -> S.El <$!> go a
+    Pi x i a b        -> S.Pi x i <$!> go a <*!> goBind a b
+    Lam sp x i a t    -> S.Lam sp x i <$!> go a <*!> goBind a t
+    Sg x a b          -> S.Sg x <$!> go a <*!> goBind a b
+    Pair sp t u       -> S.Pair sp <$!> go t <*!> go u
+    Prop              -> pure S.Prop
+    Top               -> pure S.Top
+    Tt                -> pure S.Tt
+    Bot               -> pure S.Bot
+    Refl a t          -> S.Refl <$!> go a <*!> go t
+    Sym a x y p       -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
+    Trans a x y z p q -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
+    Ap a b f x y p    -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
+    Irrelevant        -> impossible
+
 
 fullPSubst :: PartialSub -> Val -> IO ()
 fullPSubst = uf
-
 
 psubst :: PartialSub -> Val -> IO S.Tm
 psubst = rigidPSubst
 
 psubst' :: PartialSub -> Val -> IO (S.Tm, Val)
-psubst' sigma@(PSub idenv occ dom cod sub) t = do
-  t <- psubst sigma t
-  let ?env = idenv; ?lvl = dom
+psubst' psub t = do
+  t <- psubst psub t
+  let ?env = psub^.domVars; ?lvl = psub^.dom
   let vt = eval t
   pure (t, vt)
 
+
+
+
+--------------------------------------------------------------------------------
+
+hasProjection :: Spine -> Bool
+hasProjection = \case
+  SId          -> False
+  SApp t _ _   -> hasProjection t
+  SProj1{}     -> True
+  SProj2{}     -> True
+  SProjField{} -> True
+
+removeProjections :: MetaVar -> Spine -> IO (MetaVar, Spine)
+removeProjections x sp = do
+  if hasProjection sp then do
+    v <- expansionOfMeta x sp
+    ES.solve x v
+    let ?lvl = 0
+    case spine v sp of
+      Flex (FHMeta x) sp _ -> pure (x, sp)
+      _                    -> impossible
+  else pure (x, sp)
+
+-- | Grab spine-many argument types for a meta.
+metaArgs :: MetaVar -> Spine -> IO Vars
+metaArgs x sp = do
+  a <- ES.unsolvedMetaType x
+  let ?lvl = 0
+  metaArgs' a sp ENil
+
+metaArgs' :: LvlArg => Ty -> Spine -> Vars -> IO Vars
+metaArgs' a sp vars = do
+  a <- forceAll a
+  case (a, sp) of
+    (Pi x i a b, SApp sp _ _) -> do
+      let var = Var ?lvl a
+      let ?lvl = ?lvl + 1
+      metaArgs' (b $$ var) sp (EDef vars var)
+    (El (Pi x i a b), SApp sp _ _) -> do
+      let var = Var ?lvl a
+      let ?lvl = ?lvl + 1
+      metaArgs' (b $$ var) sp (EDef vars var)
+    (_, SId) ->
+      pure vars
+    _ ->
+      impossible
+
+-- | Wrap a term in Lvl number of lambdas, pulling
+--   binder information from the given Ty.
+addLams :: Lvl -> Ty -> S.Tm -> IO S.Tm
+addLams l a t = go a (0 :: Lvl) where
+  go a l' | l' == l = pure t
+  go a l' = do
+    let ?lvl = l'
+    forceAll a >>= \case
+      Pi x i a b      -> S.Lam S x i (quote UnfoldNone a) <$!> go (b $$ Var l' a) (l' + 1)
+      El (Pi x i a b) -> S.Lam P x i (quote UnfoldNone a) <$!> go (b $$ Var l' a) (l' + 1)
+      _               -> impossible
+
+-- | Solve (?x sp ?= rhs : A).
+solve :: LvlArg => CanPrune => MetaVar -> Spine -> Val -> Ty -> IO ()
+solve x sp rhs rhsty = do
+
+  -- check freezing
+  frz <- ES.isFrozen x
+  when frz $ throwIO CantSolveFrozenMeta
+
+  -- eliminate spine projections
+  (x, sp) <- removeProjections x sp
+
+  -- get meta arg types
+  argTypes <- metaArgs x sp
+
+  -- invert spine
+  psub <- invertSpine argTypes sp
+
+  solve' x psub rhs rhsty
+
+-- | Solve metavariable with an inverted spine.
+solve' :: MetaVar -> PartialSub -> Val -> Ty -> IO ()
+solve' m psub rhs rhsty = do
+
+  mty <- ES.unsolvedMetaType m
+
+  -- if spine was non-linear, check rhsty well-formedness
+  when (not (psub^.isLinear))
+    (() <$ psubst psub rhsty)
+
+  -- occurs check
+  psub <- pure $! psub & occ .~ Just m
+
+  -- get rhs
+  rhs <- psubst psub rhs
+
+  -- add lambdas
+  rhs <- eval0 <$!> addLams (psub^.dom) mty rhs
+
+  -- register solution
+  ES.solve m rhs
 
 -- Unification
 --------------------------------------------------------------------------------
 
 unify :: LvlArg => UnifyState -> G -> G -> IO ()
 unify st t t' = uf
-
--- unify :: LvlArg => Val -> Val -> IO ()
--- unify t u = do
---   let go = conv
---       {-# inline go #-}
-
---       goBind a t u = do
---         let v = Var ?lvl a
---         let ?lvl = ?lvl + 1
---         conv (t $$ v) (u $$ v)
---       {-# inline goBind #-}
-
---       guardP hl (cont :: IO ()) = case hl of
---         P -> pure ()
---         _ -> cont
---       {-# inline guardP #-}
-
---   t <- forceAll t
---   u <- forceAll u
---   case (t, u) of
-
---     -- canonical
---     ------------------------------------------------------------
---     (Pi _ x i a b, Pi _ x' i' a' b') -> do
---       unless (i == i') $ throwIO Diff
---       go a a'
---       goBind a b b'
-
---     (Sg _ x a b, Sg _ x' a' b') -> do
---       go a a'
---       goBind a b b
-
---     (Set  , Set  ) -> pure ()
---     (Prop , Prop ) -> pure ()
---     (Top  , Top  ) -> pure ()
---     (Bot  , Bot  ) -> pure ()
---     (El a , El b ) -> go a b
---     (Tt   , Tt   ) -> pure ()
-
---     (RigidEq a t u  , RigidEq a' t' u') -> go a a' >> go t t' >> go u u'
---     (Lam hl _ _ _ t , Lam _ _ _ a t'  ) -> guardP hl $ goBind a t t'
---     (Pair hl t u    , Pair _ t' u'    ) -> guardP hl $ go t t' >> go u u'
-
---     -- eta
---     --------------------------------------------------------------------------------
-
---     (Lam hl _ i a t , t'              ) -> guardP hl $ goBind a t (Cl \u -> app t' u i)
---     (t              , Lam hl _ i a t' ) -> guardP hl $ goBind a (Cl \u -> app t u i) t'
---     (Pair hl t u    , t'              ) -> guardP hl $ go t (proj1 t') >> go u (proj2 t')
---     (t              , Pair hl t' u'   ) -> guardP hl $ go (proj1 t) t' >> go (proj2 t) u'
-
---     -- non-canonical
---     ------------------------------------------------------------
-
---     (Irrelevant , _         ) -> pure ()
---     (_          , Irrelevant) -> pure ()
-
---     (Flex h sp, _) -> flexRelevance h sp >>= \case
---       RIrr       -> pure ()
---       _          -> throwIO $ BlockOn (flexHeadMeta h)
-
---     (_, Flex h sp) -> flexRelevance h sp >>= \case
---       RIrr       -> pure ()
---       _          -> throwIO $ BlockOn (flexHeadMeta h)
-
---     (FlexEq x _ _ _, _) -> throwIO $ BlockOn x
---     (_, FlexEq x _ _ _) -> throwIO $ BlockOn x
-
---     (Rigid h sp, Rigid h' sp') -> rigidRelevance h sp >>= \case
---       RIrr       -> pure ()
---       RBlockOn x -> throwIO $ BlockOn x
---       RRel       -> convRigidRel h sp h' sp'
-
---     (Rigid h sp, _) -> rigidRelevance h sp >>= \case
---       RIrr       -> pure ()
---       RBlockOn x -> throwIO $ BlockOn x
---       RRel       -> throwIO Diff
-
---     (_, Rigid h' sp') -> rigidRelevance h' sp' >>= \case
---       RIrr       -> pure ()
---       RBlockOn x -> throwIO $ BlockOn x
---       RRel       -> throwIO Diff
-
---     -- canonical mismatch is always a failure, because we don't yet
---     -- have inductive data in Prop, so mismatch is only possible in Set.
---     --------------------------------------------------------------------------------
-
---     (a, b) -> throwIO Diff

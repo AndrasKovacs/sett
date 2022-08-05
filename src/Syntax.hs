@@ -56,7 +56,7 @@ data Tm
   | App Tm Tm Icit
 
   | Pair SP Tm Tm
-  | HideProjField Tm ~(Hide V.Ty) Int
+  | ProjField Tm Name Int
   | Proj1 Tm
   | Proj2 Tm
 
@@ -94,10 +94,6 @@ pattern TopDef x t a <- HideTopDef x (coerce -> t) (coerce -> a) where
 pattern Postulate :: Lvl -> V.Ty -> Tm
 pattern Postulate x a <- HidePostulate x (coerce -> a) where
   Postulate x ~a = HidePostulate x (coerce a)
-
-pattern ProjField :: Tm -> V.Ty -> Int -> Tm
-pattern ProjField t a n <- HideProjField t (coerce -> a) n where
-  ProjField t ~a n = HideProjField t (coerce a) n
 
 {-# complete
   LocalVar, TopDef, Lam, App, Pair, ProjField, Proj1, Proj2, Pi, Sg, Postulate,

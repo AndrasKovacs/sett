@@ -37,8 +37,8 @@ data Spine
   | SApp Spine Val Icit
   | SProj1 Spine
   | SProj2 Spine
-  | SProjField Spine ~Ty Int  -- field name can be computed from the type
-                              -- of the projected value
+  | SProjField Spine ~Name Int -- field name can be computed from the type
+                               -- of the projected value
 
 --------------------------------------------------------------------------------
 
@@ -169,3 +169,10 @@ gjoin ~v = G v v
 
 data Env = ENil | EDef Env ~Val
 type EnvArg = (?env :: Env)
+
+envLength :: Env -> Lvl
+envLength e = Lvl (go 0 e) where
+  go n ENil = n
+  go n (EDef e _) = go (n + 1) e
+
+type Vars = Env
