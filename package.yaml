@@ -98,6 +98,6 @@ executable:
   - -Wno-unused-do-bind
   - -Wno-unused-matches
   - -Wno-missing-pattern-synonym-signatures
-  - -fmax-relevant-binds=0
+  - -fmax-relevant-binds=3
   - -fmax-valid-hole-fits=0
   - -fplugin StrictImplParams

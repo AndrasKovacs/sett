@@ -9,12 +9,17 @@ import qualified Data.IntMap as IM
 -- import qualified Data.Ref.F as RF
 import Lens.Micro.Platform
 
+
 import Common
 import Values
 import Evaluation
 import qualified ElabState as ES
 -- import Errors
 import qualified Syntax as S
+
+import ErrWriter (ErrWriter)
+import qualified ErrWriter as EW
+
 
 --------------------------------------------------------------------------------
 
@@ -157,7 +162,7 @@ type CanPrune = (?canPrune :: Bool)
 -- | lift : (σ : PSub Γ Δ) → PSub (Γ, x : A[σ]) (Δ, x : A)
 --   Note: gets A[σ] as Ty input, not A!
 lift :: PartialSub -> Ty -> PartialSub
-lift (PSub idenv occ dom cod sub linear allowpr) asub =
+lift (PSub idenv occ dom cod sub linear allowpr) ~asub =
   let psvar = PSVar dom asub
       var   = Var dom asub
   in PSub (EDef idenv var) occ (dom + 1) (cod + 1) (IM.insert (coerce cod) psvar sub) linear allowpr
@@ -311,6 +316,7 @@ freshExpandedTm sp a = do
     _ -> impossible
 
 
+-- Partial substitution
 --------------------------------------------------------------------------------
 
 approxOccursInSolution :: MetaVar -> MetaVar -> IO Bool
@@ -319,30 +325,112 @@ approxOccursInSolution occ x = uf
 approxOccurs :: MetaVar -> S.Tm -> IO Bool
 approxOccurs x t = uf
 
-newtype FlexPS a = FlexPS {unFlexPS :: IO (a, Bool)} deriving (Functor)
+flexPSubstSp :: PartialSub -> S.Tm -> Spine -> ErrWriter S.Tm
+flexPSubstSp psub hd sp = do
+  let go   = flexPSubst psub; {-# inline go #-}
+      goSp = flexPSubstSp psub hd; {-# inline goSp #-}
+  case sp of
+    SId              -> pure hd
+    SApp t u i       -> S.App <$> goSp t <*> go u <*> pure i
+    SProj1 t         -> S.Proj1 <$> goSp t
+    SProj2 t         -> S.Proj2 <$> goSp t
+    SProjField t x n -> S.ProjField <$> goSp t <*> pure x <*> pure n
 
-instance Applicative FlexPS where
-  pure a = FlexPS (pure (a, True))
-  (<*>) (FlexPS !f) (FlexPS !a) = FlexPS do
-    (!f, !fv) <- f
-    (!a, !av) <- a
-    let v' = fv && av
-        b  = f a
-    pure (b, v')
+-- -- | Apply a spine to a PSVal.
+-- forcePSVal :: LvlArg => PSVal -> Spine -> IO Val
+-- forcePSVal t sp = case t of
+--   PSVar x a        -> pure $ Rigid (RHLocalVar x) sp a
+--   PSNonlinearEntry -> throwIO CantUnify
+--   PSProj1 t        -> proj1 <$!> forcePSVal t sp
+--   PSProj2 t        -> proj2 <$!> forcePSVal t sp
+  -- PSNonlinearEntr
+  -- PSProj1
+  -- PSProj2
+  -- PSProjField
+  -- PSPair1
+  -- PSPair2
+  -- PSPairN
 
-instance Monad FlexPS where
-  return = pure
-  FlexPS a >>= f = FlexPS do
-    (!a, !av) <- a
-    (!b, !bv) <- unFlexPS (f a)
-    let v' = av && bv
-    pure (b, v')
 
-flexPSubstSp :: PartialSub -> S.Tm -> Spine -> FlexPS S.Tm
-flexPSubstSp = uf
+flexPSubst :: PartialSub -> Val -> ErrWriter S.Tm
+flexPSubst psub t = do
 
-flexPSubst :: PartialSub -> Val -> FlexPS S.Tm -- IO (S.Tm, Bool)
-flexPSubst = uf
+  let ?lvl = psub^.cod
+
+  let go   = flexPSubst psub; {-# inline go #-}
+      goSp = flexPSubstSp psub; {-# inline goSp #-}
+
+      goBind a t = do
+        (_, a) <- EW.liftIO (psubst' psub a)
+        flexPSubst (lift psub a) (t $$ Var ?lvl a)
+      {-# inline goBind #-}
+
+      goLocalVar :: Lvl -> Spine -> ErrWriter S.Tm
+      goLocalVar x sp = uf
+
+  EW.liftIO (force t) >>= \case
+
+    Rigid h sp a -> case h of
+      RHLocalVar x    -> goLocalVar x sp
+      RHPostulate x a -> goSp (S.Postulate x a) sp
+      RHExfalso a p   -> do {a <- go a; p <- go p; goSp (S.Exfalso a p) sp}
+      RHCoe a b p t   -> do {a <- go a; b <- go b; p <- go p; t <- go t; goSp (S.Coe a b p t) sp}
+
+    -- RigidEq a t u ->
+    --   S.Eq <$!> go a <*!> go t <*!> go u
+
+    -- Flex h sp a -> case h of
+
+    --   FHMeta x -> do
+    --     if Just x == psub^.occ then
+    --       throwIO CantUnify
+    --     else
+    --       uf -- pruning
+
+    --   FHCoe x a b p t -> do
+    --     hd <- S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
+    --     goSp hd sp
+
+    -- FlexEq x a t u -> do
+    --   S.Eq <$!> go a <*!> go t <*!> go u
+
+    -- Unfold h sp unf a -> runFlexPS unf do
+    --   hd <- case h of
+    --     UHTopDef x v a ->
+    --       pure (S.TopDef x v a)
+
+    --     UHSolvedMeta x -> FlexPS do
+    --       xValid <- case psub^.occ of
+    --         Just occ -> approxOccursInSolution occ x
+    --         Nothing  -> pure True
+    --       pure (S.Meta x // xValid)
+
+    --     UHCoe a b p t -> do
+    --       S.Coe <$> goFlex a <*> goFlex b <*> goFlex p <*> goFlex t
+
+    --   goSpFlex hd sp
+
+    -- TraceEq a t u unf -> runFlexPS unf do
+    --   S.Eq <$> goFlex a <*> goFlex t <*> goFlex u
+
+    -- UnfoldEq a t u unf -> runFlexPS unf do
+    --   S.Eq <$> goFlex a <*> goFlex t <*> goFlex u
+
+    -- Set               -> pure S.Set
+    -- El a              -> S.El <$!> go a
+    -- Pi x i a b        -> S.Pi x i <$!> go a <*!> goBind a b
+    -- Lam sp x i a t    -> S.Lam sp x i <$!> go a <*!> goBind a t
+    -- Sg x a b          -> S.Sg x <$!> go a <*!> goBind a b
+    -- Pair sp t u       -> S.Pair sp <$!> go t <*!> go u
+    -- Prop              -> pure S.Prop
+    -- Top               -> pure S.Top
+    -- Tt                -> pure S.Tt
+    -- Bot               -> pure S.Bot
+    -- Refl a t          -> S.Refl <$!> go a <*!> go t
+    -- Sym a x y p       -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
+    -- Trans a x y z p q -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
+    -- Ap a b f x y p    -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
+    -- Irrelevant        -> impossible
 
 rigidPSubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
 rigidPSubstSp psub hd sp = do
@@ -360,17 +448,23 @@ rigidPSubst psub topt = do
 
   let ?lvl = psub^.cod
 
-  let goSp       = rigidPSubstSp psub; {-# inline goSp #-}
-      goSpFlex   = flexPSubstSp psub; {-# inline goSpFlex #-}
-      goFlex     = flexPSubst psub; {-# inline goFlex #-}
-      go         = rigidPSubst psub; {-# inline go #-}
-      goBind a t = rigidPSubst (lift psub a) (t $$ Var (psub^.cod) a); {-# inline goBind #-}
+  let goSp     = rigidPSubstSp psub; {-# inline goSp #-}
+      goSpFlex = flexPSubstSp psub; {-# inline goSpFlex #-}
+      goFlex   = flexPSubst psub; {-# inline goFlex #-}
+      go       = rigidPSubst psub; {-# inline go #-}
 
+      goBind a t = do
+        (_, ~a) <- psubst' psub a
+        rigidPSubst (lift psub a) (t $$ Var ?lvl a)
+      {-# inline goBind #-}
+
+      goLocalVar :: Lvl -> Spine -> IO S.Tm
       goLocalVar x sp = uf
 
+      runFlexPS :: Val -> ErrWriter S.Tm -> IO S.Tm
       runFlexPS fullval act = do
-        (t, tv) <- unFlexPS act
-        unless tv $ fullPSubst psub fullval
+        (t, tv) <- EW.run act
+        unless tv $ fullPSubstCheck psub fullval
         pure t
       {-# inline runFlexPS #-}
 
@@ -406,11 +500,11 @@ rigidPSubst psub topt = do
         UHTopDef x v a ->
           pure (S.TopDef x v a)
 
-        UHSolvedMeta x -> FlexPS do
-          xValid <- case psub^.occ of
-            Just occ -> approxOccursInSolution occ x
-            Nothing  -> pure True
-          pure (S.Meta x // xValid)
+        UHSolvedMeta x -> do
+          case psub^.occ of
+            Just occ -> EW.liftIOBool (approxOccursInSolution occ x)
+            Nothing  -> pure ()
+          pure (S.Meta x)
 
         UHCoe a b p t -> do
           S.Coe <$> goFlex a <*> goFlex b <*> goFlex p <*> goFlex t
@@ -439,9 +533,67 @@ rigidPSubst psub topt = do
     Ap a b f x y p    -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
     Irrelevant        -> impossible
 
+fullPSubstCheckSp :: PartialSub -> Spine -> IO ()
+fullPSubstCheckSp psub sp = do
+  let go   = fullPSubstCheck psub; {-# inline go #-}
+      goSp = fullPSubstCheckSp psub; {-# inline goSp #-}
+  case sp of
+    SId              -> pure ()
+    SApp t u _       -> goSp t >> go u
+    SProj1 t         -> goSp t
+    SProj2 t         -> goSp t
+    SProjField t _ _ -> goSp t
 
-fullPSubst :: PartialSub -> Val -> IO ()
-fullPSubst = uf
+fullPSubstCheck :: PartialSub -> Val -> IO ()
+fullPSubstCheck psub topt = do
+  let ?lvl = psub^.cod
+
+  let go   = fullPSubstCheck psub; {-# inline go #-}
+      goSp = fullPSubstCheckSp psub; {-# inline goSp #-}
+
+      goBind a t = do
+        (_, a) <- psubst' psub a
+        fullPSubstCheck (lift psub a) (t $$ Var ?lvl a)
+      {-# inline goBind #-}
+
+      goLocalVar x sp = uf
+
+  topt <- forceAll topt
+  case topt of
+    Rigid h sp a -> case h of
+      RHLocalVar x    -> goLocalVar x sp
+      RHPostulate x a -> goSp sp
+      RHExfalso a p   -> go a >> go p >> goSp sp
+      RHCoe a b p t   -> go a >> go b >> go p >> go t >> goSp sp
+
+    RigidEq a t u -> go a >> go t >> go u
+
+    Flex h sp a -> do
+      case h of
+        FHMeta x        -> when (Just x == psub^.occ) (throwIO CantUnify)
+        FHCoe x a b p t -> go a >> go b >> go p >> go t
+      goSp sp
+
+    FlexEq x a t u    -> go a >> go t >> go u
+    Unfold{}          -> impossible
+    TraceEq{}         -> impossible
+    UnfoldEq{}        -> impossible
+    Set               -> pure ()
+    El a              -> go a
+    Pi x i a b        -> go a >> goBind a b
+    Lam sp x i a t    -> go a >> goBind a t
+    Sg x a b          -> go a >> goBind a b
+    Pair sp t u       -> go t >> go u
+    Prop              -> pure ()
+    Top               -> pure ()
+    Tt                -> pure ()
+    Bot               -> pure ()
+    Refl a t          -> go a >> go t
+    Sym a x y p       -> go a >> go x >> go y >> go p
+    Trans a x y z p q -> go a >> go x >> go y >> go z >> go p >> go q
+    Ap a b f x y p    -> go a >> go b >> go f >> go x >> go y >> go p
+    Irrelevant        -> impossible
+
 
 psubst :: PartialSub -> Val -> IO S.Tm
 psubst = rigidPSubst
@@ -450,10 +602,8 @@ psubst' :: PartialSub -> Val -> IO (S.Tm, Val)
 psubst' psub t = do
   t <- psubst psub t
   let ?env = psub^.domVars; ?lvl = psub^.dom
-  let vt = eval t
+  let ~vt = eval t
   pure (t, vt)
-
-
 
 
 --------------------------------------------------------------------------------
