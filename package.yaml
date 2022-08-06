@@ -66,8 +66,8 @@ executable:
   - BlockArguments
   - CPP
   - ConstraintKinds
-  - DerivingVia
   - DataKinds
+  - DerivingVia
   - FlexibleContexts
   - FunctionalDependencies
   - ImplicitParams

@@ -1,6 +1,8 @@
 
 module Unification where
 
+import Common
+
 -- import IO
 import Control.Exception
 
@@ -9,8 +11,6 @@ import qualified Data.IntMap as IM
 -- import qualified Data.Ref.F as RF
 import Lens.Micro.Platform
 
-
-import Common
 import Values
 import Evaluation
 import qualified ElabState as ES
@@ -129,31 +129,53 @@ freshMeta (G a fa) = do
 -- Partial substitutions
 --------------------------------------------------------------------------------
 
--- | Values appearing in partial substitutions.
---   They can be bound vars, projections or pairings, where one field
---   of a pairing is always undefined (i.e. a "scope error" value).
-data PSVal
-  = PSVar Lvl ~Ty
-  | PSNonlinearEntry       -- error corresponding to nonlinear spine entry
-  | PSProj1 PSVal
-  | PSProj2 PSVal
-  | PSProjField PSVal ~Ty Int
-  | PSPair1 PSVal          -- pairing whose second field is undefined
-  | PSPair2 PSVal          -- pairing whose first field is undefined
-  | PSPairN PSVal Int      -- pairing whose N-th field projection is defined, and undefined elsewhere
+
+data PartialPairings
+  = PPId
+  | PPPair1 PartialPairings     -- ^ Pairing whose second field is undefined.
+  | PPPair2 PartialPairings     -- ^ Pairing whose first  field is undefined.
+  | PPPairN PartialPairings Int -- ^ Pairing with only the given field defined.
+  deriving Show
+
+-- | Apply a spine to partial pairings. We succeed if all pairings are
+--   cancelled by a projection, otherwise the result is undefined.
+--   TODO: handle conversion between field proj and simple proj!
+cancelPairings :: PartialPairings -> Spine -> Maybe Spine
+cancelPairings pps sp = do
+  let go :: Spine -> Maybe (Spine, PartialPairings)
+      go = \case
+        SId -> pure (SId, pps)
+        SApp t u i -> do
+          (t, PPId) <- go t
+          pure (SApp t u i, PPId)
+        SProj1 t -> do
+          (t, PPPair1 pps) <- go t
+          pure (t, pps)
+        SProj2 t -> do
+          (t, PPPair2 pps) <- go t
+          pure (t, pps)
+        SProjField t _ n -> do
+          (t, PPPairN pps n') <- go t
+          guard (n == n')
+          pure (t, pps)
+  (t, PPId) <- go sp
+  pure t
+
+
+data PSEntry = PSENonlinear | PSEVal Val PartialPairings
 
 data PartialSub = PSub {
-    partialSubDomVars      :: Vars            -- Identity env from Γ to Γ, serves as the list of Γ types.
-                                              -- We need this when we want to evaluate the result term of
-                                              -- partial substitution.
-  , partialSubOcc          :: Maybe MetaVar   -- optional occurs check
-  , partialSubDom          :: Lvl             -- size of Γ
-  , partialSubCod          :: Lvl             -- size of Δ
-  , partialSubSub          :: IM.IntMap PSVal -- Partial map from Δ vars to Γ values. A var which is not
-                                              -- in the map is mapped to a scope error, but note that
-                                              -- PSVal-s can contain scope errors as well.
-  , partialSubIsLinear     :: Bool            -- Does the sub contain PSNonlinearEntry.
-  , partialSubAllowPruning :: Bool            -- Is pruning allowed during partial substitution.
+    partialSubDomVars      :: Vars              -- Identity env from Γ to Γ, serves as the list of Γ types.
+                                                -- We need this when we want to evaluate the result term of
+                                                -- partial substitution.
+  , partialSubOcc          :: Maybe MetaVar     -- optional occurs check
+  , partialSubDom          :: Lvl               -- size of Γ
+  , partialSubCod          :: Lvl               -- size of Δ
+  , partialSubSub          :: IM.IntMap PSEntry -- Partial map from Δ vars to Γ values. A var which is not
+                                                -- in the map is mapped to a scope error, but note that
+                                                -- PSVal-s can contain scope errors as well.
+  , partialSubIsLinear     :: Bool              -- Does the sub contain PSNonlinearEntry.
+  , partialSubAllowPruning :: Bool              -- Is pruning allowed during partial substitution.
   }
 makeFields ''PartialSub
 
@@ -163,9 +185,10 @@ type CanPrune = (?canPrune :: Bool)
 --   Note: gets A[σ] as Ty input, not A!
 lift :: PartialSub -> Ty -> PartialSub
 lift (PSub idenv occ dom cod sub linear allowpr) ~asub =
-  let psvar = PSVar dom asub
-      var   = Var dom asub
-  in PSub (EDef idenv var) occ (dom + 1) (cod + 1) (IM.insert (coerce cod) psvar sub) linear allowpr
+  let var     = Var dom asub
+      psentry = PSEVal var PPId
+  in PSub (EDef idenv var) occ (dom + 1) (cod + 1)
+          (IM.insert (coerce cod) psentry sub) linear allowpr
 
 -- | skip : PSub Γ Δ → PSub Γ (Δ, x : A)
 skip :: PartialSub -> PartialSub
@@ -173,32 +196,33 @@ skip psub = psub & cod +~ 1
 
 --------------------------------------------------------------------------------
 
-invertRigid :: LvlArg => RigidHead -> Spine -> Ty -> PartialSub -> PSVal -> IO PartialSub
-invertRigid rh sp a psub psval = do
-  let go sp psval = invertRigid rh sp a psub psval; {-# inline go #-}
+invertRigid :: LvlArg => RigidHead -> Spine -> Ty -> PartialSub -> Val -> PartialPairings -> IO PartialSub
+invertRigid rh sp a psub psval pairings = do
+  let go sp = invertRigid rh sp a psub; {-# inline go #-}
   case sp of
     SId -> case rh of
       RHLocalVar (Lvl x) -> do
         typeRelevance a >>= \case
           RIrr -> do
-            pure $! psub & sub %~ IM.insert x psval
+            pure $! psub & sub %~ IM.insert x (PSEVal psval pairings)
           _ ->
-            pure $! psub & sub %~ IM.insertWithKey (\_ _ _ -> PSNonlinearEntry) x psval
+            pure $! psub & sub %~ IM.insertWithKey (\_ _ _ -> PSENonlinear) x (PSEVal psval pairings)
       _ ->
         throwIO CantUnify
 
-    SProj1 sp         -> go sp (PSPair1 psval)
-    SProj2 sp         -> go sp (PSPair2 psval)
-    SProjField sp _ n -> go sp (PSPairN psval n)
+    SProj1 sp         -> go sp psval (PPPair1 pairings)
+    SProj2 sp         -> go sp psval (PPPair2 pairings)
+    SProjField sp _ n -> go sp psval (PPPairN pairings n)
     _                 -> throwIO CantUnify
 
-invertVal :: LvlArg => Val -> PartialSub -> PSVal -> IO PartialSub
+
+invertVal :: LvlArg => Val -> PartialSub -> Val -> IO PartialSub
 invertVal v psub psval = forceAll v >>= \case
   Rigid rh sp a -> do
-    invertRigid rh sp a psub psval
+    invertRigid rh sp a psub psval PPId
   Pair _ t u -> do
-    psub <- invertVal t psub (PSProj1 psval)
-    invertVal u psub (PSProj2 psval)
+    psub <- invertVal t psub (proj1 psval)
+    invertVal u psub (proj2 psval)
   _ ->
     throwIO CantUnify
 
@@ -211,7 +235,7 @@ invertSpine vars sp = do
     (EDef vars a, SApp sp t i) -> do
        psub <- go vars sp
        let psub' = psub & dom +~ 1 & domVars .~ EDef vars a
-       invertVal t psub' (PSVar (psub^.dom) a)
+       invertVal t psub' (Var (psub^.dom) a)
     _ ->
       impossible
 
@@ -336,22 +360,6 @@ flexPSubstSp psub hd sp = do
     SProj2 t         -> S.Proj2 <$> goSp t
     SProjField t x n -> S.ProjField <$> goSp t <*> pure x <*> pure n
 
--- -- | Apply a spine to a PSVal.
--- forcePSVal :: LvlArg => PSVal -> Spine -> IO Val
--- forcePSVal t sp = case t of
---   PSVar x a        -> pure $ Rigid (RHLocalVar x) sp a
---   PSNonlinearEntry -> throwIO CantUnify
---   PSProj1 t        -> proj1 <$!> forcePSVal t sp
---   PSProj2 t        -> proj2 <$!> forcePSVal t sp
-  -- PSNonlinearEntr
-  -- PSProj1
-  -- PSProj2
-  -- PSProjField
-  -- PSPair1
-  -- PSPair2
-  -- PSPairN
-
-
 flexPSubst :: PartialSub -> Val -> ErrWriter S.Tm
 flexPSubst psub t = do
 
@@ -360,13 +368,23 @@ flexPSubst psub t = do
   let go   = flexPSubst psub; {-# inline go #-}
       goSp = flexPSubstSp psub; {-# inline goSp #-}
 
+      illegal = S.Irrelevant <$ EW.writeErr; {-# inline illegal #-}
+
       goBind a t = do
         (_, a) <- EW.liftIO (psubst' psub a)
         flexPSubst (lift psub a) (t $$ Var ?lvl a)
       {-# inline goBind #-}
 
       goLocalVar :: Lvl -> Spine -> ErrWriter S.Tm
-      goLocalVar x sp = uf
+      goLocalVar x sp = case IM.lookup (coerce x) (psub^.sub) of
+
+        Nothing           -> illegal
+        Just PSENonlinear -> illegal
+
+        Just (PSEVal v pairings) ->
+          case cancelPairings pairings sp of
+            Just sp -> goSp (quote UnfoldNone v) sp
+            _       -> illegal
 
   EW.liftIO (force t) >>= \case
 
@@ -376,23 +394,47 @@ flexPSubst psub t = do
       RHExfalso a p   -> do {a <- go a; p <- go p; goSp (S.Exfalso a p) sp}
       RHCoe a b p t   -> do {a <- go a; b <- go b; p <- go p; t <- go t; goSp (S.Coe a b p t) sp}
 
-    -- RigidEq a t u ->
-    --   S.Eq <$!> go a <*!> go t <*!> go u
+    RigidEq a t u -> do
+      S.Eq <$> go a <*> go t <*> go u
 
-    -- Flex h sp a -> case h of
+    Flex h sp a -> case h of
 
-    --   FHMeta x -> do
-    --     if Just x == psub^.occ then
-    --       throwIO CantUnify
-    --     else
-    --       uf -- pruning
+      FHMeta x -> do
+        if Just x == psub^.occ then
+          illegal
+        else
+          goSp (S.Meta x) sp
 
-    --   FHCoe x a b p t -> do
-    --     hd <- S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
-    --     goSp hd sp
+      FHCoe x a b p t -> do
+        hd <- S.Coe <$> go a <*> go b <*> go p <*> go t
+        goSp hd sp
 
-    -- FlexEq x a t u -> do
-    --   S.Eq <$!> go a <*!> go t <*!> go u
+    FlexEq x a t u -> do
+      S.Eq <$> go a <*> go t <*> go u
+
+    Unfold h sp unf a -> do
+      (t, tValid) <- EW.catch $ case h of
+        UHTopDef x v a -> goSp (S.TopDef x v a) sp
+        UHSolvedMeta x -> goSp (S.Meta x) sp
+        UHCoe a b p t  -> do hd <- S.Coe <$> go a <*> go b <*> go p <*> go t
+                             goSp hd sp
+      uf
+
+
+
+
+-- topt@(VUnfold h sp t) -> U.do
+--       (t, tf) <- case h of    -- WARNING: Core was fine here, but should be checked on ghc change
+--         UHTopVar x v -> U.do
+--           goSp (TopVar x (coerce v) // UTrue) sp
+--         UHSolved x -> U.do
+--           xf <- approxOccursInSolution ms frz (occ pren) x
+--           goSp (Meta x // xf) sp
+
+--       U.when (tf == UFalse) $
+--         fullCheckRhs ms frz pren topt
+
+--       U.pure (t // UTrue)
 
     -- Unfold h sp unf a -> runFlexPS unf do
     --   hd <- case h of
@@ -459,14 +501,22 @@ rigidPSubst psub topt = do
       {-# inline goBind #-}
 
       goLocalVar :: Lvl -> Spine -> IO S.Tm
-      goLocalVar x sp = uf
+      goLocalVar x sp = case IM.lookup (unLvl x) (psub^.sub) of
 
-      runFlexPS :: Val -> ErrWriter S.Tm -> IO S.Tm
-      runFlexPS fullval act = do
+        Nothing           -> throwIO CantUnify
+        Just PSENonlinear -> throwIO CantUnify
+
+        Just (PSEVal v pairings) ->
+          case cancelPairings pairings sp of
+            Just sp -> goSp (quote UnfoldNone v) sp
+            _       -> throwIO CantUnify
+
+      goUnfolding :: Val -> ErrWriter S.Tm -> IO S.Tm
+      goUnfolding fullval act = do
         (t, tv) <- EW.run act
         unless tv $ fullPSubstCheck psub fullval
         pure t
-      {-# inline runFlexPS #-}
+      {-# inline goUnfolding #-}
 
   topt <- force topt
   case topt of
@@ -495,7 +545,7 @@ rigidPSubst psub topt = do
     FlexEq x a t u -> do
       S.Eq <$!> go a <*!> go t <*!> go u
 
-    Unfold h sp unf a -> runFlexPS unf do
+    Unfold h sp unf a -> goUnfolding unf do
       hd <- case h of
         UHTopDef x v a ->
           pure (S.TopDef x v a)
@@ -511,10 +561,10 @@ rigidPSubst psub topt = do
 
       goSpFlex hd sp
 
-    TraceEq a t u unf -> runFlexPS unf do
+    TraceEq a t u unf -> goUnfolding unf do
       S.Eq <$> goFlex a <*> goFlex t <*> goFlex u
 
-    UnfoldEq a t u unf -> runFlexPS unf do
+    UnfoldEq a t u unf -> goUnfolding unf do
       S.Eq <$> goFlex a <*> goFlex t <*> goFlex u
 
     Set               -> pure S.Set

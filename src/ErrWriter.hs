@@ -1,13 +1,14 @@
 
 {-# language UnboxedTuples #-}
 
+{-| The same thing as @WriterT All IO a@, implemented more efficiently. -}
+
 module ErrWriter where
 
 import Control.Monad
 import GHC.Exts
 import GHC.Types
 
--- | The same thing as @WriterT All IO a@, implemented more efficiently.
 newtype ErrWriter a = ErrWriter# {unErrWriter# :: State# RealWorld -> (# a, Int#, State# RealWorld #)}
 
 instance Functor ErrWriter where
@@ -37,6 +38,13 @@ liftIO (IO f) = ErrWriter# \s -> case f s of (# s, a #) -> (# a, 1#, s #)
 writeErr :: ErrWriter ()
 writeErr = ErrWriter# \s -> (# (), 0#, s #)
 {-# inline writeErr #-}
+
+-- | Capture the error output of an action in the return value. Reset the error
+--   value to success.
+catch :: ErrWriter a -> ErrWriter (a, Bool)
+catch (ErrWriter# f) = ErrWriter# \s -> case f s of
+  (# a, e, s #) -> let b = isTrue# e in (# (a, b), 1#, s #)
+{-# inline catch #-}
 
 liftIOBool :: IO Bool -> ErrWriter ()
 liftIOBool act = do

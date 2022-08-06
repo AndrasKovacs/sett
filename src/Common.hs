@@ -7,6 +7,7 @@ module Common (
   , coerce
   ) where
 
+
 import Control.Monad
 import Control.Exception
 import Data.List
