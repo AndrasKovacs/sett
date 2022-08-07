@@ -27,15 +27,18 @@ import qualified ErrWriter as EW
 DESIGN
   backtracking:
     - whenever we can backtrack, we want to disallow non-conservative
-      destructive updates. Currently this is *meta solution* and
-      *pruning*. Eta-expansion is always allowed!
-    - we need an extra argument to partial sub for toggling pruning!
+      destructive updates. Allowed updates:
+      - solving irrelevant metas
+      - eta-expanding metas
+
+    - we need to pass backtracking/non-backtracking toggle arg to psub,
+      or put it *in* psub
 
   unification:
     - 4 states, rigid, flex, irrelevant, full
+    - see smalltt for rigid, flex, full
     - irrelevant:
-      - we can solve only irrelevant metas
-      - pruning is not allowed, but eta-expansion is
+      - backtracking mode, no unfolding, we solve only irrelevant metas, always succeeds
     - eta-short solutions:
       - we try to solve, on any failure we retry with expansion
       - pruning is allowed in speculative eta-short solutions! That's because we
@@ -46,61 +49,209 @@ DESIGN
     - Setoid ops: TODO
 
   solving ?m spine = rhs
-    1. check relevance
-       - if irrelevant, disable pruning, catch any subsequent exception and then succeed
-    2. eliminate projections
-    3. eta-contract sides
-    4. invert spine
-         4.1. walk spine, invert values
-           - when hitting a bound var, check relevance
-             - if relevant, invert as usual
-             - if irrelevant, disregard linearity
-               - this means that we just keep the innermost non-linear binding
-         4.2. check well-typing of spine pruning
-           - Noe: this may involve pruning in types (which may be disabled here)
-           - compute domain idEnv here
-    5. substitute rhs
-      - 3 states: rigid, flex, full
-      - use smalltt optimizations
-      - we don't have to care about irrelevance
-      - note: pruning can be disallowed at this point
+    - NEW algorithm: solution is computed by single pass on reversed spine,
+      handles all inversion & expansion. See notes below.
+    - When we get down to the rhs substitution, we check relevance. If we're irrelevant,
+      we catch rhs subst failure and instead return a fresh meta.
 
-    TODO: fancy
+  psub:
+    - We have *partial values*. Eliminators propagate error values in eval.
+      Error values never appear in conversion checking or unification.
+    - We have to tag bound vars with types in general, for nested spine inversions.
+    - We have *forcing* with psub. We have to disambiguate dom/cod vars here,
+      so we simply tag dom vars, and only substitute cod vars in forcing.
+    - 3 modes, rigid, flex, full (see smalltt)
 
-  pruning flex spine
-    - try to psub spine. If it fails, and pruning is allowed, we try pruning
-      1. eliminate all projections and pairs from spine
-      2. prune spine
-
-WARNING:
-  - eta-contraction for equations in smalltt is buggy!
-    If we have   ?0 f x = f x x x, it gets contracted to ?0 f = f x x, which is ill-scoped!
-    We have to check contracted var occurrence in rhs too!
-    (Let's skip eta-contraction at first)
+  pruning
+    - NEW: see notes below.
 
 
-INVERSION & PRUNING DESIGN
-  - partialsub maps to values made of pairing, projection, var, OUT-OF-SCOPE
-    - there's a separate data type for these values
-
-  - in psubst, we specially handle the rigid case, we explicitly recurse over
-    the value
-
-  - in pruning, we just do proj elimination and currying as in my other implementations
-    - A rigid neutral with illegal head counts as a prunable value, not just a plain rigid
-      illegal var as in my old stuff.
-
-  - In summary, the current design can handle pairing and projections in spines
-    in inversion & in pruning. It can't handle lambdas.
-
-    We don't have to do "forcing" in partial sub, nor do we have to use
-    fresh variable generation.
+PRUNING:
+    Note: only UNDEF boundvars can be pruned, non-linear bound vars can't!
+    assume σ : PSub Δ Γ, always force terms with it, extend it under binders.
+    question: should prA, wkA be Val functions or terms? Probably yes.
 
 
-TODO: in solving, grab a precise bundle of info about the spine
-      args (S/P, type, name), don't recompute the same things.
+    pruneSp : ((Γ Γ* : Con) × (wk : Sub Γ Γ*) × (pr : PSub Γ* Γ)) → (A : Ty Γ) → Spine Δ → Tm Γ A
+    pruneTm : ((Γ Γ* : Con) × (wk : Sub Γ Γ*) × (pr : PSub Γ* Γ)) → (A : Ty Γ) → (t : Tm Δ A[σ])
+              → ((A* : Ty Γ*) × (wkA : Tm (Γ,A) A*[wk]) × (prA : PTm (Γ*,A*) A[wk⁻¹]))
+
+    pruneSp Γ Γ* wk pr ((a : A) → B a) ($t sp) =
+      (A*, wkA, prA) <- pruneTm Γ Γ* wk pr A t
+      sol <- pruneSp (Γ,A) (Γ*,A*) (wk, wkA) (pr, prA) sp
+      return (λ (a:A).sol)
+
+    pruneSp Γ Γ* wk pr A ∙ =
+      m <- fresh meta : Tm Γ* A[pr]
+      m[wk] : Tm Γ A[pr][wk]
+            : Tm Γ A
+      return m[wk]
+
+    pruneSp Γ Γ* wk pr ((a : A) × B a) (.1 sp) =
+      sol <- pruneSp Γ Γ* wk pr A
+      m   <- freshMeta : Tm Γ (B sol)
+      return (sol, m)
+
+    pruneSp Γ Γ* wk pr ((a : A) × B a) (.2 sp) =
+      m   <- freshMeta : Tm Γ A
+      sol <- pruneSp Γ Γ* wk pr (B sol)
+      return (m, sol)
+
+
+    + force terms with σ everywhere below!
+
+    pruneTm Γ Γ* wk pr A UNDEF =
+      A*  := ⊤
+      wkA := tt
+      prA := UNDEF
+
+    pruneTm Γ Γ* wk pr A (x sp) =
+      A*  = A
+      wkA = a.a
+      prA = a*.a*
+
+    pruneTm Γ Γ* wk pr A (?x sp) =
+      throw error (can't prune metas from metas)
+
+    pruneTm Γ Γ* wk pr (a : A, B a) (t, u) =
+      A*, wkA, prA <- pruneTm Γ Γ* wk pr A t
+      B*, wkB, prB <- pruneTm (Γ,A) (Γ*,A*) (wk, wkA) (pr, prA) (B t) u
+      return
+        (a* : A*, B* a*)
+        (wkA, wkB)
+        (prA, prB)
+
+    pruneTm Γ Γ* wk pr ((a : A) → B a) (λ a. t) =
+
+      B*, wkB, prB <- pruneTm (Γ, a:A) (Γ*, A[pr]) (B a) t
+
+      wkB : Γ, a:A, b : B a ⊢ B*[wk] a
+      prB : Γ*, a:A[pr], b* : B* ⊢ B[pr]
+
+      return
+        A*  := (a : A[pr]) → B*
+        wkA := (f : (a : A) → B). λ a. wkB [f a]
+        prA := (f : (a : A[pr]) → B*). λ a. prB [f a]
+
+BASIC TOP SPINE INVERSION
+  (no nested inversion, only projections and tuples allowed in spine)
+
+  assume ?x metavar, rhs : Tm Δ A
+
+  invSp : PSub Γ Δ → (A : Ty Γ) → Spine Δ → Tm Γ
+  invTm : (σ : PSub Γ Δ) → Tm Δ A[_] → Tm Γ A → PSub Γ Δ     -- _ is previous spine entries
+
+  invSp σ A ε = rhs[σ]
+
+  invSp σ ((a : A) → B a) ($t sp) =
+    σ' <- invTm {Γ,a:A}{Δ} σ t
+    sol <- invSp σ' (B a) sp
+    return λ (a : A). sol
+
+  invSp σ (a : A, B a) (.1 sp) =
+    sol <- invSp σ A sp
+    m   <- freshMeta Γ (B sol)
+    return (sol, m)
+
+  invSp σ (a : A, B a) (.2 sp) =
+    m   <- freshMeta Γ A
+    sol <- invSp σ (B m) sp
+    return (m, sol)
+
+  invSp σ A (+elim sp) =
+    ensure that rhs is of the form (rhs' +elim sp)
+    return (rhs' +elim sp)[σ]
+
+  invTm σ (t, u) rhs =
+    σ <- invTm σ t (rhs.1)
+    σ <- invTm σ u (rhs.2)
+    return σ
+
+  invTm σ ((x:A) projs) rhs | x solvable
+    return (σ, x ↦ invProjs A projs rhs)
+
+  invProjs A ε rhs = rhs
+  invProjs (a : A, B a) (.1 projs) rhs = (invProjs A projs rhs, UNDEF)
+  invProjs (a : A, B a) (.2 projs) rhs = (UNDEF, invProjs (B UNDEF) projs rhs)
+
+
+EXTENSION of PSub with a mapping: we MERGE the existing value and the new value
+
+  merge (x sp) (y sp') | x /= y, irrelevant (x sp) = x sp
+                       | x /= y = NONLINEAR
+                       | x == y = x (mergeSp sp sp')
+
+  merge NONLINEAR u = NONLINEAR
+  merge t NONLINEAR = NONLINEAR
+  merge UNDEF u = u
+  merge t UNDEF = t
+
+  merge (t, u) (t', u') = (merge t t', merge u u')
+  merge (t, u) t'       = (merge t t'.1, merge u t'.2)
+  merge t      (t', u') = (merge t.1 t', merge t.2 u')
+
+  merge (λ x. t) (λ x. t') = λ x. merge t t'
+  merge (λ x. t) t'        = λ x. merge t (t' x)
+  merge t (λ x. t')        = λ x. merge (t x) t'
+
+
+
+NOW WE TRY NESTED INVERSION
+--------------------------------------------------------------------------------
+
+top-level invSp is the same
+invTm is generalized + we have nested invSp
+TODO: in implementation, can we write just one code for top+local invSp, by abstracting over stuff?
+
+- Δ is consists of Δᵤ|Δₛ|Δₚ, where u is unsolvable, s is solvable and p is "parameters"
+- at the top level, we have = ∙|Δ|∙
+
+invTm : {Γ Δᵤ Δₛ Δₚ} → (σ : PSub Γ Δ) → Tm Δ A[_] → Tm Γ A → PSub Γ Δ  -- _ consists of prev spine entries
+invSp : {Γ Δᵤ Δₛ} → PSub Γ Δᵤₛ → (A : Ty Γ) → Spine Δ → Tm Γ
+
+invSp Γ (Δᵤ|Δₛ) σ A ε = rhs[σ]
+
+invSp Γ (Δᵤ|Δₛ) σ ((a : A) → B a) ($t sp) =
+  σ'  <- invTm (Γ, a : A) (Δᵤ|Δₛ|∙) σ t
+  sol <- invSp (Γ, a: A) (Δᵤ|Δₛ) σ' (B a) sp
+  return λ (a : A). sol
+
+invSp σ (a : A, B a) (.1 sp) =
+  sol <- invSp σ A sp
+  m   <- if TOP then (freshMeta Γ (B sol)) else UNDEF
+  return (sol, m)
+
+invSp σ (a : A, B a) (.2 sp) =
+  m   <- if TOP then (freshMeta Γ A) else UNDEF
+  sol <- invSp σ (B m) sp
+  return (m, sol)
+
+invSp σ A (+elim sp) =
+  if TOP then
+    ensure that rhs is of the form (rhs' +elim sp)
+    return (rhs' +elim sp)[σ]
+  else
+    FAIL
+
+invTm Γ (Δᵤ|Δₛ|Δₚ) σ (t, u) rhs =
+  σ <- invTm Γ (Δᵤ|Δₛ|Δₚ) σ t (rhs.1)
+  σ <- invTm Γ (Δᵤ|Δₛ|Δₚ) σ u (rhs.2)
+  return σ
+
+invTm Γ (Δᵤ|Δₛ|Δₚ) σ (λ (a : A). t) rhs =
+  σ <- invTm (Γ,a:A) (Δᵤ|Δₛ|Δₚ,x:A[σ]) (σ,x↦a) t (rhs a)
+  return (delete {x↦_} from σ)
+
+invTm Γ (Δᵤ|Δₛ|Δₚ) σ ((x:A) sp) rhs | x ∈ Δₛ =
+  sol <- invSp Γ ΔᵤΔₛ|Δₚ A sp
+  return (σ, x ↦ sol)
+
+invTm Γ (Δᵤ|Δₛ|Δₚ) σ ((x:A) sp) rhs | x ∉ Δₛ =
+  FAIL
 
 -}
+
+
 
 
 
@@ -473,6 +624,8 @@ flexPSubst psub t = do
     -- Trans a x y z p q -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
     -- Ap a b f x y p    -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
     -- Irrelevant        -> impossible
+
+
 
 rigidPSubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
 rigidPSubstSp psub hd sp = do
