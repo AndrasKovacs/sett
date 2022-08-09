@@ -73,11 +73,11 @@ lift (PSub idenv occ dom cod sub linear allowpr) ~asub =
 skip :: PartialSub -> PartialSub
 skip psub = psub & cod +~ 1
 
-forceAllPSub :: PartialSub -> Val -> IO Val
-forceAllPSub psub t = uf
+forceAllWithPSub :: PartialSub -> Val -> IO Val
+forceAllWithPSub psub t = uf
 
-forcePSub :: PartialSub -> Val -> IO Val
-forcePSub = uf
+forceWithPSub :: PartialSub -> Val -> IO Val
+forceWithPSub = uf
 
 
 -- Partial substitution
@@ -87,8 +87,8 @@ data ApproxOccursEx = ApproxOccursEx
   deriving Show
 instance Exception ApproxOccursEx
 
-approxOccursInMeta :: MetaVar -> MetaVar -> IO ()
-approxOccursInMeta occ m = ES.isFrozen m >>= \case
+approxOccursInMeta' :: MetaVar -> MetaVar -> IO ()
+approxOccursInMeta' occ m = ES.isFrozen m >>= \case
   True -> pure ()
   _    -> ES.readMeta m >>= \case
     ES.MEUnsolved{} -> do
@@ -99,10 +99,16 @@ approxOccursInMeta occ m = ES.isFrozen m >>= \case
         approxOccurs occ t
         RF.write cache occ
 
+approxOccursInMeta :: MetaVar -> MetaVar -> IO Bool
+approxOccursInMeta occ m =
+  (False <$ approxOccursInMeta' occ m)
+  `catch` \(_ :: ApproxOccursEx) -> pure True
+
 approxOccurs :: MetaVar -> S.Tm -> IO ()
 approxOccurs occ t = do
   let go = approxOccurs occ; {-# inline go #-}
-      goMeta = approxOccursInMeta occ; {-# inline goMeta #-}
+      goMeta = approxOccursInMeta' occ; {-# inline goMeta #-}
+
   case t of
     S.LocalVar{}       -> pure ()
     S.HideTopDef{}     -> pure ()
@@ -159,7 +165,7 @@ flexPSubst psub t = do
 
       goRigid h sp = do
         h <- case h of
-          RHLocalVar x _ True  -> uf
+          RHLocalVar x _ True  -> pure (S.LocalVar (lvlToIx x))
           RHLocalVar x _ False -> impossible
           RHPostulate x a      -> pure (S.Postulate x a)
           RHExfalso a p        -> S.Exfalso <$> go a <*> go p
@@ -174,17 +180,24 @@ flexPSubst psub t = do
 
       goUnfold h sp = do
         h <- case h of
-          UHTopDef x v a -> pure $ S.TopDef x v a
-          UHSolvedMeta x -> pure $ S.Meta x
-          UHCoe a b p t  -> S.Coe <$> go a <*> go b <*> go p <*> go t
+          UHTopDef x v a ->
+            pure $ S.TopDef x v a
+          UHSolvedMeta m -> do
+            case psub^.occ of
+              Nothing  -> pure ()
+              Just occ -> EW.liftIOBool (approxOccursInMeta occ m)
+            pure $ S.Meta m
+          UHCoe a b p t ->
+            S.Coe <$> go a <*> go b <*> go p <*> go t
         goSp h sp
 
       goMagic = \case
         ComputesAway -> pure S.ComputesAway
         Undefined    -> S.ComputesAway <$ EW.writeErr
         Nonlinear    -> S.ComputesAway <$ EW.writeErr
+        MetaOccurs   -> S.ComputesAway <$ EW.writeErr
 
-  EW.liftIO (forcePSub psub t) >>= \case
+  EW.liftIO (forceWithPSub psub t) >>= \case
 
     Rigid h sp _      -> goRigid h sp
     RigidEq a t u     -> S.Eq <$> go a <*> go t <*> go u
@@ -213,7 +226,7 @@ flexPSubst psub t = do
 rigidPSubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
 rigidPSubstSp psub hd sp = do
   let goSp = rigidPSubstSp psub hd; {-# inline goSp #-}
-      go   = rigidPSubst psub; {-# inline go #-}
+      go   = rigidPSubst psub;      {-# inline go #-}
   case sp of
     SId              -> pure hd
     SApp t u i       -> S.App <$!> goSp t <*!> go u <*!> pure i
@@ -227,25 +240,23 @@ rigidPSubst psub topt = do
   let ?lvl = psub^.cod
 
   let goSp     = rigidPSubstSp psub; {-# inline goSp #-}
-      goSpFlex = flexPSubstSp psub; {-# inline goSpFlex #-}
-      goFlexPS = flexPSubst psub; {-# inline goFlex #-}
-      go       = rigidPSubst psub; {-# inline go #-}
+      go       = rigidPSubst psub;   {-# inline go #-}
 
       goBind a t = do
         (_, ~a) <- psubst' psub a
         rigidPSubst (lift psub a) (t $$ Var ?lvl a)
       {-# inline goBind #-}
 
-      runFlex :: Val -> ErrWriter S.Tm -> IO S.Tm
-      runFlex fullval act = do
-        (t, tv) <- EW.run act
+      goUnfolding :: Val -> Val -> IO S.Tm
+      goUnfolding fullval t = do
+        (!t, !tv) <- EW.run (flexPSubst psub t)
         unless tv $ fullPSubstCheck psub fullval
         pure t
-      {-# inline runFlex #-}
+      {-# inline goUnfolding #-}
 
       goRigid h sp = do
         h <- case h of
-          RHLocalVar x a True  -> uf
+          RHLocalVar x a True  -> pure (S.LocalVar (lvlToIx x))
           RHLocalVar x a False -> impossible
           RHPostulate x a      -> pure (S.Postulate x a)
           RHExfalso a p        -> S.Exfalso <$!> go a <*!> go p
@@ -257,26 +268,21 @@ rigidPSubst psub topt = do
         FHCoe x a b p t -> do h <- S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
                               goSp h sp
 
-      goUnfold h sp ~unf = runFlex unf do
-        h <- case h of
-          UHTopDef x v a -> pure (S.TopDef x v a)
-          UHSolvedMeta x -> pure (S.Meta x)
-          UHCoe a b p t  -> S.Coe <$> goFlexPS a <*> goFlexPS b <*> goFlexPS p <*> goFlexPS t
-        goSpFlex h sp
-
       goMagic = \case
         ComputesAway -> impossible
         Undefined    -> throwIO CantUnify
         Nonlinear    -> throwIO CantUnify
+        MetaOccurs   -> throwIO CantUnify
 
-  forcePSub psub topt >>= \case
+  topt <- forceWithPSub psub topt
+  case topt of
     Rigid h sp _       -> goRigid h sp
     RigidEq a t u      -> S.Eq <$!> go a <*!> go t <*!> go u
     Flex h sp _        -> goFlex h sp
     FlexEq x a t u     -> S.Eq <$!> go a <*!> go t <*!> go u
-    Unfold h sp unf a  -> goUnfold h sp unf
-    TraceEq a t u unf  -> runFlex unf $ S.Eq <$> goFlexPS a <*> goFlexPS t <*> goFlexPS u
-    UnfoldEq a t u unf -> runFlex unf $ S.Eq <$> goFlexPS a <*> goFlexPS t <*> goFlexPS u
+    Unfold _ _ unf _   -> goUnfolding unf topt
+    TraceEq _ _ _ unf  -> goUnfolding unf topt
+    UnfoldEq _ _ _ unf -> goUnfolding unf topt
     Set                -> pure S.Set
     El a               -> S.El <$!> go a
     Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a b
@@ -314,7 +320,7 @@ fullPSubstCheck psub topt = do
       {-# inline goBind #-}
 
       goRH = \case
-        RHLocalVar x a True  -> uf
+        RHLocalVar x a True  -> pure ()
         RHLocalVar x a False -> impossible
         RHPostulate x a      -> pure ()
         RHExfalso a p        -> go a >> go p
@@ -328,8 +334,9 @@ fullPSubstCheck psub topt = do
         ComputesAway -> impossible
         Undefined    -> throwIO CantUnify
         Nonlinear    -> throwIO CantUnify
+        MetaOccurs   -> throwIO CantUnify
 
-  forceAllPSub psub topt >>= \case
+  forceAllWithPSub psub topt >>= \case
     Rigid h sp _      -> goRH h >> goSp sp
     RigidEq a t u     -> go a >> go t >> go u
     Flex h sp a       -> goFlex h sp

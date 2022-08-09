@@ -42,8 +42,7 @@ data Spine
   | SApp Spine Val Icit
   | SProj1 Spine
   | SProj2 Spine
-  | SProjField Spine ~Name Int -- field name can be computed from the type
-                               -- of the projected value
+  | SProjField Spine Val ~Ty Int -- projected value, its type, field index
 
 --------------------------------------------------------------------------------
 
@@ -122,6 +121,7 @@ data Magic
   = ComputesAway
   | Undefined
   | Nonlinear
+  | MetaOccurs
 
 markEq :: Val -> Val -> Val -> Val -> Val
 markEq ~a ~t ~u ~v = TraceEq a t u v
