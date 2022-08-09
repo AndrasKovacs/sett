@@ -6,8 +6,13 @@ import GHC.Exts
 
 --------------------------------------------------------------------------------
 
+-- | Annotation on bound variables which is only used during partial
+--   substitution. If a variable is in the domain of a partial substitution,
+--   that means that it has been already substituted.
+type InPSubDomain = Bool
+
 data RigidHead
-  = RHLocalVar Lvl
+  = RHLocalVar Lvl ~Ty InPSubDomain
   | RHPostulate Lvl ~Ty
   | RHExfalso Val Val
   | RHCoe Val Val Val Val  -- rigid neutral coe
@@ -80,16 +85,16 @@ type Ty = Val
 data Val
   -- Rigidly stuck values
   = Rigid RigidHead Spine ~Ty
-  | RigidEq Ty Val Val           -- at least 1 Val is rigid
+  | RigidEq Ty Val Val                -- at least 1 Val is rigid
 
   -- Flexibly stuck values
   | Flex FlexHead Spine ~Ty
-  | FlexEq MetaVar Val Val Val    -- at least 1 Val is flex
+  | FlexEq MetaVar Val Val Val        -- at least 1 Val is flex
 
   -- Traced reductions
   | Unfold UnfoldHead Spine ~Val ~Ty  -- unfolding choice (top/meta)
   | TraceEq Val Val Val ~Val          -- trace Eq reduction to non-Eq proposition
-  | UnfoldEq Val Val Val ~Val         -- at least 1 Val is Unfold
+  | UnfoldEq Ty Val Val ~Val          -- at least 1 Val is Unfold
 
   -- Canonical values
   | Set
@@ -111,13 +116,21 @@ data Val
   | Trans Val Val Val Val Val Val
   | Ap Val Val Val Val Val Val
 
-  | Irrelevant
+  | Magic Magic
+
+data Magic
+  = ComputesAway
+  | Undefined
+  | Nonlinear
 
 markEq :: Val -> Val -> Val -> Val -> Val
 markEq ~a ~t ~u ~v = TraceEq a t u v
 {-# inline markEq #-}
 
-pattern Var x a = Rigid (RHLocalVar x) SId a
+pattern Var' x a b <- Rigid (RHLocalVar x _ b) SId a where
+  Var' x ~a b = Rigid (RHLocalVar x a b) SId a
+
+pattern Var x a = Var' x a False
 
 pattern LamP x i a t = Lam P x i a (Cl t)
 pattern LamS x i a t = Lam S x i a (Cl t)

@@ -38,12 +38,12 @@ unify t l r =
 
 data Infer = Infer Tm {-# unpack #-} GTy
 
-freshMeta :: LvlArg => LocalsArg => PruningArg => GTy -> IO Tm
+freshMeta :: LvlArg => LocalsArg => GTy -> IO Tm
 freshMeta (G a fa) = do
   let closed   = eval0 $ closeTy $ quote UnfoldNone a
   let ~fclosed = eval0 $ closeTy $ quote UnfoldNone fa
   m <- newMeta (G closed fclosed)
-  pure $ InsertedMeta m ?pruning
+  pure $ InsertedMeta m ?locals
 
 -- Insertion
 --------------------------------------------------------------------------------

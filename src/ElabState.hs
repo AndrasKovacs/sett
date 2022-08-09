@@ -18,8 +18,8 @@ import qualified Presyntax as P
 type OccursCache = RF.Ref MetaVar
 
 data MetaEntry
-  = MEUnsolved {-# unpack #-} GTy                -- ^ Type
-  | MESolved OccursCache Val {-# unpack #-} GTy  -- ^ Occurs check cache, value, type
+  = MEUnsolved {-# unpack #-} GTy                     -- ^ Type
+  | MESolved OccursCache S.Tm Val {-# unpack #-} GTy  -- ^ Occurs check cache, term solution, value, type
 
 type MetaCxt = ADL.Array MetaEntry
 
@@ -41,13 +41,13 @@ newMeta a = do
   pure (MkMetaVar s)
 {-# inline newMeta #-}
 
-solve :: MetaVar -> V.Val -> IO ()
-solve x tv = do
+solve :: MetaVar -> S.Tm -> V.Val -> IO ()
+solve x t tv = do
   ADL.unsafeRead metaCxt (coerce x) >>= \case
     MESolved{} -> impossible
     MEUnsolved a -> do
       cache <- RF.new (-1)
-      ADL.write metaCxt (coerce x) (MESolved cache tv a)
+      ADL.write metaCxt (coerce x) (MESolved cache t tv a)
 
 unsolvedMetaType :: MetaVar -> IO V.Ty
 unsolvedMetaType x = readMeta x >>= \case

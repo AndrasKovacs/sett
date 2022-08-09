@@ -8,7 +8,6 @@ module Evaluation (
 
 import Control.Exception
 import IO
--- import GHC.Exts
 
 import Common
 import ElabState
@@ -44,8 +43,8 @@ localVar x = go ?env x where
 
 meta :: MetaVar -> Val
 meta x = runIO $ readMeta x >>= \case
-  MEUnsolved (G _ a)   -> pure (Flex (FHMeta x) SId a)
-  MESolved _ v (G _ a) -> pure (Unfold (UHSolvedMeta x) SId v a)
+  MEUnsolved (G _ a)     -> pure (Flex (FHMeta x) SId a)
+  MESolved _ _ v (G _ a) -> pure (Unfold (UHSolvedMeta x) SId v a)
 
 appTy :: LvlArg => Ty -> Val -> Ty
 appTy a t = runIO $ forceAll a >>= \case
@@ -58,7 +57,7 @@ app t u i = case t of
   Rigid h sp a     -> Rigid h (SApp sp u i) (appTy a u)
   Flex h sp a      -> Flex h (SApp sp u i) (appTy a u)
   Unfold h sp t a  -> Unfold h (SApp sp u i) (app t u i) (appTy a u)
-  Irrelevant       -> Irrelevant
+  Magic m          -> Magic m
   _                -> impossible
 
 appE :: LvlArg => Val -> Val -> Val
@@ -78,7 +77,7 @@ proj1 t = case t of
   Rigid h sp a    -> Rigid  h (SProj1 sp) (proj1Ty a)
   Flex h sp a     -> Flex   h (SProj1 sp) (proj1Ty a)
   Unfold h sp t a -> Unfold h (SProj1 sp) (proj1 t) (proj1Ty a)
-  Irrelevant      -> Irrelevant
+  Magic m         -> Magic m
   _               -> impossible
 
 proj2Ty :: LvlArg => Ty -> Val -> Ty
@@ -92,7 +91,7 @@ proj2 topt = case topt of
   Rigid h sp a    -> Rigid  h (SProj2 sp) (proj2Ty a (proj1 topt))
   Flex h sp a     -> Flex   h (SProj2 sp) (proj2Ty a (proj1 topt))
   Unfold h sp t a -> Unfold h (SProj2 sp) (proj2 t) (proj2Ty a (proj1 topt))
-  Irrelevant      -> Irrelevant
+  Magic m         -> Magic m
   _               -> impossible
 
 projFieldInfo :: LvlArg => Val -> Ty -> Int -> IO (Name, Ty)
@@ -127,7 +126,7 @@ projField topt n = case topt of
   Rigid h sp a    -> Rigid  h (SProjField sp (projFieldName topt a n) n) (projFieldTy topt a n)
   Flex h sp a     -> Flex   h (SProjField sp (projFieldName topt a n) n) (projFieldTy topt a n)
   Unfold h sp t a -> Unfold h (SProjField sp (projFieldName topt a n) n) (projField t n) (projFieldTy topt a n)
-  Irrelevant      -> Irrelevant
+  Magic m         -> Magic m
   _               -> impossible
 
 coe :: LvlArg => Val -> Val -> Val -> Val -> Val
@@ -162,8 +161,8 @@ coe a b p t = case (a, b) of
   -- non-canonical
   ------------------------------------------------------------
 
-  (Irrelevant, _) -> Irrelevant
-  (_, Irrelevant) -> Irrelevant
+  (Magic m, _) -> Magic m
+  (_, Magic m) -> Magic m
 
   (ua@(Unfold h sp a _), b) -> Unfold (UHCoe ua b p t) SId (coe a b p t) b
   (a, ub@(Unfold h sp b _)) -> Unfold (UHCoe a ub p t) SId (coe a b p t) b
@@ -192,7 +191,7 @@ coeTrans a b p t = case t of
   t@(Flex h sp _)                -> Flex (FHCoe (flexHeadMeta h) a b p t) SId b
   t@(Unfold h sp ft _)           -> Unfold (UHCoe a b p t) SId (coeTrans a b p ft) b
   Rigid (RHCoe a' _ p' t') SId _ -> coe a' b (Trans Set a' a b p' p) t'
-  Irrelevant                     -> Irrelevant
+  Magic m                        -> Magic m
   t                              -> coeRefl a b p t
 
 coeRefl :: LvlArg => Val -> Val -> Val -> Val -> Val
@@ -233,7 +232,7 @@ eq a t u = case a of
   a@Rigid{}            -> RigidEq a t u
   a@(FlexEq x _ _ _)   -> FlexEq x a t u
   a@(Unfold h sp fa _) -> UnfoldEq a t u (eq fa t u)
-  Irrelevant           -> Irrelevant
+  Magic m              -> Magic m
   _                    -> impossible
 
 eqSet :: LvlArg => Val -> Val -> Val
@@ -261,10 +260,10 @@ eqSet a b = case (a, b) of
 
   -- non-canonical
   ------------------------------------------------------------
-  (Irrelevant, _) -> Irrelevant
-  (_, Irrelevant) -> Irrelevant
+  (Magic m, _) -> Magic m
+  (_, Magic m) -> Magic m
 
-  (a@(Unfold h sp fa _), b) -> UnfoldEq Set a b (eqSet fa b)
+  (a@(Unfold h sp fa _), _) -> UnfoldEq Set a b (eqSet fa b)
   (a, b@(Unfold h sp fb _)) -> UnfoldEq Set a b (eqSet a fb)
 
   (a@(Flex h _ _), b) -> FlexEq (flexHeadMeta h) Set a b
@@ -291,19 +290,19 @@ spine v sp =
     SProj2 t         -> proj2 (go t)
     SProjField t a n -> projField (go t) n
 
-pruneEnv :: Env -> S.Pruning -> Spine
+pruneEnv :: Env -> S.Locals -> Spine
 pruneEnv e ls = case (e, ls) of
-  (ENil,     []          ) -> SId
-  (EDef e _, Nothing : pr) -> pruneEnv e ls
-  (EDef e v, Just _  : pr) -> SApp (pruneEnv e ls) v Expl
-  _                        -> impossible
+  (ENil,     S.LEmpty          ) -> SId
+  (EDef e _, S.LDefine ls _ _ _) -> pruneEnv e ls
+  (EDef e v, S.LBind ls _ _    ) -> SApp (pruneEnv e ls) v Expl
+  _                              -> impossible
 
-insertedMeta :: LvlArg => EnvArg => MetaVar -> S.Pruning -> Val
-insertedMeta x pr = runIO do
-  let sp = pruneEnv ?env pr
+insertedMeta :: LvlArg => EnvArg => MetaVar -> S.Locals -> Val
+insertedMeta x locals = runIO do
+  let sp = pruneEnv ?env locals
   readMeta x >>= \case
-    MEUnsolved (G _ a)   -> pure (Flex (FHMeta x) sp a)
-    MESolved _ v (G _ a) -> pure (Unfold (UHSolvedMeta x) sp (spine v sp) a)
+    MEUnsolved (G _ a)     -> pure (Flex (FHMeta x) sp a)
+    MESolved _ _ v (G _ a) -> pure (Unfold (UHSolvedMeta x) sp (spine v sp) a)
 
 eqSym, coeSym, symSym, apSym, transSym, elSym, reflSym, exfalsoSym :: Val
 eqSym      = LamSI na Set \a -> LamSE nx a \x -> LamSE ny a \y -> eq a x y
@@ -344,7 +343,6 @@ eval t =
     S.Sg x a b          -> Sg x (go a) (goBind b)
     S.Postulate x a     -> Rigid (RHPostulate x a) SId a
     S.InsertedMeta x pr -> insertedMeta x pr
-    S.AppPruning t pr   -> spine (go t) (pruneEnv ?env pr)
     S.Meta x            -> meta x
     S.Let x a t u       -> let ?env = EDef ?env (eval t) in eval u
     S.Set               -> Set
@@ -360,15 +358,15 @@ eval t =
     S.TransSym          -> transSym
     S.ApSym             -> apSym
     S.ExfalsoSym        -> exfalsoSym
-    S.Irrelevant        -> Irrelevant
+    S.ComputesAway      -> Magic ComputesAway
 
 -- Forcing
 --------------------------------------------------------------------------------
 
 unblock :: MetaVar -> a -> (Val -> Ty -> IO a) -> IO a
 unblock x deflt k = readMeta x >>= \case
-  MEUnsolved{}         -> pure deflt
-  MESolved _ v (G _ a) -> k v a
+  MEUnsolved{}           -> pure deflt
+  MESolved _ _ v (G _ a) -> k v a
 {-# inline unblock #-}
 
 -- | Eliminate solved flex head metas.
@@ -446,7 +444,6 @@ typeRelevance a = do
     El _         -> pure RIrr
     Set          -> pure RRel
     Prop         -> pure RRel
-    Irrelevant   -> pure RIrr
     Pi _ _ a b   -> goBind a b
     Sg _ a b     -> go a <> goBind a b
     Rigid h sp _ -> pure RRel
@@ -508,7 +505,7 @@ convExfalso a a' sp sp' = case (sp, sp') of
 -- | Compare rigid-s which are known to be relevant.
 convRigidRel :: LvlArg => RigidHead -> Spine -> RigidHead -> Spine -> IO ()
 convRigidRel h sp h' sp' = case (h, h') of
-  (RHLocalVar x    , RHLocalVar x'     ) -> convEq x x' >> convSp sp sp'
+  (RHLocalVar x _ _, RHLocalVar x' _ _ ) -> convEq x x' >> convSp sp sp'
   (RHPostulate x _ , RHPostulate x' _  ) -> convEq x x' >> convSp sp sp'
   (RHCoe a b p t   , RHCoe a' b' p' t' ) -> convCoe a b p t sp a' b' p' t' sp'
   (RHExfalso a p   , RHExfalso a' p'   ) -> convExfalso a a' sp sp'
@@ -564,8 +561,10 @@ conv t u = do
     -- non-canonical
     ------------------------------------------------------------
 
-    (Irrelevant , _         ) -> pure ()
-    (_          , Irrelevant) -> pure ()
+    (Magic ComputesAway , _      ) -> pure ()
+    (Magic _            , _      ) -> impossible
+    (_       , Magic ComputesAway) -> pure ()
+    (_       , Magic _           ) -> impossible
 
     (Flex h sp a, _) -> typeRelevance a >>= \case
       RIrr       -> pure ()
@@ -603,7 +602,6 @@ conv t u = do
 -- Quoting
 --------------------------------------------------------------------------------
 
-
 quoteSp :: LvlArg => UnfoldOpt -> S.Tm -> Spine -> S.Tm
 quoteSp opt hd sp = let
   go         = quote opt; {-# inline go #-}
@@ -626,10 +624,10 @@ quote opt t = let
     FHCoe x a b p t -> S.Coe (go a) (go b) (go p) (go t)
 
   goRigidHead = \case
-    RHLocalVar x    -> S.LocalVar (lvlToIx x)
-    RHPostulate x a -> S.Postulate x a
-    RHCoe a b p t   -> S.Coe (go a) (go b) (go p) (go t)
-    RHExfalso a t   -> S.Exfalso (go a) (go t)
+    RHLocalVar x _ _ -> S.LocalVar (lvlToIx x)
+    RHPostulate x a  -> S.Postulate x a
+    RHCoe a b p t    -> S.Coe (go a) (go b) (go p) (go t)
+    RHExfalso a t    -> S.Exfalso (go a) (go t)
 
   goUnfoldHead ~v = \case
     UHSolvedMeta x -> S.Meta x
@@ -659,7 +657,8 @@ quote opt t = let
     Sym a x y p         -> S.Sym (go a) (go x) (go y) (go p)
     Trans a x y z p q   -> S.Trans (go a) (go x) (go y) (go z) (go p) (go q)
     Ap a b f x y p      -> S.Ap (go a) (go b) (go f) (go x) (go y) (go p)
-    Irrelevant          -> S.Irrelevant
+    Magic ComputesAway  -> S.ComputesAway
+    Magic _             -> impossible
 
   in case opt of
     UnfoldAll   -> cont (runIO (forceAll t))

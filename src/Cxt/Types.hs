@@ -11,9 +11,8 @@ type InCxt a =
   => EnvArg
   => LocalsArg
   => NameTableArg
-  => PruningArg
   => a
 
 forceCxt :: InCxt a -> InCxt a
-forceCxt a = seq ?lvl (seq ?env (seq ?locals (seq ?nameTable (seq ?pruning a))))
+forceCxt f = seq ?lvl (seq ?env (seq ?locals (seq ?nameTable f)))
 {-# inline forceCxt #-}

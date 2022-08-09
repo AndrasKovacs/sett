@@ -1,4 +1,342 @@
 
+
+1. Do something simple, copy old code
+2. Most proper design (most general, least ugly)
+
+-- Introduction
+--------------------------------------------------------------------------------
+
+-- metavars
+
+?0 : (A : Type) -> A -> Type
+?0 = λ A x. A
+
+id : (A : Type) -> A -> A
+id = λ A x. x
+
+id2 : (A : Type) -> A -> A
+id2 = λ A x. id (?0 A x) x
+
+ -- check (id _ x) A
+ --   infer id  (A : Type) -> A -> A
+ --   check _ Type --> fresh meta for the hole ?0 : Type
+ --   check x (?0 A x)
+ --     infer x --> A
+ --     unify (?0 A x) A
+ --       ?0 := λ A x. A
+
+-- whenever we hit a hole, we create a fresh meta which is a *function*
+-- abstracting over local bound variables
+
+-- Two complication:
+--    1. meta solutions (one side has a metavariableapplied to things)
+--    2. pruning
+
+
+-- projections: .1 .2
+-- (t, u)
+-- metavariable notation: ?<number>
+-- bound variables: x, y, z, a, b, c
+-- general values: t, u, v, rhs
+-- spine neutrals:
+ -- rigid spine:    x t .1 v
+ -- flex spine:     ?0 .1 .2 t u
+
+-- 1. META SOLUTIONS
+
+
+ -- ?0 sp = rhs    (when is this solvable?)
+ --  (pattern unification)
+ --  simplest version: sp consists of bound var applications,
+ --                    all vars are distinct
+
+ -- ?0 x y z = rhs
+ -- ?0 = λ x y z. rhs
+
+ -- examples for ill-scoped solution
+ --   ?0 = ?0 → ?0    (occurs check, "infinite type error" in GHC)
+ --   ?0 x = x → y    (scope error, solution can't depend on y)
+
+ -- ?0 : Γ ⇒ A
+
+
+ -- ?0 x₁ ... xₙ = rhs : Δ
+ --        Γ
+
+ -- ?0 sp = rhs
+ --  Δ ⊢ sp : Γ
+ --  sp : Sub Δ Γ
+ -- task: get an inverse substitution of sp
+ --  sp⁻¹ : Sub Γ Δ     (only a *partial* substitution)
+ --                      not all Δ vars are mapped to something
+
+
+ -- Γ  = (a : A, b : B)
+ -- Δ  = (..., x : A, y : B, ...)
+
+ -- sp : Sub Δ Γ
+ -- sp = [a ↦ x, b ↦ y]
+
+ -- ?0 : (a : A)(b : B) → A
+ -- ?0 x y = x
+
+ -- sp⁻¹ : Sub Γ Δ
+ -- sp⁻¹ = [x ↦ a, y ↦ b]
+
+ -- if we hit an undefined var during using sp⁻¹, we get a scope
+ --  error
+
+ -- ?0 := λ a b. rhs[x ↦ a, y ↦ b]
+ -- ?0 := λ a b. x[x ↦ a, y ↦ b]
+ -- ?0 := λ a b. a                    (+ we also check for ?0 occur)
+
+------------------------------------------------------------
+
+-- ?0 true x = rhs₀
+-- ?0 false x = rhs₁  -- ?0 := λ x. if x then rhs₀ else rhs₁
+
+2. PRUNING
+
+  ?0 x = x → ?1 x y     (scope error, rhs contains y)
+
+  pruning:
+     ?1 = λ x y. ?2 x   (?2 fresh meta)
+
+  ?0 x = x → ?2 x
+  ?0 := λ x. x → ?2 x
+
+  implementation:
+     during partial subst of rhs,
+     if we see an ill-scoped flexible neutral
+     then we try to prune the head meta
+
+  which flex neutrals are prune-able?
+  simplest: spine: applications to rigid neutral values
+
+  example for un-pruneable value
+
+    ?1 x y true
+    ?1 x y ?2
+    ?1 x y (t, u) (λ x. _)
+
+  (we don't want to lose potential solution at any point during
+   unification, "uniqueness of solutions")
+
+ADVANCED unification & pruning
+------------------------------------------------------------
+
+- Agda: somewhat advanced unif & pruning + postponing unification
+-       problems
+
+- Our version: more advanced unif & pruning, no postponing yet
+
+UNIFICATION
+
+- Goals:
+  - handle projections, pairings, lambdas,
+    strict Prop values, non-linear spines
+  - efficient, we don't recompute types multiple times
+  - (no separate eta-expansion/currying passes on metas)
+  - (single pass on the spine)
+
+Projections:
+
+?0 : (a : A) → (b : B a) × C a b
+?0 x .1 = rhs : B x
+
+Classic solution: eta-expand ?0 to zero or fresh metas,
+  such that all projections disappear from a given equation
+
+?0 := λ x. (?1 x, ?2 x)
+?1 x = rhs
+?1 := λ x. rhs[_]
+
+Pairings:
+
+?0 (x, y) = rhs
+
+Currying:
+
+?0 := λ xy. ?1 xy.1 xy.2
+?1 x y = rhs
+
+combining:
+  ?0 sp = rhs    1. proj elim 2. pairing elim
+
+Does not handle:
+
+ - var projection inside app: ?0 x.1 = rhs
+ - lambdas: ?0 (λ x. f x) = rhs
+ -          ?0 (λ x y. f y x) = rhs
+
+ - ?0 (λ x y. f y x) = f
+   ?0 (flip f) = f
+   ?0 := λ f. flip f
+
+ - term is invertible if it's built of lambdas, pairs,
+   invertible spines
+
+Classic solution:
+  ?0 x.1 = rhs      Δ
+
+  eta expand the Δ context of the whole probem
+  σ = [x ↦ (x₁, x₂)]
+
+  (?0 x.1)[σ] = rhs[σ]
+  ?0 x₁ = rhs[σ]
+
+  -- also apply σ to types in Δ depending on x
+
+NEW:
+
+preparation:
+  1. instead of partial subst, we partial values
+     partial sub = sub containing partial values
+     error value propagated by eliminators
+  2. single pass on spine instead
+
+?0 : (a : A) → (b : B) × C
+
+?0 (x .1) = rhs
+
+ - walk spine left-to right
+
+ assume rhs in scope
+ solve:
+   arg: type of ?0, spine, accumulated partial subst
+
+   output: overall solution to ?0 (total term)
+
+ solve ((a : A) → (b : B) × C) (x .1) σ
+    invertTm x --> (σ, x ↦ a)
+    solve ((b : B) × C) (.1) (σ, x ↦ a)
+      solve B ε (σ, x ↦ a)
+        return rhs[σ, x ↦ a]
+      m <- freshMeta (B (rhs[σ, x ↦ a]))
+      return (rhs[σ, x ↦ a], m)
+  return (rhs[σ, x ↦ a], m)
+
+Extension of a partial subst with a mapping
+
+   (σ, x ↦ t)   issue: what is σ already maps x to t'
+
+   classic alg:
+
+        a b
+     ?0 x x = rhs     [x ↦ a, x ↦ b]
+
+     ?0 = λ a b. a
+     ?0 = λ a b. b    ambiguity from non-linear spine
+
+   (σ, x ↦ t)     t is merged with t'
+
+   merge (UNDEF, true) (false, UNDEF) = (false, true)
+
+   merge (x sp) (y sp) | x /= y = NONLINEAR (some info)
+
+   merge UNDEF t = t
+   merge t UNDEF = t
+
+   merge NONLINEAR t = NONLINEAR
+   merge t NONLINEAR = NONLINEAR
+
+   (we top and bottom value)
+
+?0 t = rhs
+Inverting terms:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+{-
+
+bar : ∀ n. foo = n
+bar = let foo = _ in λ n. (refl n : foo = n)
+
+runST : {a : Type} -> (∀ s. ST s a) → a
+
+act : (∀ s. ST s (STRef s Int))
+runST {?0} act
+-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--------------------------------------------------------------------------------
+
 DESIGN
   backtracking:
     - whenever we can backtrack, we want to disallow non-conservative
@@ -10,7 +348,7 @@ DESIGN
       or put it *in* psub
 
   unification:
-    - 4 states, rigid, flex, irrelevant, full
+    - 4 states: rigid, flex, irrelevant, full
     - see smalltt for rigid, flex, full
     - irrelevant:
       - backtracking mode, no unfolding, we solve only irrelevant metas, always succeeds
@@ -46,21 +384,38 @@ PRUNING:
     assume σ : PSub Δ Γ, always force terms with it, extend it under binders.
     question: should prA, wkA be Val functions or terms? Probably yes.
 
+    σ : PartialSub Γ Δ
+    Δ ⊢ ?0 sp              solve ?0 s.t.
+
+     prunable sp: rigid neutrals, lambda, pairing, projection
+
+
+    Γ : Con   -->    Γ* : Con       wk : Sub Γ Γ*    pr : PartialSub Γ* Γ     (partial inverse)
 
     pruneSp : ((Γ Γ* : Con) × (wk : Sub Γ Γ*) × (pr : PSub Γ* Γ)) → (A : Ty Γ) → Spine Δ → Tm Γ A
     pruneTm : ((Γ Γ* : Con) × (wk : Sub Γ Γ*) × (pr : PSub Γ* Γ)) → (A : Ty Γ) → (t : Tm Δ A[σ])
-              → ((A* : Ty Γ*) × (wkA : Tm (Γ,A) A*[wk]) × (prA : PTm (Γ*,A*) A[wk⁻¹]))
+              → ((A* : Ty Γ*) × (wkA : Tm (Γ,A) A*[wk]) × (prA : PTm (Γ*,A*) A[pr])) × partial inverses
 
     pruneSp Γ Γ* wk pr ((a : A) → B a) ($t sp) =
       (A*, wkA, prA) <- pruneTm Γ Γ* wk pr A t
       sol <- pruneSp (Γ,A) (Γ*,A*) (wk, wkA) (pr, prA) sp
       return (λ (a:A).sol)
 
+    -- pruneSp Γ Γ* wk pr ((a : A) → B a) ($t sp) =
+    --   (A*, wkA, prA) <- pruneTm Γ Γ* wk pr A t
+    --   case A* of
+    --     ⊤ → <drop entry from Γ>                          -- (propagate ⊤)
+    -- 	_ → do
+    --       sol <- pruneSp (Γ,A) (Γ*,A*) (wk, wkA) (pr, prA) sp
+    --       return (λ (a:A).sol)
+
     pruneSp Γ Γ* wk pr A ∙ =
-      m <- fresh meta : Tm Γ* A[pr]
+      m <- fresh meta : Tm Γ* A[pr]       wk : Sub Γ Γ*
       m[wk] : Tm Γ A[pr][wk]
             : Tm Γ A
       return m[wk]
+                   a
+    -- ?0 := λ x y z. (?1 a)[a ↦ z]
 
     pruneSp Γ Γ* wk pr ((a : A) × B a) (.1 sp) =
       sol <- pruneSp Γ Γ* wk pr A
@@ -72,7 +427,6 @@ PRUNING:
       sol <- pruneSp Γ Γ* wk pr (B sol)
       return (m, sol)
 
-
     + force terms with σ everywhere below!
 
     pruneTm Γ Γ* wk pr A UNDEF =
@@ -80,10 +434,10 @@ PRUNING:
       wkA := tt
       prA := UNDEF
 
-    pruneTm Γ Γ* wk pr A (x sp) =
+    pruneTm Γ Γ* wk pr A (x sp) = do
       A*  = A
-      wkA = a.a
-      prA = a*.a*
+      wkA = a.a     -- id
+      prA = a*.a*   -- id
 
     pruneTm Γ Γ* wk pr A (?x sp) =
       throw error (can't prune metas from metas)
@@ -98,15 +452,20 @@ PRUNING:
 
     pruneTm Γ Γ* wk pr ((a : A) → B a) (λ a. t) =
 
-      B*, wkB, prB <- pruneTm (Γ, a:A) (Γ*, A[pr]) (B a) t
+      B*, wkB, prB <- pruneTm (Γ, a:A) (Γ*, a*:A[pr]) (B a) t
 
       wkB : Γ, a:A, b : B a ⊢ B*[wk] a
       prB : Γ*, a:A[pr], b* : B* ⊢ B[pr]
 
       return
         A*  := (a : A[pr]) → B*
-        wkA := (f : (a : A) → B). λ a. wkB [f a]
-        prA := (f : (a : A[pr]) → B*). λ a. prB [f a]
+        wkA := (f : (a : A) → B). λ a. wkB (f a)
+        prA := (f : (a : A[pr]) → B*). λ a. prB (f a)
+
+     f var         (mapped to itself)     f : A → B
+     x illegal var (mapped to UNDEF)      x : A
+
+
 
 BASIC TOP SPINE INVERSION
   (no nested inversion, only projections and tuples allowed in spine)
@@ -213,13 +572,109 @@ invTm Γ (Δᵤ|Δₛ|Δₚ) σ (t, u) rhs =
   σ <- invTm Γ (Δᵤ|Δₛ|Δₚ) σ u (rhs.2)
   return σ
 
+      a
+  ?0 x.1 = rhs
+
+  ?0 = λ a. rhs[σ]
+
+  Δ ⊢ x.1     Γ ⊢ a
+  x.1      ↦    a
+
 invTm Γ (Δᵤ|Δₛ|Δₚ) σ (λ (a : A). t) rhs =
   σ <- invTm (Γ,a:A) (Δᵤ|Δₛ|Δₚ,x:A[σ]) (σ,x↦a) t (rhs a)
   return (delete {x↦_} from σ)
 
 invTm Γ (Δᵤ|Δₛ|Δₚ) σ ((x:A) sp) rhs | x ∈ Δₛ =
-  sol <- invSp Γ ΔᵤΔₛ|Δₚ A sp
+  sol <- invSp Γ (ΔᵤΔₛ|Δₚ) A sp
   return (σ, x ↦ sol)
 
 invTm Γ (Δᵤ|Δₛ|Δₚ) σ ((x:A) sp) rhs | x ∉ Δₛ =
   FAIL
+
+example:
+            a
+  ?0 (λ x y. f y x) = rhs
+
+         λ x y. f y x ↦ a
+  ∀ x y.
+
+       m n
+     f y x ↦ a x y
+
+       y ↦ m
+       x ↦ n
+
+     f ↦ λ m n. a n m
+  [f ↦ λ m n. a n m]
+
+  ?0 = λ a m n. a n m
+  ?0 = flip
+
+-- ?0 = λ x. (?1 x, ?2 x)
+-- ?0 x .1 = rhs
+
+-- Partial Subst:
+------------------------------------------------------------
+
+   psub : PartialSub Γ Δ → Val Δ → Val Γ  (not efficient)
+
+   - "forcing" style substitution
+   - Sub with disjoint dom/cod variables
+
+    [x ↦ a]
+    [0 ↦ 0]
+
+------------------------------------------------------------
+
+
+bound var f : El A → El A → B
+
+  ?0 (flip f) = f      ?0 = flip
+
+           a
+  ?0 (λ x. f x x) = f
+
+    (λ x. f x x) ↦ a
+
+            b c
+          f x x ↦ a x
+
+           [x ↦ b] 'merge' [x ↦ c]
+
+          f ↦ λ b c. a b
+
+  ?0 = λ a b c. a b
+
+  f is definitional iso
+
+  ?0 (f x) = x
+  ?0 = λ x. f⁻¹ x
+
+  Predicate : A → Set
+  Predicate = ⊤ × ⊤ × ⊤
+
+  f : (a : A){_ : Predicate a} → C
+
+
+  Tag : {A : Set} → A → Prop
+
+  MyRec : Set → Set → Set
+  MyRec A B = _ × _ × _ × Tag {Set × Set} (A, B)
+        (A × (B × (C × (D × ⊤))))
+         -- N-th field    .sndᴺ .fst
+
+  -- newtype MyRec = MyRec (_ × _ × _ × _)
+
+  -- Tagged : {I:Set} → (I → Set) → Name → I Set
+
+  -- I := _ × _ × _
+
+  Functor : Cat × Cat → Set
+  Functor = Tagged (λ (C, D). ....) "Functor" : Cat × Cat → Set
+            #Functor (λ (C, D). ...)
+
+  rec Functor (C, D) = ...
+  --->
+  Functor = #Functor (λ (C, D). ...)
+
+-}
