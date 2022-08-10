@@ -103,7 +103,14 @@ instance Show (Hide a) where showsPrec _ x acc = acc
 -- Icitness
 --------------------------------------------------------------------------------
 
-data Icit = Impl | Expl deriving (Eq, Show)
+newtype Icit = Icit# Int deriving Eq
+pattern Impl = Icit# 0
+pattern Expl = Icit# 1
+{-# complete Impl, Expl #-}
+
+instance Show Icit where
+  show Impl = "Impl"
+  show Expl = "Expl"
 
 icit :: Icit -> a -> a -> a
 icit Impl x y = x
@@ -263,10 +270,26 @@ pick x y = case x of
     y -> y
   x -> x
 
+-- Set/Prop
 --------------------------------------------------------------------------------
 
--- Set/Prop
-data SP = S | P deriving (Eq, Show)
+newtype SP = SP# Int deriving Eq
+pattern S = SP# 0
+pattern P = SP# 1
+{-# complete S, P #-}
+
+instance Show SP where
+  show S = "S"
+  show P = "P"
+
+--------------------------------------------------------------------------------
+
+data Magic
+  = ComputesAway
+  | Undefined
+  | Nonlinear
+  | MetaOccurs
+  deriving (Eq, Show)
 
 --------------------------------------------------------------------------------
 

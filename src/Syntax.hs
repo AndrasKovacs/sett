@@ -83,7 +83,7 @@ data Tm
   | ApSym
   | ExfalsoSym
 
-  | ComputesAway
+  | Magic Magic
   deriving Show
 
 pattern TopDef :: Lvl -> Val -> V.Ty -> Tm
@@ -97,7 +97,7 @@ pattern Postulate x a <- HidePostulate x (coerce -> a) where
 {-# complete
   LocalVar, TopDef, Lam, App, Pair, ProjField, Proj1, Proj2, Pi, Sg, Postulate,
   InsertedMeta, Meta, Let, Set, Prop, Top, Tt, Bot, ElSym, EqSym,
-  CoeSym, ReflSym, SymSym, TransSym, ApSym, ExfalsoSym, ComputesAway
+  CoeSym, ReflSym, SymSym, TransSym, ApSym, ExfalsoSym, Magic
   #-}
 
 pattern AppE t u = App t u Expl

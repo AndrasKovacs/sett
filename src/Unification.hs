@@ -20,7 +20,8 @@ import qualified Syntax as S
 import ErrWriter (ErrWriter)
 import qualified ErrWriter as EW
 
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
 
 data UnifyEx = CantUnify | CantSolveFrozenMeta | CantSolveFlexMeta
   deriving (Eq, Show)
@@ -42,9 +43,12 @@ freshMeta (G a fa) = do
   pure $ S.InsertedMeta m ?locals
 
 
--- Partial substitutions
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
+-- Partial substitution
+----------------------------------------------------------------------------------------------------
 
+type AllowPruning = Bool
+type AllowPruningArg = (?allowPruning :: Bool)
 
 data PartialSub = PSub {
     partialSubDomVars      :: Vars           -- Identity env from Γ to Γ, serves as the list of Γ types.
@@ -61,6 +65,13 @@ data PartialSub = PSub {
   }
 makeFields ''PartialSub
 
+-- | Evaluate something in the domain of the `PartialSub`.
+evalInDom :: PartialSub -> S.Tm -> Val
+evalInDom psub t = let ?env = psub^.domVars; ?lvl = psub^.dom in eval t
+
+emptyPSub :: Maybe MetaVar -> AllowPruning -> PartialSub
+emptyPSub occ allowpr = PSub ENil occ 0 0 mempty True allowpr
+
 -- | lift : (σ : PSub Γ Δ) → PSub (Γ, x : A[σ]) (Δ, x : A)
 --   Note: gets A[σ] as Ty input, not A!
 lift :: PartialSub -> Ty -> PartialSub
@@ -73,15 +84,78 @@ lift (PSub idenv occ dom cod sub linear allowpr) ~asub =
 skip :: PartialSub -> PartialSub
 skip psub = psub & cod +~ 1
 
-forceAllWithPSub :: PartialSub -> Val -> IO Val
-forceAllWithPSub psub t = uf
-
 forceWithPSub :: PartialSub -> Val -> IO Val
-forceWithPSub = uf
+forceWithPSub psub topt = do
+  let ?lvl = psub^.cod
+  let go = forceWithPSub psub; {-# inline go #-}
+  case topt of
 
+    Flex h sp _  -> case h of
 
--- Partial substitution
---------------------------------------------------------------------------------
+      FHMeta m ->
+        if Just m == psub^.occ then
+          pure $ Magic MetaOccurs
+        else unblock m topt \v _ ->
+          go $! spine v sp
+
+      FHCoe x a b p t -> unblock x topt \_ _ -> do
+        a <- go a
+        b <- go b
+        t <- go t
+        go $! coe a b p t
+
+    FlexEq x a t u -> unblock x topt \_ _ -> do
+      a <- go a
+      t <- go t
+      u <- go u
+      go $! eq a t u
+
+    Rigid (RHLocalVar (Lvl x) _ inDom) sp _ ->
+      if inDom then
+        pure topt
+      else case IM.lookup x (psub^.sub) of
+        Nothing -> pure $ Magic Undefined
+        Just v  -> go $! spine v sp
+    t ->
+      pure t
+
+forceAllWithPSub :: PartialSub -> Val -> IO Val
+forceAllWithPSub psub topt = do
+  let ?lvl = psub^.cod
+  let go = forceAllWithPSub psub; {-# inline go #-}
+  case topt of
+
+    Flex h sp _  -> case h of
+
+      FHMeta m ->
+        if Just m == psub^.occ then
+          pure $ Magic MetaOccurs
+        else unblock m topt \v _ ->
+          go $! spine v sp
+
+      FHCoe x a b p t -> unblock x topt \_ _ -> do
+        a <- go a
+        b <- go b
+        t <- go t
+        go $! coe a b p t
+
+    FlexEq x a t u -> unblock x topt \_ _ -> do
+      a <- go a
+      t <- go t
+      u <- go u
+      go $! eq a t u
+
+    Rigid (RHLocalVar (Lvl x) _ inDom) sp _ ->
+      if inDom then
+        pure topt
+      else case IM.lookup x (psub^.sub) of
+        Nothing -> pure $ Magic Undefined
+        Just v  -> go $! spine v sp
+
+    Unfold _ _ v _   -> go v
+    TraceEq _ _ _ v  -> go v
+    UnfoldEq _ _ _ v -> go v
+    t                -> pure t
 
 data ApproxOccursEx = ApproxOccursEx
   deriving Show
@@ -137,18 +211,19 @@ approxOccurs occ t = do
     S.TransSym{}       -> pure ()
     S.ApSym{}          -> pure ()
     S.ExfalsoSym{}     -> pure ()
-    S.ComputesAway{}   -> pure ()
+    S.Magic{}          -> pure ()
 
 flexPSubstSp :: PartialSub -> S.Tm -> Spine -> ErrWriter S.Tm
 flexPSubstSp psub hd sp = do
+  let ?lvl = psub^.cod
   let go   = flexPSubst psub; {-# inline go #-}
       goSp = flexPSubstSp psub hd; {-# inline goSp #-}
   case sp of
-    SId              -> pure hd
-    SApp t u i       -> S.App <$> goSp t <*> go u <*> pure i
-    SProj1 t         -> S.Proj1 <$> goSp t
-    SProj2 t         -> S.Proj2 <$> goSp t
-    SProjField t x n -> S.ProjField <$> goSp t <*> pure x <*> pure n
+    SId                 -> pure hd
+    SApp t u i          -> S.App <$> goSp t <*> go u <*> pure i
+    SProj1 t            -> S.Proj1 <$> goSp t
+    SProj2 t            -> S.Proj2 <$> goSp t
+    SProjField t tv a n -> S.ProjField <$> goSp t <*> pure (projFieldName tv a n) <*> pure n
 
 flexPSubst :: PartialSub -> Val -> ErrWriter S.Tm
 flexPSubst psub t = do
@@ -192,10 +267,10 @@ flexPSubst psub t = do
         goSp h sp
 
       goMagic = \case
-        ComputesAway -> pure S.ComputesAway
-        Undefined    -> S.ComputesAway <$ EW.writeErr
-        Nonlinear    -> S.ComputesAway <$ EW.writeErr
-        MetaOccurs   -> S.ComputesAway <$ EW.writeErr
+        ComputesAway -> pure $ S.Magic ComputesAway
+        Undefined    -> S.Magic ComputesAway <$ EW.writeErr
+        Nonlinear    -> S.Magic ComputesAway <$ EW.writeErr
+        MetaOccurs   -> S.Magic ComputesAway <$ EW.writeErr
 
   EW.liftIO (forceWithPSub psub t) >>= \case
 
@@ -225,32 +300,32 @@ flexPSubst psub t = do
 
 rigidPSubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
 rigidPSubstSp psub hd sp = do
+  let ?lvl = psub^.cod
   let goSp = rigidPSubstSp psub hd; {-# inline goSp #-}
       go   = rigidPSubst psub;      {-# inline go #-}
   case sp of
-    SId              -> pure hd
-    SApp t u i       -> S.App <$!> goSp t <*!> go u <*!> pure i
-    SProj1 t         -> S.Proj1 <$!> goSp t
-    SProj2 t         -> S.Proj2 <$!> goSp t
-    SProjField t x n -> S.ProjField <$!> goSp t <*!> pure x <*!> pure n
+    SId                 -> pure hd
+    SApp t u i          -> S.App <$!> goSp t <*!> go u <*!> pure i
+    SProj1 t            -> S.Proj1 <$!> goSp t
+    SProj2 t            -> S.Proj2 <$!> goSp t
+    SProjField t tv a n -> S.ProjField <$!> goSp t <*!> pure (projFieldName tv a n) <*!> pure n
 
 rigidPSubst :: PartialSub -> Val -> IO S.Tm
 rigidPSubst psub topt = do
 
   let ?lvl = psub^.cod
 
-  let goSp     = rigidPSubstSp psub; {-# inline goSp #-}
-      go       = rigidPSubst psub;   {-# inline go #-}
+  let goSp = rigidPSubstSp psub; {-# inline goSp #-}
+      go   = rigidPSubst psub;   {-# inline go #-}
 
       goBind a t = do
         (_, ~a) <- psubst' psub a
         rigidPSubst (lift psub a) (t $$ Var ?lvl a)
       {-# inline goBind #-}
 
-      goUnfolding :: Val -> Val -> IO S.Tm
-      goUnfolding fullval t = do
+      goUnfolding unf t = do
         (!t, !tv) <- EW.run (flexPSubst psub t)
-        unless tv $ fullPSubstCheck psub fullval
+        unless tv $ fullPSubstCheck psub unf
         pure t
       {-# inline goUnfolding #-}
 
@@ -301,11 +376,11 @@ rigidPSubst psub topt = do
 
 fullPSubstCheckSp :: PartialSub -> Spine -> IO ()
 fullPSubstCheckSp psub = \case
-    SId              -> pure ()
-    SApp t u _       -> fullPSubstCheckSp psub t >> fullPSubstCheck psub u
-    SProj1 t         -> fullPSubstCheckSp psub t
-    SProj2 t         -> fullPSubstCheckSp psub t
-    SProjField t _ _ -> fullPSubstCheckSp psub t
+    SId                -> pure ()
+    SApp t u _         -> fullPSubstCheckSp psub t >> fullPSubstCheck psub u
+    SProj1 t           -> fullPSubstCheckSp psub t
+    SProj2 t           -> fullPSubstCheckSp psub t
+    SProjField t _ _ _ -> fullPSubstCheckSp psub t
 
 fullPSubstCheck :: PartialSub -> Val -> IO ()
 fullPSubstCheck psub topt = do
@@ -367,32 +442,248 @@ psubst = rigidPSubst
 psubst' :: PartialSub -> Val -> IO (S.Tm, Val)
 psubst' psub t = do
   t <- psubst psub t
-  let ?env = psub^.domVars; ?lvl = psub^.dom
-  let ~vt = eval t
+  let ~vt = evalInDom psub t
   pure (t, vt)
 
+
+----------------------------------------------------------------------------------------------------
 -- Pruning
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
 
 prune :: PartialSub -> MetaVar -> Spine -> IO Val
-prune psub m sp = uf
+prune psub m sp = do
+  unless (psub^.allowPruning) (throwIO CantUnify)
+  uf
 
---------------------------------------------------------------------------------
+
+----------------------------------------------------------------------------------------------------
+-- Spine solving
+----------------------------------------------------------------------------------------------------
+
+mergeSp :: LvlArg => S.Tm -> Spine -> Spine -> IO S.Tm
+mergeSp hd sp sp' = case (sp, sp') of
+  (SId          , SId          ) -> pure hd
+  (SApp t u i   , SApp t' u' _ ) -> S.App <$!> mergeSp hd t t' <*!> merge u u' <*!> pure i
+  (SProj1 t     , SProj1 t'    ) -> S.Proj1 <$!> mergeSp hd t t'
+  (SProj2 t     , SProj2 t'    ) -> S.Proj2 <$!> mergeSp hd t t'
+  (SProjField{} , _            ) -> impossible
+  (_            , SProjField{} ) -> impossible
+  _                              -> pure $ S.Magic Nonlinear
+
+-- TODO: can we gain anything from trying to merge irrelevant values?
+-- Recall how we dig for irrelevant solutions in unification.
+merge :: LvlArg => Val -> Val -> IO S.Tm
+merge topt topu = do
+
+  let guardP :: SP -> IO S.Tm -> IO S.Tm
+      guardP sp cont = case sp of
+        P -> pure $ quote UnfoldNone topt
+        S -> cont
+      {-# inline guardP #-}
+
+  case (topt, topu) of
+
+    (Rigid (RHLocalVar x xty dom) sp a, Rigid (RHLocalVar x' _ _) sp' _) -> do
+      if not dom then
+        impossible
+      else if x == x' then do
+        mergeSp (S.LocalVar (lvlToIx x)) sp sp'
+      else do
+        typeRelevance a >>= \case
+          RRel       -> pure $ S.Magic Nonlinear
+          RIrr       -> pure $ quote UnfoldNone topt
+          RBlockOn{} -> pure $ S.Magic Nonlinear
+          RMagic{}   -> impossible
+
+    (Pair sp t u, Pair _ t' u') -> do
+      S.Pair sp <$!> merge t t' <*!> merge u u'
+
+    (Lam sp x i a t, Lam _ _ _ _ t') -> do
+      let var = Var' ?lvl a True
+      let ?lvl = ?lvl + 1
+      S.Lam sp x i (quote UnfoldNone a) <$!> merge (t $$ var) (t' $$ var)
+
+    (Magic m, t) -> case m of
+      Nonlinear -> pure $ S.Magic Nonlinear
+      Undefined -> pure $! quote UnfoldNone t
+      _         -> impossible
+
+    (t, Magic m) -> case m of
+      Nonlinear -> pure $ S.Magic Nonlinear
+      Undefined -> pure $! quote UnfoldNone t
+      _         -> impossible
+
+    (Lam sp x i a t, t') -> do
+      let var = Var' ?lvl a True
+      let ?lvl = ?lvl + 1
+      S.Lam sp x i (quote UnfoldNone a) <$!> merge (t $$ var) (app t' var i)
+
+    (t, Lam sp x i a t') -> do
+      let var = Var' ?lvl a True
+      let ?lvl = ?lvl + 1
+      S.Lam sp x i (quote UnfoldNone a) <$!> merge (app t var i) (t' $$ var)
+
+    (Pair sp t u, t') -> guardP sp $
+      S.Pair S <$!> merge t (proj1 t') <*!> merge u (proj2 t')
+
+    (t, Pair sp t' u') -> guardP sp $
+      S.Pair S <$!> merge (proj1 t) t' <*!> merge (proj2 t) u'
+
+    _ -> impossible
+
+solveTopSp :: PartialSub -> S.Locals -> Ty -> Spine -> Val -> Ty -> IO S.Tm
+solveTopSp psub ls a sp rhs rhsty = do
+
+  let go psub a sp = solveTopSp psub ls a sp rhs rhsty
+      {-# inline go #-}
+
+      goBind x xty qxty psub a sp =
+        solveTopSp (lift psub xty) (S.LBind ls x qxty) a sp rhs rhsty
+      {-# inline goBind #-}
+
+  let ?lvl    = psub^.dom
+      ?env    = psub^.domVars
+      ?locals = ls
+
+  a <- forceSet a
+  case (a, sp) of
+
+    (a, SId) -> do
+      unless (psub^.isLinear) (() <$ psubst psub rhsty)
+      psubst psub rhs
+
+    (Pi x i a b, SApp t u _) -> do
+      let var = Var' ?lvl a True
+      let qa = quote UnfoldNone a
+      psub <- invertVal 0 (psub^.cod) psub u var
+      sol  <- goBind x a qa psub (b $$ var) t
+      pure $ S.Lam S x i qa sol
+
+    (El (Pi x i a b), SApp t u _) -> do
+      let var = Var' ?lvl a True
+      let qa = quote UnfoldNone a
+      psub <- invertVal 0 (psub^.cod) psub u var
+      sol  <- goBind x a qa psub (b $$ var) t
+      pure $ S.Lam P x i qa sol
+
+    (Sg x a b, SProj1 t) -> do
+      fst <- go psub a t
+      let ~vfst = eval fst
+      snd <- freshMeta (gjoin (b $$ vfst))
+      pure $ S.Pair S fst snd
+
+    (Sg x a b, SProj2 t) -> do
+      fst <- freshMeta (gjoin a)
+      let ~vfst = eval fst
+      snd <- go psub (b $$ vfst) t
+      pure $ S.Pair S fst snd
+
+    (El (Sg x a b), SProj1 t) -> do
+      fst <- go psub (El a) t
+      let ~vfst = eval fst
+      snd <- freshMeta (gjoin (El (b $$ vfst)))
+      pure $ S.Pair P fst snd
+
+    (El (Sg x a b), SProj2 t) -> do
+      fst <- freshMeta (gjoin (El a))
+      let ~vfst = eval fst
+      snd <- go psub (El (b $$ vfst)) t
+      pure $ S.Pair P fst snd
+
+    (a, SProjField t tv tty n) ->
+      case n of
+        0 -> go psub a (SProj1 t)
+        n -> go psub a (SProj2 (SProjField t tv tty (n - 1)))
+
+    _ -> impossible
+
+solveNestedSp :: Lvl -> PartialSub -> Ty -> Spine -> Val -> Ty -> IO S.Tm
+solveNestedSp solvable psub a sp rhs rhsty = do
+
+  let go psub a sp = solveNestedSp solvable psub a sp rhs rhsty
+      {-# inline go #-}
+
+      goBind x xty qxty psub a sp =
+        solveNestedSp solvable (lift psub xty) a sp rhs rhsty
+      {-# inline goBind #-}
+
+  let ?lvl    = psub^.dom
+      ?env    = psub^.domVars
+
+  a <- forceSet a
+  case (a, sp) of
+    (a, SId) -> do
+      unless (psub^.isLinear) (() <$ psubst psub rhsty)
+      psubst psub rhs
+
+    (Pi x i a b, SApp t u _) -> do
+      let var = Var' ?lvl a True
+      let qa = quote UnfoldNone a
+      psub <- invertVal solvable (psub^.cod) psub u var
+      sol  <- goBind x a qa psub (b $$ var) t
+      pure $ S.Lam S x i qa sol
+
+    (El (Pi x i a b), SApp t u _) -> do
+      let var = Var' ?lvl a True
+      let qa = quote UnfoldNone a
+      psub <- invertVal solvable (psub^.cod) psub u var
+      sol  <- goBind x a qa psub (b $$ var) t
+      pure $ S.Lam P x i qa sol
+
+    (Sg x a b, SProj1 t) ->
+      S.Pair S <$!> go psub a t <*!> pure (S.Magic Undefined)
+
+    (Sg x a b, SProj2 t) -> do
+      let fst  = S.Magic Undefined
+          vfst = Magic Undefined
+      S.Pair S fst <$!> go psub (b $$ vfst) t
+
+    (El (Sg x a b), SProj1 t) ->
+      S.Pair P <$!> go psub (El a) t <*!> pure (S.Magic Undefined)
+
+    (El (Sg x a b), SProj2 t) -> do
+      let fst  = S.Magic Undefined
+          vfst = Magic Undefined
+      S.Pair P fst <$!> go psub (El (b $$ vfst)) t
+
+    (a, SProjField t tv tty n) ->
+      case n of
+        0 -> go psub a (SProj1 t)
+        n -> go psub a (SProj2 (SProjField t tv tty (n - 1)))
+
+    _ -> impossible
+
+
+invertVal :: Lvl -> Lvl -> PartialSub -> Val -> Val -> IO PartialSub
+invertVal solvable param psub t rhs = uf
 
 -- | Solve (?x sp ?= rhs : A).
-solve :: LvlArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+solve :: LvlArg => AllowPruningArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solve x sp rhs rhsty = do
-  uf
+  a <- ES.unsolvedMetaType x
 
+  let goRelevant = do
+        sol <- solveTopSp (emptyPSub (Just x) ?allowPruning)
+                          S.LEmpty a (reverseSpine sp) rhs rhsty
+        ES.solve x sol (eval0 sol)
 
--- | Solve metavariable with an inverted spine.
-solve' :: MetaVar -> PartialSub -> Val -> Ty -> IO ()
-solve' m psub rhs rhsty = do
-  uf
+      goIrrelevant =
+        (do sol <- solveTopSp (emptyPSub (Just x) False)
+                          S.LEmpty a (reverseSpine sp) rhs rhsty
+            ES.solve x sol (eval0 sol))
+        `catch`
+        \(_ :: UnifyEx) -> pure () -- TODO: clean up unused expansion metas in this branch!
 
+  typeRelevance rhsty >>= \case
+    RRel       -> goRelevant
+    RBlockOn{} -> goRelevant
+    RIrr       -> goIrrelevant
+    RMagic{}   -> impossible
 
+----------------------------------------------------------------------------------------------------
 -- Unification
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
+
 
 unify :: LvlArg => UnifyState -> G -> G -> IO ()
 unify st t t' = uf

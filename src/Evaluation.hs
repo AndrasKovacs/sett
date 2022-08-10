@@ -2,7 +2,7 @@
 module Evaluation (
     app, appE, appI, proj1, proj2, projField
   , eval, quote, eval0, quote0, nf, nf0, spine, coe, eq
-  , force, forceAll, forceMetas, eqSet, forceAllButEq
+  , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeRelevance, Relevance(..)
   ) where
 
@@ -47,7 +47,7 @@ meta x = runIO $ readMeta x >>= \case
   MESolved _ _ v (G _ a) -> pure (Unfold (UHSolvedMeta x) SId v a)
 
 appTy :: LvlArg => Ty -> Val -> Ty
-appTy a t = runIO $ forceAll a >>= \case
+appTy a t = runIO $ forceSet a >>= \case
   Pi _ _ _ b -> pure $! (b $$ t)
   _          -> impossible
 
@@ -67,7 +67,7 @@ appI :: LvlArg => Val -> Val -> Val
 appI t u = app t u Impl
 
 proj1Ty :: LvlArg => Ty -> Ty
-proj1Ty a = runIO $ forceAll a >>= \case
+proj1Ty a = runIO $ forceSet a >>= \case
   Sg _ a _ -> pure a
   _        -> impossible
 
@@ -81,7 +81,7 @@ proj1 t = case t of
   _               -> impossible
 
 proj2Ty :: LvlArg => Ty -> Val -> Ty
-proj2Ty a proj1 = runIO $ forceAll a >>= \case
+proj2Ty a proj1 = runIO $ forceSet a >>= \case
   Sg _ _ b -> pure $! (b $$ proj1)
   _        -> impossible
 
@@ -94,12 +94,13 @@ proj2 topt = case topt of
   Magic m         -> Magic m
   _               -> impossible
 
+-- TODO: ghc 9.4 will unbox the result
 projFieldInfo :: LvlArg => Val -> Ty -> Int -> IO (Name, Ty)
 projFieldInfo val topa topn = do
 
   let go :: Ty -> Int -> IO (Name, Ty)
       go a ix = do
-        a <- forceAll a
+        a <- forceSet a
         if ix == topn then
           case a of
             Sg x a b      -> pure (x, a)
@@ -199,7 +200,7 @@ coeRefl a b p t = case runConv (conv a b) of
   Same      -> t
   Diff      -> Rigid (RHCoe a b p t) SId b
   BlockOn x -> Flex (FHCoe x a b p t) SId b
-
+  CRMagic m -> Magic m
 
   -- Equality type
 --------------------------------------------------------------------------------
@@ -358,8 +359,7 @@ eval t =
     S.TransSym          -> transSym
     S.ApSym             -> apSym
     S.ExfalsoSym        -> exfalsoSym
-    S.ComputesAway      -> Magic ComputesAway
-
+    S.Magic m           -> Magic m
 
 
 -- Forcing
@@ -372,6 +372,7 @@ unblock x deflt k = readMeta x >>= \case
   MESolved _ _ v (G _ a) -> k v a
 {-# inline unblock #-}
 
+
 ------------------------------------------------------------
 
 -- | Eliminate solved flex head metas.
@@ -381,13 +382,6 @@ force v = case v of
   topv@(FlexEq x a t u) -> forceFlexEq topv x a t u
   v                     -> pure v
 {-# inline force #-}
-
--- | Eliminate solved flex head metas from a value with type `Set`.
-forceSet :: LvlArg => Val -> IO Val
-forceSet v = case v of
-  topv@(Flex h sp _) -> forceFlex topv h sp
-  v                  -> pure v
-{-# inline forceSet #-}
 
 forceFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val
 forceFlexEq topv x a t u = unblock x topv \_ _ -> do
@@ -445,6 +439,32 @@ forceAll' v = case v of
   Unfold _ _ v _        -> forceAll' v
   TraceEq _ _ _ v       -> forceAll' v
   UnfoldEq _ _ _ v      -> forceAll' v
+  t                     -> pure t
+
+------------------------------------------------------------
+
+-- | Eliminate all unfoldings from the head of a type.
+forceSet :: LvlArg => Val -> IO Val
+forceSet v = case v of
+  topv@(Flex h sp _)    -> forceSetFlex topv h sp
+  Unfold _ _ v _        -> forceSet' v
+  t                     -> pure t
+{-# inline forceSet #-}
+
+forceSetFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
+forceSetFlex topv h sp = case h of
+  FHMeta x        -> unblock x topv \v _ -> forceSet' $! spine v sp
+  FHCoe x a b p t -> unblock x topv \_ _ -> do
+    a <- forceSet a
+    b <- forceSet b
+    t <- force t
+    forceSet' $! coe a b p t
+{-# noinline forceSetFlex #-}
+
+forceSet' :: LvlArg => Val -> IO Val
+forceSet' v = case v of
+  topv@(Flex h sp _)    -> forceSetFlex topv h sp
+  Unfold _ _ v _        -> forceSet' v
   t                     -> pure t
 
 ------------------------------------------------------------
@@ -524,7 +544,7 @@ forceMetas' v = case v of
 -- Relevance
 --------------------------------------------------------------------------------
 
-data Relevance = RRel | RIrr | RBlockOn MetaVar
+data Relevance = RRel | RIrr | RBlockOn MetaVar | RMagic Magic
 
 instance Semigroup Relevance where
   (<>) (RBlockOn x) _ = RBlockOn x
@@ -537,7 +557,7 @@ typeRelevance :: LvlArg => Ty -> IO Relevance
 typeRelevance a = do
   let go         = typeRelevance; {-# inline go #-}
       goBind a b = newVar a \v -> typeRelevance (b $$ v); {-# inline goBind #-}
-  forceAll a >>= \case
+  forceSet a >>= \case
     El _         -> pure RIrr
     Set          -> pure RRel
     Prop         -> pure RRel
@@ -545,6 +565,7 @@ typeRelevance a = do
     Sg _ a b     -> go a <> goBind a b
     Rigid h sp _ -> pure RRel
     Flex h sp _  -> pure $! RBlockOn (flexHeadMeta h)
+    Magic m      -> pure $ RMagic m
     _            -> impossible
 
 
@@ -559,7 +580,7 @@ newVar a cont =
   seq ?lvl (cont v)
 {-# inline newVar #-}
 
-data ConvRes = Same | Diff | BlockOn MetaVar
+data ConvRes = Same | Diff | BlockOn MetaVar | CRMagic Magic
   deriving Show
 instance Exception ConvRes
 
@@ -621,14 +642,20 @@ conv t u = do
         _ -> cont
       {-# inline guardP #-}
 
+      goMagic :: Magic -> IO ()
+      goMagic = \case
+        ComputesAway -> pure ()
+        m            -> throwIO (CRMagic m)
+      {-# inline goMagic #-}
+
   t <- forceAll t
   u <- forceAll u
   case (t, u) of
 
-    -- canonical
+    -- canonical & rigid match
     ------------------------------------------------------------
     (Pi x i a b, Pi x' i' a' b') -> do
-      unless (i == i') $ throwIO Diff
+      convEq i i'
       go a a'
       goBind a b b'
 
@@ -643,6 +670,12 @@ conv t u = do
     (El a , El b ) -> go a b
     (Tt   , Tt   ) -> pure ()
 
+    (Rigid h sp a, Rigid h' sp' _) -> typeRelevance a >>= \case
+      RIrr       -> pure ()
+      RBlockOn x -> throwIO $ BlockOn x
+      RRel       -> convRigidRel h sp h' sp'
+      RMagic m   -> goMagic m
+
     (RigidEq a t u  , RigidEq a' t' u') -> go a a' >> go t t' >> go u u'
     (Lam hl _ _ _ t , Lam _ _ _ a t'  ) -> guardP hl $ goBind a t t'
     (Pair hl t u    , Pair _ t' u'    ) -> guardP hl $ go t t' >> go u u'
@@ -655,39 +688,35 @@ conv t u = do
     (Pair hl t u    , t'              ) -> guardP hl $ go t (proj1 t') >> go u (proj2 t')
     (t              , Pair hl t' u'   ) -> guardP hl $ go (proj1 t) t' >> go (proj2 t) u'
 
-    -- non-canonical
     ------------------------------------------------------------
 
-    (Magic ComputesAway , _      ) -> pure ()
-    (Magic _            , _      ) -> impossible
-    (_       , Magic ComputesAway) -> pure ()
-    (_       , Magic _           ) -> impossible
+    (Magic m, _) -> case m of ComputesAway -> pure (); m -> throwIO (CRMagic m)
+    (_, Magic m) -> case m of ComputesAway -> pure (); m -> throwIO (CRMagic m)
 
     (Flex h sp a, _) -> typeRelevance a >>= \case
       RIrr       -> pure ()
+      RMagic m   -> goMagic m
       _          -> throwIO $! BlockOn (flexHeadMeta h)
 
     (_, Flex h sp a) -> typeRelevance a >>= \case
       RIrr       -> pure ()
+      RMagic m   -> goMagic m
       _          -> throwIO $! BlockOn (flexHeadMeta h)
 
     (FlexEq x _ _ _, _) -> throwIO $ BlockOn x
     (_, FlexEq x _ _ _) -> throwIO $ BlockOn x
 
-    (Rigid h sp a, Rigid h' sp' _) -> typeRelevance a >>= \case
-      RIrr       -> pure ()
-      RBlockOn x -> throwIO $ BlockOn x
-      RRel       -> convRigidRel h sp h' sp'
-
     (Rigid h sp a, _) -> typeRelevance a >>= \case
       RIrr       -> pure ()
-      RBlockOn x -> throwIO $ BlockOn x
       RRel       -> throwIO Diff
+      RBlockOn x -> throwIO $ BlockOn x
+      RMagic m   -> goMagic m
 
     (_, Rigid h' sp' a) -> typeRelevance a >>= \case
       RIrr       -> pure ()
-      RBlockOn x -> throwIO $ BlockOn x
       RRel       -> throwIO Diff
+      RBlockOn x -> throwIO $ BlockOn x
+      RMagic m   -> goMagic m
 
     -- canonical mismatch is always a failure, because we don't yet
     -- have inductive data in Prop, so mismatch is only possible in Set.
@@ -754,8 +783,7 @@ quote opt t = let
     Sym a x y p        -> S.Sym (go a) (go x) (go y) (go p)
     Trans a x y z p q  -> S.Trans (go a) (go x) (go y) (go z) (go p) (go q)
     Ap a b f x y p     -> S.Ap (go a) (go b) (go f) (go x) (go y) (go p)
-    Magic ComputesAway -> S.ComputesAway
-    Magic _            -> impossible
+    Magic m            -> S.Magic m
 
   in case opt of
     UnfoldAll   -> cont (runIO (forceAll t))

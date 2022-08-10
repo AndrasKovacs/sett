@@ -49,7 +49,7 @@ freshMeta (G a fa) = do
 --------------------------------------------------------------------------------
 
 -- | Insert fresh implicit applications.
-insertApps' :: LvlArg => EnvArg => LocalsArg => PruningArg => IO Infer -> IO Infer
+insertApps' :: LvlArg => EnvArg => LocalsArg => IO Infer -> IO Infer
 insertApps' act = go =<< act where
   go :: Infer -> IO Infer
   go (Infer t (G a fa)) = forceAll fa >>= \case
@@ -63,7 +63,7 @@ insertApps' act = go =<< act where
 
 -- | Insert fresh implicit applications to a term which is not
 --   an implicit lambda (i.e. neutral).
-insertApps :: LvlArg => EnvArg => LocalsArg => PruningArg => IO Infer -> IO Infer
+insertApps :: LvlArg => EnvArg => LocalsArg => IO Infer -> IO Infer
 insertApps act = act >>= \case
   inf@(Infer (S.Lam _ _ Impl _ _) _) -> pure inf
   inf                                -> insertApps' (pure inf)
@@ -71,7 +71,7 @@ insertApps act = act >>= \case
 
 -- | Insert fresh implicit applications until we hit a Pi with
 --   a particular binder name.
-insertAppsUntilName :: LvlArg => EnvArg => LocalsArg => PruningArg => P.Tm -> P.Name -> IO Infer -> IO Infer
+insertAppsUntilName :: LvlArg => EnvArg => LocalsArg => P.Tm -> P.Name -> IO Infer -> IO Infer
 insertAppsUntilName pt name act = go =<< act where
   go :: Infer -> IO Infer
   go (Infer t (G a fa)) = forceAll fa >>= \case
@@ -403,7 +403,7 @@ infer topt = case topt of
             elabError topt $ NoSuchField x
 
     (ix, b) <- go (g2 ga) 0
-    pure $! Infer (S.ProjField t (coerce (g2 ga)) ix) (gjoin b)
+    pure $! Infer (S.ProjField t fieldName ix) (gjoin b)
 
   P.Let _ x ma t u -> do
 

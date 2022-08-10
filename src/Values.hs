@@ -44,6 +44,15 @@ data Spine
   | SProj2 Spine
   | SProjField Spine Val ~Ty Int -- projected value, its type, field index
 
+reverseSpine :: Spine -> Spine
+reverseSpine = go SId where
+  go acc = \case
+    SId                 -> acc
+    SApp t u i          -> go (SApp acc u i) t
+    SProj1 t            -> go (SProj1 acc) t
+    SProj2 t            -> go (SProj2 acc) t
+    SProjField t tv a n -> go (SProjField acc tv a n) t
+
 --------------------------------------------------------------------------------
 
 -- | A closure abstract over the `Int#` which marks the next fresh variable.
@@ -116,12 +125,6 @@ data Val
   | Ap Val Val Val Val Val Val
 
   | Magic Magic
-
-data Magic
-  = ComputesAway
-  | Undefined
-  | Nonlinear
-  | MetaOccurs
 
 markEq :: Val -> Val -> Val -> Val -> Val
 markEq ~a ~t ~u ~v = TraceEq a t u v
