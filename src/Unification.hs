@@ -80,6 +80,11 @@ lift (PSub idenv occ dom cod sub linear allowpr) ~asub =
   in PSub (EDef idenv var) occ (dom + 1) (cod + 1)
           (IM.insert (coerce cod) var sub) linear allowpr
 
+unlift :: PartialSub -> PartialSub
+unlift (PSub (EDef idenv _) occ dom cod sub linear allowpr) =
+  PSub idenv occ (dom - 1) (cod - 1)
+       (IM.delete (unLvl (cod - 1)) sub) linear allowpr
+
 -- | skip : PSub Γ Δ → PSub Γ (Δ, x : A)
 skip :: PartialSub -> PartialSub
 skip psub = psub & cod +~ 1
@@ -360,7 +365,7 @@ rigidPSubst psub topt = do
     UnfoldEq _ _ _ unf -> goUnfolding unf topt
     Set                -> pure S.Set
     El a               -> S.El <$!> go a
-    Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a b
+    Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a b -- TODO: share "go a" and "psubst' a" work!
     Lam sp x i a t     -> S.Lam sp x i <$!> go a <*!> goBind a t
     Sg x a b           -> S.Sg x <$!> go a <*!> goBind a b
     Pair sp t u        -> S.Pair sp <$!> go t <*!> go u
@@ -475,25 +480,25 @@ mergeSp hd sp sp' = case (sp, sp') of
 merge :: LvlArg => Val -> Val -> IO S.Tm
 merge topt topu = do
 
-  let guardP :: SP -> IO S.Tm -> IO S.Tm
-      guardP sp cont = case sp of
-        P -> pure $ quote UnfoldNone topt
-        S -> cont
-      {-# inline guardP #-}
+  let guardIrr a act = act >>= \case
+        S.Magic Nonlinear -> typeRelevance a >>= \case
+          RRel       -> pure $ S.Magic Nonlinear
+          RIrr       -> pure $! quote UnfoldNone topt -- TODO: choose the more defined side?
+          RBlockOn{} -> pure $ S.Magic Nonlinear
+          RMagic{}   -> impossible -- TODO: is ComputedAway possible?
+        t -> pure t
+
+  -- TODO: think about where ComputedAway is possible in general!!!
 
   case (topt, topu) of
 
-    (Rigid (RHLocalVar x xty dom) sp a, Rigid (RHLocalVar x' _ _) sp' _) -> do
+    (Rigid (RHLocalVar x xty dom) sp a, Rigid (RHLocalVar x' _ _) sp' _) -> guardIrr a do
       if not dom then
         impossible
       else if x == x' then do
         mergeSp (S.LocalVar (lvlToIx x)) sp sp'
-      else do
-        typeRelevance a >>= \case
-          RRel       -> pure $ S.Magic Nonlinear
-          RIrr       -> pure $ quote UnfoldNone topt
-          RBlockOn{} -> pure $ S.Magic Nonlinear
-          RMagic{}   -> impossible
+      else
+        pure $ S.Magic Nonlinear
 
     (Pair sp t u, Pair _ t' u') -> do
       S.Pair sp <$!> merge t t' <*!> merge u u'
@@ -523,10 +528,10 @@ merge topt topu = do
       let ?lvl = ?lvl + 1
       S.Lam sp x i (quote UnfoldNone a) <$!> merge (app t var i) (t' $$ var)
 
-    (Pair sp t u, t') -> guardP sp $
+    (Pair sp t u, t') ->
       S.Pair S <$!> merge t (proj1 t') <*!> merge u (proj2 t')
 
-    (t, Pair sp t' u') -> guardP sp $
+    (t, Pair sp t' u') ->
       S.Pair S <$!> merge (proj1 t) t' <*!> merge (proj2 t) u'
 
     _ -> impossible
@@ -555,14 +560,14 @@ solveTopSp psub ls a sp rhs rhsty = do
     (Pi x i a b, SApp t u _) -> do
       let var = Var' ?lvl a True
       let qa = quote UnfoldNone a
-      psub <- invertVal 0 (psub^.cod) psub u var
+      psub <- invertVal 0 (psub^.cod) psub u var a
       sol  <- goBind x a qa psub (b $$ var) t
       pure $ S.Lam S x i qa sol
 
     (El (Pi x i a b), SApp t u _) -> do
       let var = Var' ?lvl a True
       let qa = quote UnfoldNone a
-      psub <- invertVal 0 (psub^.cod) psub u var
+      psub <- invertVal 0 (psub^.cod) psub u var a
       sol  <- goBind x a qa psub (b $$ var) t
       pure $ S.Lam P x i qa sol
 
@@ -607,8 +612,8 @@ solveNestedSp solvable psub a sp rhs rhsty = do
         solveNestedSp solvable (lift psub xty) a sp rhs rhsty
       {-# inline goBind #-}
 
-  let ?lvl    = psub^.dom
-      ?env    = psub^.domVars
+  let ?lvl = psub^.dom
+      ?env = psub^.domVars
 
   a <- forceSet a
   case (a, sp) of
@@ -619,14 +624,14 @@ solveNestedSp solvable psub a sp rhs rhsty = do
     (Pi x i a b, SApp t u _) -> do
       let var = Var' ?lvl a True
       let qa = quote UnfoldNone a
-      psub <- invertVal solvable (psub^.cod) psub u var
+      psub <- invertVal solvable (psub^.cod) psub u var a
       sol  <- goBind x a qa psub (b $$ var) t
       pure $ S.Lam S x i qa sol
 
     (El (Pi x i a b), SApp t u _) -> do
       let var = Var' ?lvl a True
       let qa = quote UnfoldNone a
-      psub <- invertVal solvable (psub^.cod) psub u var
+      psub <- invertVal solvable (psub^.cod) psub u var a
       sol  <- goBind x a qa psub (b $$ var) t
       pure $ S.Lam P x i qa sol
 
@@ -654,8 +659,26 @@ solveNestedSp solvable psub a sp rhs rhsty = do
     _ -> impossible
 
 
-invertVal :: Lvl -> Lvl -> PartialSub -> Val -> Val -> IO PartialSub
-invertVal solvable param psub t rhs = uf
+invertVal :: Lvl -> Lvl -> PartialSub -> Val -> Val -> Ty -> IO PartialSub
+invertVal solvable param psub t rhs rhsty = do
+
+  let ?lvl = psub^.dom
+      ?env = psub^.domVars
+
+  (let ?lvl = psub^.cod in forceAll t) >>= \case
+
+    Lam sp x i a t -> do
+      (_, ~a) <- psubst' psub a
+      let var = Var' ?lvl a True
+      psub <- invertVal solvable param (lift psub a) (t $$ var) (app rhs var i) (appTy rhsty var)
+      pure $! unlift psub
+
+    Pair sp t u -> do
+      psub <- invertVal solvable param psub t (proj1 rhs) (proj1Ty rhsty)
+      invertVal solvable param psub u (proj2 rhs) (proj2Ty rhsty (proj1 rhs))
+
+    Rigid (RHLocalVar x xty dom) sp a -> do
+      _
 
 -- | Solve (?x sp ?= rhs : A).
 solve :: LvlArg => AllowPruningArg => MetaVar -> Spine -> Val -> Ty -> IO ()

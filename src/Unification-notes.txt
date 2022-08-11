@@ -585,7 +585,7 @@ invTm Γ (Δᵤ|Δₛ|Δₚ) σ (λ (a : A). t) rhs =
   return (delete {x↦_} from σ)
 
 invTm Γ (Δᵤ|Δₛ|Δₚ) σ ((x:A) sp) rhs | x ∈ Δₛ =
-  sol <- invSp Γ (ΔᵤΔₛ|Δₚ) A sp
+  sol <- invSp Γ (ΔᵤΔₛ|Δₚ|) A sp
   return (σ, x ↦ sol)
 
 invTm Γ (Δᵤ|Δₛ|Δₚ) σ ((x:A) sp) rhs | x ∉ Δₛ =
