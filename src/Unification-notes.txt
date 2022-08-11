@@ -678,3 +678,27 @@ bound var f : El A → El A → B
   Functor = #Functor (λ (C, D). ...)
 
 -}
+
+NEWWWWWWWWW
+
+ΔᵤΔₛΔₚ ⊢ sp : Γ
+ΔᵤΔₛΓ ⊢ sp⁻¹ : Δₚ
+
+                        ΔᵤΔₛΔₚ ⊢ rhs
+
+               Σ
+             a b c
+Δᵤ|Δₛ|Δₚ ⊢ f x y z = rhs    goal : ΔᵤΔₛΣ ⊢ _ : Δₚ
+
+  ΔᵤΔₛ|Δₚ|∙ ⊢ x     ΔᵤΔₛ,a:A ⊢ a
+
+
+assume :
+
+   ΔᵤΔₛΔₚ ⊢ sp   : Σ
+   ΔᵤΔₛΣ  ⊢ sp⁻¹ : Δₚ
+
+  ΔᵤΔₛ|Δₚ|∙ ⊢ lhs : A[Σ ↦ sp]            ΔᵤΔₛΣ ⊢ rhs : A
+
+
+     lhs ↦ rhs

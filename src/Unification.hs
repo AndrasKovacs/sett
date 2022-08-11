@@ -50,6 +50,8 @@ freshMeta (G a fa) = do
 type AllowPruning = Bool
 type AllowPruningArg = (?allowPruning :: Bool)
 
+type IsLinear = Bool
+
 data PartialSub = PSub {
     partialSubDomVars      :: Vars           -- Identity env from Γ to Γ, serves as the list of Γ types.
                                              -- We need this when we want to evaluate the result term of
@@ -60,8 +62,7 @@ data PartialSub = PSub {
   , partialSubSub          :: IM.IntMap Val  -- Partial map from Δ vars to Γ values. A var which is not
                                              -- in the map is mapped to a scope error, but note that
                                              -- PSVal-s can contain scope errors as well.
-  , partialSubIsLinear     :: Bool           -- Does the sub contain PSNonlinearEntry.
-  , partialSubAllowPruning :: Bool           -- Is pruning allowed during partial substitution.
+  , partialSubAllowPruning :: AllowPruning   -- Is pruning allowed during partial substitution.
   }
 makeFields ''PartialSub
 
@@ -69,25 +70,16 @@ makeFields ''PartialSub
 evalInDom :: PartialSub -> S.Tm -> Val
 evalInDom psub t = let ?env = psub^.domVars; ?lvl = psub^.dom in eval t
 
-emptyPSub :: Maybe MetaVar -> AllowPruning -> PartialSub
-emptyPSub occ allowpr = PSub ENil occ 0 0 mempty True allowpr
+-- emptyPSub :: Maybe MetaVar -> AllowPruning -> PartialSub
+-- emptyPSub occ allowpr = PSub ENil occ 0 0 mempty True allowpr
 
 -- | lift : (σ : PSub Γ Δ) → PSub (Γ, x : A[σ]) (Δ, x : A)
 --   Note: gets A[σ] as Ty input, not A!
 lift :: PartialSub -> Ty -> PartialSub
-lift (PSub idenv occ dom cod sub linear allowpr) ~asub =
+lift (PSub idenv occ dom cod sub allowpr) ~asub =
   let var = Var dom asub
   in PSub (EDef idenv var) occ (dom + 1) (cod + 1)
-          (IM.insert (coerce cod) var sub) linear allowpr
-
-unlift :: PartialSub -> PartialSub
-unlift (PSub (EDef idenv _) occ dom cod sub linear allowpr) =
-  PSub idenv occ (dom - 1) (cod - 1)
-       (IM.delete (unLvl (cod - 1)) sub) linear allowpr
-
--- | skip : PSub Γ Δ → PSub Γ (Δ, x : A)
-skip :: PartialSub -> PartialSub
-skip psub = psub & cod +~ 1
+          (IM.insert (coerce cod) var sub) allowpr
 
 forceWithPSub :: PartialSub -> Val -> IO Val
 forceWithPSub psub topt = do
@@ -288,7 +280,7 @@ flexPSubst psub t = do
     UnfoldEq a t u _  -> S.Eq <$> go a <*> go t <*> go u
     Set               -> pure S.Set
     El a              -> S.El <$> go a
-    Pi x i a b        -> S.Pi x i <$> go a <*> goBind a b
+    Pi x i a b        -> S.Pi x i <$> go a <*> goBind a b   -- TODO: share "go a"
     Lam sp x i a t    -> S.Lam sp x i <$> go a <*> goBind a t
     Sg x a b          -> S.Sg x <$> go a <*> goBind a b
     Pair sp t u       -> S.Pair sp <$> go t <*> go u
@@ -444,6 +436,9 @@ fullPSubstCheck psub topt = do
 psubst :: PartialSub -> Val -> IO S.Tm
 psubst = rigidPSubst
 
+psubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
+psubstSp = rigidPSubstSp
+
 psubst' :: PartialSub -> Val -> IO (S.Tm, Val)
 psubst' psub t = do
   t <- psubst psub t
@@ -536,15 +531,46 @@ merge topt topu = do
 
     _ -> impossible
 
+updatePSub :: Lvl -> Val -> PartialSub -> IO PartialSub
+updatePSub (Lvl x) t psub = case IM.lookup x (psub^.sub) of
+  Nothing -> do
+    pure $! (psub & sub %~ IM.insert x t)
+  Just t' -> do
+    let ?lvl = psub^.dom
+    merged <- evalInDom psub <$!> merge t t'
+    pure $! (psub & sub %~ IM.insert x merged)
+
+invertVal :: Lvl -> PartialSub -> Lvl -> Val -> Spine -> IO PartialSub
+invertVal unsolvable psub param t rhsSp = do
+
+  t <- let ?lvl = param in forceAll t
+  case t of
+
+    Pair _ t u -> do
+      psub <- invertVal unsolvable psub param t (SProj1 rhsSp)
+      invertVal unsolvable psub param t (SProj2 rhsSp)
+
+    Lam sp x i a t -> do
+      let var  = Var' param a True
+      let ?lvl = param + 1
+      invertVal unsolvable psub ?lvl (t $$ var) (SApp rhsSp var i)
+
+    Rigid (RHLocalVar x xty _) sp rhsTy -> do
+      unless (unsolvable <= x && x < psub^.cod) (throw CantUnify)
+      (_, xty) <- psubst' psub xty
+      let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
+      sol <- solveNestedSp (psub^.cod) psub' xty sp (psub^.dom, rhsSp) rhsTy
+      updatePSub x (evalInDom psub sol) psub
+
+    _ ->
+      throwIO CantUnify
+
+
 solveTopSp :: PartialSub -> S.Locals -> Ty -> Spine -> Val -> Ty -> IO S.Tm
 solveTopSp psub ls a sp rhs rhsty = do
 
-  let go psub a sp = solveTopSp psub ls a sp rhs rhsty
+  let go psub ls a sp = solveTopSp psub ls a sp rhs rhsty
       {-# inline go #-}
-
-      goBind x xty qxty psub a sp =
-        solveTopSp (lift psub xty) (S.LBind ls x qxty) a sp rhs rhsty
-      {-# inline goBind #-}
 
   let ?lvl    = psub^.dom
       ?env    = psub^.domVars
@@ -554,25 +580,31 @@ solveTopSp psub ls a sp rhs rhsty = do
   case (a, sp) of
 
     (a, SId) -> do
-      unless (psub^.isLinear) (() <$ psubst psub rhsty)
+      () <$ psubst psub rhsty
       psubst psub rhs
 
     (Pi x i a b, SApp t u _) -> do
-      let var = Var' ?lvl a True
-      let qa = quote UnfoldNone a
-      psub <- invertVal 0 (psub^.cod) psub u var a
-      sol  <- goBind x a qa psub (b $$ var) t
+      let var   = Var' ?lvl a True
+      let ?lvl  = ?lvl + 1
+      let qa    = quote UnfoldNone a
+      psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
+      ls    <- pure (S.LBind ls x qa)
+      psub  <- invertVal 0 psub (psub^.cod) u SId
+      sol   <- go psub ls (b $$ var) t
       pure $ S.Lam S x i qa sol
 
     (El (Pi x i a b), SApp t u _) -> do
-      let var = Var' ?lvl a True
-      let qa = quote UnfoldNone a
-      psub <- invertVal 0 (psub^.cod) psub u var a
-      sol  <- goBind x a qa psub (b $$ var) t
+      let var   = Var' ?lvl a True
+      let ?lvl  = ?lvl + 1
+      let qa    = quote UnfoldNone a
+      psub <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
+      ls   <- pure (S.LBind ls x qa)
+      psub <- invertVal 0 psub (psub^.cod) u SId
+      sol  <- go psub ls (b $$ var) t
       pure $ S.Lam P x i qa sol
 
     (Sg x a b, SProj1 t) -> do
-      fst <- go psub a t
+      fst <- go psub ls a t
       let ~vfst = eval fst
       snd <- freshMeta (gjoin (b $$ vfst))
       pure $ S.Pair S fst snd
@@ -580,11 +612,11 @@ solveTopSp psub ls a sp rhs rhsty = do
     (Sg x a b, SProj2 t) -> do
       fst <- freshMeta (gjoin a)
       let ~vfst = eval fst
-      snd <- go psub (b $$ vfst) t
+      snd <- go psub ls (b $$ vfst) t
       pure $ S.Pair S fst snd
 
     (El (Sg x a b), SProj1 t) -> do
-      fst <- go psub (El a) t
+      fst <- go psub ls (El a) t
       let ~vfst = eval fst
       snd <- freshMeta (gjoin (El (b $$ vfst)))
       pure $ S.Pair P fst snd
@@ -592,6 +624,69 @@ solveTopSp psub ls a sp rhs rhsty = do
     (El (Sg x a b), SProj2 t) -> do
       fst <- freshMeta (gjoin (El a))
       let ~vfst = eval fst
+      snd <- go psub ls (El (b $$ vfst)) t
+      pure $ S.Pair P fst snd
+
+    (a, SProjField t tv tty n) ->
+      case n of
+        0 -> go psub ls a (SProj1 t)
+        n -> go psub ls a (SProj2 (SProjField t tv tty (n - 1)))
+
+    _ -> impossible
+
+solveNestedSp :: Lvl -> PartialSub -> Ty -> Spine -> (Lvl, Spine) -> Ty -> IO S.Tm
+solveNestedSp unsolvable psub a sp (!rhsVar, !rhsSp) rhsty = do
+
+  let go psub a sp = solveNestedSp unsolvable psub a sp (rhsVar, rhsSp) rhsty
+      {-# inline go #-}
+
+  let ?lvl = psub^.dom
+      ?env = psub^.domVars
+
+  a <- forceSet a
+  case (a, sp) of
+
+    (a, SId) -> do
+      _ <- psubst psub rhsty
+      psubstSp psub (S.LocalVar (lvlToIx rhsVar)) rhsSp
+
+    (Pi x i a b, SApp t u _) -> do
+      let var   = Var' ?lvl a True
+      let ?lvl  = ?lvl + 1
+      let qa    = quote UnfoldNone a
+      psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
+      psub  <- invertVal unsolvable psub (psub^.cod) u SId
+      sol   <- go psub (b $$ var) t
+      pure $ S.Lam S x i qa sol
+
+    (El (Pi x i a b), SApp t u _) -> do
+      let var   = Var' ?lvl a True
+      let ?lvl  = ?lvl + 1
+      let qa    = quote UnfoldNone a
+      psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
+      psub  <- invertVal unsolvable psub (psub^.cod) u SId
+      sol   <- go psub (b $$ var) t
+      pure $ S.Lam P x i qa sol
+
+    (Sg x a b, SProj1 t) -> do
+      fst <- go psub a t
+      let snd = S.Magic Undefined
+      pure $ S.Pair S fst snd
+
+    (Sg x a b, SProj2 t) -> do
+      let fst  = S.Magic Undefined
+      let vfst = Magic Undefined
+      snd <- go psub (b $$ vfst) t
+      pure $ S.Pair S fst snd
+
+    (El (Sg x a b), SProj1 t) -> do
+      fst <- go psub (El a) t
+      let snd = S.Magic Undefined
+      pure $ S.Pair P fst snd
+
+    (El (Sg x a b), SProj2 t) -> do
+      let fst  = S.Magic Undefined
+      let vfst = Magic Undefined
       snd <- go psub (El (b $$ vfst)) t
       pure $ S.Pair P fst snd
 
@@ -602,97 +697,19 @@ solveTopSp psub ls a sp rhs rhsty = do
 
     _ -> impossible
 
-solveNestedSp :: Lvl -> PartialSub -> Ty -> Spine -> Val -> Ty -> IO S.Tm
-solveNestedSp solvable psub a sp rhs rhsty = do
-
-  let go psub a sp = solveNestedSp solvable psub a sp rhs rhsty
-      {-# inline go #-}
-
-      goBind x xty qxty psub a sp =
-        solveNestedSp solvable (lift psub xty) a sp rhs rhsty
-      {-# inline goBind #-}
-
-  let ?lvl = psub^.dom
-      ?env = psub^.domVars
-
-  a <- forceSet a
-  case (a, sp) of
-    (a, SId) -> do
-      unless (psub^.isLinear) (() <$ psubst psub rhsty)
-      psubst psub rhs
-
-    (Pi x i a b, SApp t u _) -> do
-      let var = Var' ?lvl a True
-      let qa = quote UnfoldNone a
-      psub <- invertVal solvable (psub^.cod) psub u var a
-      sol  <- goBind x a qa psub (b $$ var) t
-      pure $ S.Lam S x i qa sol
-
-    (El (Pi x i a b), SApp t u _) -> do
-      let var = Var' ?lvl a True
-      let qa = quote UnfoldNone a
-      psub <- invertVal solvable (psub^.cod) psub u var a
-      sol  <- goBind x a qa psub (b $$ var) t
-      pure $ S.Lam P x i qa sol
-
-    (Sg x a b, SProj1 t) ->
-      S.Pair S <$!> go psub a t <*!> pure (S.Magic Undefined)
-
-    (Sg x a b, SProj2 t) -> do
-      let fst  = S.Magic Undefined
-          vfst = Magic Undefined
-      S.Pair S fst <$!> go psub (b $$ vfst) t
-
-    (El (Sg x a b), SProj1 t) ->
-      S.Pair P <$!> go psub (El a) t <*!> pure (S.Magic Undefined)
-
-    (El (Sg x a b), SProj2 t) -> do
-      let fst  = S.Magic Undefined
-          vfst = Magic Undefined
-      S.Pair P fst <$!> go psub (El (b $$ vfst)) t
-
-    (a, SProjField t tv tty n) ->
-      case n of
-        0 -> go psub a (SProj1 t)
-        n -> go psub a (SProj2 (SProjField t tv tty (n - 1)))
-
-    _ -> impossible
-
-
-invertVal :: Lvl -> Lvl -> PartialSub -> Val -> Val -> Ty -> IO PartialSub
-invertVal solvable param psub t rhs rhsty = do
-
-  let ?lvl = psub^.dom
-      ?env = psub^.domVars
-
-  (let ?lvl = psub^.cod in forceAll t) >>= \case
-
-    Lam sp x i a t -> do
-      (_, ~a) <- psubst' psub a
-      let var = Var' ?lvl a True
-      psub <- invertVal solvable param (lift psub a) (t $$ var) (app rhs var i) (appTy rhsty var)
-      pure $! unlift psub
-
-    Pair sp t u -> do
-      psub <- invertVal solvable param psub t (proj1 rhs) (proj1Ty rhsty)
-      invertVal solvable param psub u (proj2 rhs) (proj2Ty rhsty (proj1 rhs))
-
-    Rigid (RHLocalVar x xty dom) sp a -> do
-      _
-
 -- | Solve (?x sp ?= rhs : A).
 solve :: LvlArg => AllowPruningArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solve x sp rhs rhsty = do
   a <- ES.unsolvedMetaType x
 
   let goRelevant = do
-        sol <- solveTopSp (emptyPSub (Just x) ?allowPruning)
+        sol <- solveTopSp (PSub ENil (Just x) 0 ?lvl mempty ?allowPruning)
                           S.LEmpty a (reverseSpine sp) rhs rhsty
         ES.solve x sol (eval0 sol)
 
       goIrrelevant =
-        (do sol <- solveTopSp (emptyPSub (Just x) False)
-                          S.LEmpty a (reverseSpine sp) rhs rhsty
+        (do sol <- solveTopSp (PSub ENil (Just x) 0 ?lvl mempty ?allowPruning)
+                              S.LEmpty a (reverseSpine sp) rhs rhsty
             ES.solve x sol (eval0 sol))
         `catch`
         \(_ :: UnifyEx) -> pure () -- TODO: clean up unused expansion metas in this branch!
