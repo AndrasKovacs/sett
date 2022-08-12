@@ -4,6 +4,7 @@ module Evaluation (
   , eval, quote, eval0, quote0, nf, nf0, spine, coe, eq
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeRelevance, Relevance(..), appTy, proj1Ty, proj2Ty
+  , evalIn, forceAllIn
   ) where
 
 import Control.Exception
@@ -361,6 +362,9 @@ eval t =
     S.ExfalsoSym        -> exfalsoSym
     S.Magic m           -> Magic m
 
+evalIn :: Lvl -> Env -> S.Tm -> Val
+evalIn l e t = let ?lvl = l; ?env = e in eval t
+
 
 -- Forcing
 --------------------------------------------------------------------------------
@@ -413,6 +417,9 @@ forceAll v = case v of
   UnfoldEq _ _ _ v      -> forceAll' v
   t                     -> pure t
 {-# inline forceAll #-}
+
+forceAllIn :: Lvl -> Val -> IO Val
+forceAllIn l t = let ?lvl = l in forceAll t
 
 forceAllFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
 forceAllFlex topv h sp = case h of

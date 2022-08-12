@@ -294,7 +294,8 @@ flexPSubst psub t = do
     Ap a b f x y p    -> S.Ap <$> go a <*> go b <*> go f <*> go x <*> go y <*> go p
     Magic m           -> goMagic m
 
-
+-- TODO: think about getting rid of ComputeAway and instead doing a more plain psubst where
+-- we have rigid & flex and we retry on every unfolding failure!
 rigidPSubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
 rigidPSubstSp psub hd sp = do
   let ?lvl = psub^.cod
@@ -450,10 +451,108 @@ psubst' psub t = do
 -- Pruning
 ----------------------------------------------------------------------------------------------------
 
+pruneVal :: PartialSub -> Env -> PartialSub -> Ty -> Val -> IO (Ty, Val -> Val, Val -> Val)
+pruneVal psub wk prune ty v = do
+  v <- forceAllWithPSub psub v
+  uf
+
+-- ambient PSub, Env Γ Γ*, PSub Γ* Γ, Locals Γ, Locals Γ*, SpineTy, Spine
+pruneSp :: PartialSub -> Env -> PartialSub -> S.Locals -> S.Locals -> Ty -> Spine -> IO S.Tm
+pruneSp psub wk prune fls prls spty sp = do
+
+  let (quoteF, forceSetF, evalF, appClF, freshMetaF) =
+        let ?lvl = prune^.cod; ?env = wk; ?locals = fls
+        in (quote, forceSet, eval, ($$), freshMeta)
+
+  let (quoteP, freshMetaP, forceSetP) =
+        let ?lvl = prune^.dom; ?locals = prls
+        in (quote, freshMeta, forceSet)
+
+  spty <- forceSetF spty
+  case (spty, sp) of
+
+    (a, SId) -> do
+      (_, a) <- psubst' prune a
+      quoteF UnfoldNone . evalF <$!> freshMetaP (gjoin a)
+
+    (Pi x i a b, SApp t u _) -> do
+      (a', wkA, prA) <- pruneVal psub wk prune a u
+      let varF = Var (prune^.cod) a
+      let qa   = quoteF UnfoldNone a
+      forceSetP a' >>= \case
+        El Top -> do
+          sol <- pruneSp psub wk (prune & cod +~ 1) (S.LBind fls x qa) prls (appClF b varF) t
+          pure $ S.Lam S x i qa sol
+        a' -> do
+          let qa'    = quoteP UnfoldNone a'
+          let varP   = Var (prune^.dom) a'
+          let wk'    = EDef wk $! wkA varF
+          let prune' = prune & dom +~ 1
+                             & cod +~ 1
+                             & domVars %~ (`EDef` varP)
+                             & sub %~ IM.insert (unLvl (prune^.cod)) (prA varP)
+          let prls' = S.LBind prls x qa'
+          let fls'  = S.LBind fls x qa
+          sol <- pruneSp psub wk' prune' fls' prls' (appClF b varF) t
+          pure $ S.Lam S x i qa sol
+
+    (El (Pi x i a b), SApp t u _) -> do
+      (a', wkA, prA) <- pruneVal psub wk prune a u
+      let varF = Var (prune^.cod) a
+      let qa   = quoteF UnfoldNone a
+      forceSetP a' >>= \case
+        El Top -> do
+          sol <- pruneSp psub wk (prune & cod +~ 1) (S.LBind fls x qa) prls (El (appClF b varF)) t
+          pure $ S.Lam S x i qa sol
+        a' -> do
+          let qa'    = quoteP UnfoldNone a'
+          let varP   = Var (prune^.dom) a'
+          let wk'    = EDef wk $! wkA varF
+          let prune' = prune & dom +~ 1
+                             & cod +~ 1
+                             & domVars %~ (`EDef` varP)
+                             & sub %~ IM.insert (unLvl (prune^.cod)) (prA varP)
+          let prls' = S.LBind prls x qa'
+          let fls'  = S.LBind fls x qa
+          sol <- pruneSp psub wk' prune' fls' prls' (El (appClF b varF)) t
+          pure $ S.Lam P x i qa sol
+
+    (Sg x a b, SProj1 t) -> do
+      fst <- pruneSp psub wk prune fls prls a t
+      snd <- freshMetaF (gjoin (appClF b (evalF fst)))
+      pure $ S.Pair S fst snd
+
+    (Sg x a b, SProj2 t) -> do
+      fst <- freshMetaF (gjoin a)
+      snd <- pruneSp psub wk prune fls prls (appClF b (evalF fst)) t
+      pure $ S.Pair S fst snd
+
+    (El (Sg x a b), SProj1 t) -> do
+      fst <- pruneSp psub wk prune fls prls (El a) t
+      snd <- freshMetaF (gjoin (El (appClF b (evalF fst))))
+      pure $ S.Pair P fst snd
+
+    (El (Sg x a b), SProj2 t) -> do
+      fst <- freshMetaF (gjoin (El a))
+      snd <- pruneSp psub wk prune fls prls (El (appClF b (evalF fst))) t
+      pure $ S.Pair P fst snd
+
+    _ ->
+      impossible
+
+
 prune :: PartialSub -> MetaVar -> Spine -> IO Val
 prune psub m sp = do
   unless (psub^.allowPruning) (throwIO CantUnify)
-  uf
+  a <- ES.unsolvedMetaType m
+  let wk     = ENil
+      prune  = PSub ENil Nothing 0 0 mempty True
+  sol <- pruneSp psub wk prune S.LEmpty S.LEmpty a sp
+  let ?lvl = 0
+      ?env = ENil
+  let vsol = eval sol
+  ES.solve m sol vsol
+  pure $! spine vsol sp
 
 
 ----------------------------------------------------------------------------------------------------
@@ -600,7 +699,7 @@ solveTopSp psub ls a sp rhs rhsty = do
       psub <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
       ls   <- pure (S.LBind ls x qa)
       psub <- invertVal 0 psub (psub^.cod) u SId
-      sol  <- go psub ls (b $$ var) t
+      sol  <- go psub ls (El (b $$ var)) t
       pure $ S.Lam P x i qa sol
 
     (Sg x a b, SProj1 t) -> do
@@ -665,7 +764,7 @@ solveNestedSp unsolvable psub a sp (!rhsVar, !rhsSp) rhsty = do
       let qa    = quote UnfoldNone a
       psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
       psub  <- invertVal unsolvable psub (psub^.cod) u SId
-      sol   <- go psub (b $$ var) t
+      sol   <- go psub (El (b $$ var)) t
       pure $ S.Lam P x i qa sol
 
     (Sg x a b, SProj1 t) -> do
