@@ -284,9 +284,9 @@ instance Show SP where
 
 --------------------------------------------------------------------------------
 
+-- | Error-like values used during partial substitution.
 data Magic
-  = ComputesAway
-  | Undefined
+  = Undefined
   | Nonlinear
   | MetaOccurs
   deriving (Eq, Show)

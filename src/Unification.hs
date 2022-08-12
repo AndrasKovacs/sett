@@ -17,9 +17,6 @@ import qualified ElabState as ES
 -- import Errors
 import qualified Syntax as S
 
-import ErrWriter (ErrWriter)
-import qualified ErrWriter as EW
-
 ----------------------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------------------
 
@@ -210,97 +207,11 @@ approxOccurs occ t = do
     S.ExfalsoSym{}     -> pure ()
     S.Magic{}          -> pure ()
 
-flexPSubstSp :: PartialSub -> S.Tm -> Spine -> ErrWriter S.Tm
-flexPSubstSp psub hd sp = do
+psubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
+psubstSp psub hd sp = do
   let ?lvl = psub^.cod
-  let go   = flexPSubst psub; {-# inline go #-}
-      goSp = flexPSubstSp psub hd; {-# inline goSp #-}
-  case sp of
-    SId                 -> pure hd
-    SApp t u i          -> S.App <$> goSp t <*> go u <*> pure i
-    SProj1 t            -> S.Proj1 <$> goSp t
-    SProj2 t            -> S.Proj2 <$> goSp t
-    SProjField t tv a n -> S.ProjField <$> goSp t <*> pure (projFieldName tv a n) <*> pure n
-
-flexPSubst :: PartialSub -> Val -> ErrWriter S.Tm
-flexPSubst psub t = do
-
-  let ?lvl = psub^.cod
-
-  let go   = flexPSubst psub; {-# inline go #-}
-      goSp = flexPSubstSp psub; {-# inline goSp #-}
-
-      goBind a t = do
-        (_, a) <- EW.liftIO (psubst' psub a)
-        flexPSubst (lift psub a) (t $$ Var ?lvl a)
-      {-# inline goBind #-}
-
-      goRigid h sp = do
-        h <- case h of
-          RHLocalVar x _ True  -> pure (S.LocalVar (lvlToIx x))
-          RHLocalVar x _ False -> impossible
-          RHPostulate x a      -> pure (S.Postulate x a)
-          RHExfalso a p        -> S.Exfalso <$> go a <*> go p
-          RHCoe a b p t        -> S.Coe <$> go a <*> go b <*> go p <*> go t
-        goSp h sp
-
-      goFlex h sp = do
-        h <- case h of
-          FHMeta x        -> pure $ S.Meta x
-          FHCoe x a b p t -> S.Coe <$> go a <*> go b <*> go p <*> go t
-        goSp h sp
-
-      goUnfold h sp = do
-        h <- case h of
-          UHTopDef x v a ->
-            pure $ S.TopDef x v a
-          UHSolvedMeta m -> do
-            case psub^.occ of
-              Nothing  -> pure ()
-              Just occ -> EW.liftIOBool (approxOccursInMeta occ m)
-            pure $ S.Meta m
-          UHCoe a b p t ->
-            S.Coe <$> go a <*> go b <*> go p <*> go t
-        goSp h sp
-
-      goMagic = \case
-        ComputesAway -> pure $ S.Magic ComputesAway
-        Undefined    -> S.Magic ComputesAway <$ EW.writeErr
-        Nonlinear    -> S.Magic ComputesAway <$ EW.writeErr
-        MetaOccurs   -> S.Magic ComputesAway <$ EW.writeErr
-
-  EW.liftIO (forceWithPSub psub t) >>= \case
-
-    Rigid h sp _      -> goRigid h sp
-    RigidEq a t u     -> S.Eq <$> go a <*> go t <*> go u
-    Flex h sp _       -> goFlex h sp
-    FlexEq x a t u    -> S.Eq <$> go a <*> go t <*> go u
-    Unfold h sp _ _   -> goUnfold h sp
-    TraceEq a t u _   -> S.Eq <$> go a <*> go t <*> go u
-    UnfoldEq a t u _  -> S.Eq <$> go a <*> go t <*> go u
-    Set               -> pure S.Set
-    El a              -> S.El <$> go a
-    Pi x i a b        -> S.Pi x i <$> go a <*> goBind a b   -- TODO: share "go a"
-    Lam sp x i a t    -> S.Lam sp x i <$> go a <*> goBind a t
-    Sg x a b          -> S.Sg x <$> go a <*> goBind a b
-    Pair sp t u       -> S.Pair sp <$> go t <*> go u
-    Prop              -> pure S.Prop
-    Top               -> pure S.Top
-    Tt                -> pure S.Tt
-    Bot               -> pure S.Bot
-    Refl a t          -> S.Refl <$> go a <*> go t
-    Sym a x y p       -> S.Sym <$> go a <*> go x <*> go y <*> go p
-    Trans a x y z p q -> S.Trans <$> go a <*> go x <*> go y <*> go z <*> go p <*> go q
-    Ap a b f x y p    -> S.Ap <$> go a <*> go b <*> go f <*> go x <*> go y <*> go p
-    Magic m           -> goMagic m
-
--- TODO: think about getting rid of ComputeAway and instead doing a more plain psubst where
--- we have rigid & flex and we retry on every unfolding failure!
-rigidPSubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
-rigidPSubstSp psub hd sp = do
-  let ?lvl = psub^.cod
-  let goSp = rigidPSubstSp psub hd; {-# inline goSp #-}
-      go   = rigidPSubst psub;      {-# inline go #-}
+  let goSp = psubstSp psub hd; {-# inline goSp #-}
+      go   = psubst psub;      {-# inline go #-}
   case sp of
     SId                 -> pure hd
     SApp t u i          -> S.App <$!> goSp t <*!> go u <*!> pure i
@@ -308,24 +219,25 @@ rigidPSubstSp psub hd sp = do
     SProj2 t            -> S.Proj2 <$!> goSp t
     SProjField t tv a n -> S.ProjField <$!> goSp t <*!> pure (projFieldName tv a n) <*!> pure n
 
-rigidPSubst :: PartialSub -> Val -> IO S.Tm
-rigidPSubst psub topt = do
+psubst :: PartialSub -> Val -> IO S.Tm
+psubst psub topt = do
 
   let ?lvl = psub^.cod
 
-  let goSp = rigidPSubstSp psub; {-# inline goSp #-}
-      go   = rigidPSubst psub;   {-# inline go #-}
+  let goSp     = psubstSp psub; {-# inline goSp #-}
+      goSpFlex = psubstSp (psub & allowPruning .~ False); {-# inline goSpFlex #-}
+      go       = psubst psub; {-# inline go #-}
+      goFlex   = psubst (psub & allowPruning .~ False); {-# inline goFlex #-}
 
-      goBind a t = do
-        (_, ~a) <- psubst' psub a
-        rigidPSubst (lift psub a) (t $$ Var ?lvl a)
+      goBind :: Val -> Closure -> (S.Tm -> S.Tm -> S.Tm) -> IO S.Tm
+      goBind a t k = do
+        (a, ~va) <- psubst' psub a
+        t <- psubst (lift psub va) (t $$ Var ?lvl va)
+        pure $! k a t
       {-# inline goBind #-}
 
-      goUnfolding unf t = do
-        (!t, !tv) <- EW.run (flexPSubst psub t)
-        unless tv $ fullPSubstCheck psub unf
-        pure t
-      {-# inline goUnfolding #-}
+      goUnfolding unf act =
+        catch @UnifyEx act (\_ -> go unf)
 
       goRigid h sp = do
         h <- case h of
@@ -336,31 +248,39 @@ rigidPSubst psub topt = do
           RHCoe a b p t        -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
         goSp h sp
 
-      goFlex h sp = case h of
-        FHMeta m        -> goSp (S.Meta m) sp `catch` \(_ :: UnifyEx) -> go =<< prune psub m sp
-        FHCoe x a b p t -> do h <- S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
-                              goSp h sp
+      goUnfold h sp = do
+        h <- case h of
+          UHSolvedMeta m   -> case psub^.occ of
+                                Nothing  -> pure (S.Meta m)
+                                Just occ -> do approxOccursInMeta occ m
+                                               pure (S.Meta m)
+          UHTopDef x t tty -> pure (S.TopDef x t tty)
+          UHCoe a b p t    -> S.Coe <$!> goFlex a <*!> goFlex b <*!> goFlex p <*!> goFlex t
+        goSpFlex h sp
 
-      goMagic = \case
-        ComputesAway -> impossible
-        Undefined    -> throwIO CantUnify
-        Nonlinear    -> throwIO CantUnify
-        MetaOccurs   -> throwIO CantUnify
+      goFlex' h sp = case h of
+        FHMeta m -> do
+          goSpFlex (S.Meta m) sp `catch` \(_ :: UnifyEx) -> do
+            (m, sp) <- prune psub m sp
+            goSp (S.Meta m) sp
+        FHCoe x a b p t -> do
+          h <- S.Coe <$!> goFlex a <*!> goFlex b <*!> goFlex p <*!> goFlex t
+          goSpFlex h sp
 
   topt <- forceWithPSub psub topt
   case topt of
     Rigid h sp _       -> goRigid h sp
     RigidEq a t u      -> S.Eq <$!> go a <*!> go t <*!> go u
-    Flex h sp _        -> goFlex h sp
+    Flex h sp _        -> goFlex' h sp
     FlexEq x a t u     -> S.Eq <$!> go a <*!> go t <*!> go u
-    Unfold _ _ unf _   -> goUnfolding unf topt
-    TraceEq _ _ _ unf  -> goUnfolding unf topt
-    UnfoldEq _ _ _ unf -> goUnfolding unf topt
+    Unfold uh sp unf _ -> goUnfolding unf $ goUnfold uh sp
+    TraceEq a t u unf  -> goUnfolding unf $ S.Eq <$!> goFlex a <*!> goFlex t <*!> goFlex u
+    UnfoldEq a t u unf -> goUnfolding unf $ S.Eq <$!> goFlex a <*!> goFlex t <*!> goFlex u
     Set                -> pure S.Set
     El a               -> S.El <$!> go a
-    Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a b -- TODO: share "go a" and "psubst' a" work!
-    Lam sp x i a t     -> S.Lam sp x i <$!> go a <*!> goBind a t
-    Sg x a b           -> S.Sg x <$!> go a <*!> goBind a b
+    Pi x i a b         -> goBind a b (S.Pi x i)
+    Lam sp x i a t     -> goBind a t (S.Lam sp x i)
+    Sg x a b           -> goBind a b (S.Sg x)
     Pair sp t u        -> S.Pair sp <$!> go t <*!> go u
     Prop               -> pure S.Prop
     Top                -> pure S.Top
@@ -370,75 +290,7 @@ rigidPSubst psub topt = do
     Sym a x y p        -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
     Trans a x y z p q  -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
     Ap a b f x y p     -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
-    Magic m            -> goMagic m
-
-fullPSubstCheckSp :: PartialSub -> Spine -> IO ()
-fullPSubstCheckSp psub = \case
-    SId                -> pure ()
-    SApp t u _         -> fullPSubstCheckSp psub t >> fullPSubstCheck psub u
-    SProj1 t           -> fullPSubstCheckSp psub t
-    SProj2 t           -> fullPSubstCheckSp psub t
-    SProjField t _ _ _ -> fullPSubstCheckSp psub t
-
-fullPSubstCheck :: PartialSub -> Val -> IO ()
-fullPSubstCheck psub topt = do
-  let ?lvl = psub^.cod
-
-  let go   = fullPSubstCheck psub; {-# inline go #-}
-      goSp = fullPSubstCheckSp psub; {-# inline goSp #-}
-
-      goBind a t = do
-        (_, a) <- psubst' psub a
-        fullPSubstCheck (lift psub a) (t $$ Var ?lvl a)
-      {-# inline goBind #-}
-
-      goRH = \case
-        RHLocalVar x a True  -> pure ()
-        RHLocalVar x a False -> impossible
-        RHPostulate x a      -> pure ()
-        RHExfalso a p        -> go a >> go p
-        RHCoe a b p t        -> go a >> go b >> go p >> go t
-
-      goFlex h sp = case h of
-        FHMeta m        -> goSp sp `catch` \(_ :: UnifyEx) -> go =<< prune psub m sp
-        FHCoe _ a b p t -> go a >> go b >> go p >> go t >> goSp sp
-
-      goMagic = \case
-        ComputesAway -> impossible
-        Undefined    -> throwIO CantUnify
-        Nonlinear    -> throwIO CantUnify
-        MetaOccurs   -> throwIO CantUnify
-
-  forceAllWithPSub psub topt >>= \case
-    Rigid h sp _      -> goRH h >> goSp sp
-    RigidEq a t u     -> go a >> go t >> go u
-    Flex h sp a       -> goFlex h sp
-    FlexEq x a t u    -> go a >> go t >> go u
-    Unfold{}          -> impossible
-    TraceEq{}         -> impossible
-    UnfoldEq{}        -> impossible
-    Set               -> pure ()
-    El a              -> go a
-    Pi x i a b        -> go a >> goBind a b
-    Lam sp x i a t    -> go a >> goBind a t
-    Sg x a b          -> go a >> goBind a b
-    Pair sp t u       -> go t >> go u
-    Prop              -> pure ()
-    Top               -> pure ()
-    Tt                -> pure ()
-    Bot               -> pure ()
-    Refl a t          -> go a >> go t
-    Sym a x y p       -> go a >> go x >> go y >> go p
-    Trans a x y z p q -> go a >> go x >> go y >> go z >> go p >> go q
-    Ap a b f x y p    -> go a >> go b >> go f >> go x >> go y >> go p
-    Magic m           -> goMagic m
-
-
-psubst :: PartialSub -> Val -> IO S.Tm
-psubst = rigidPSubst
-
-psubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
-psubstSp = rigidPSubstSp
+    Magic m            -> throwIO CantUnify
 
 psubst' :: PartialSub -> Val -> IO (S.Tm, Val)
 psubst' psub t = do
@@ -540,8 +392,7 @@ pruneSp psub wk prune fls prls spty sp = do
     _ ->
       impossible
 
-
-prune :: PartialSub -> MetaVar -> Spine -> IO Val
+prune :: PartialSub -> MetaVar -> Spine -> IO (MetaVar, Spine)
 prune psub m sp = do
   unless (psub^.allowPruning) (throwIO CantUnify)
   a <- ES.unsolvedMetaType m
@@ -552,8 +403,9 @@ prune psub m sp = do
       ?env = ENil
   let vsol = eval sol
   ES.solve m sol vsol
-  pure $! spine vsol sp
-
+  case spine vsol sp of
+    Flex (FHMeta m) sp _ -> pure (m, sp)
+    _                    -> impossible
 
 ----------------------------------------------------------------------------------------------------
 -- Spine solving

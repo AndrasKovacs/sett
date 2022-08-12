@@ -649,12 +649,6 @@ conv t u = do
         _ -> cont
       {-# inline guardP #-}
 
-      goMagic :: Magic -> IO ()
-      goMagic = \case
-        ComputesAway -> pure ()
-        m            -> throwIO (CRMagic m)
-      {-# inline goMagic #-}
-
   t <- forceAll t
   u <- forceAll u
   case (t, u) of
@@ -681,7 +675,7 @@ conv t u = do
       RIrr       -> pure ()
       RBlockOn x -> throwIO $ BlockOn x
       RRel       -> convRigidRel h sp h' sp'
-      RMagic m   -> goMagic m
+      RMagic m   -> throwIO $ CRMagic m
 
     (RigidEq a t u  , RigidEq a' t' u') -> go a a' >> go t t' >> go u u'
     (Lam hl _ _ _ t , Lam _ _ _ a t'  ) -> guardP hl $ goBind a t t'
@@ -697,18 +691,20 @@ conv t u = do
 
     ------------------------------------------------------------
 
-    (Magic m, _) -> case m of ComputesAway -> pure (); m -> throwIO (CRMagic m)
-    (_, Magic m) -> case m of ComputesAway -> pure (); m -> throwIO (CRMagic m)
+    (Magic m, _) -> throwIO $ CRMagic m
+    (_, Magic m) -> throwIO $ CRMagic m
 
     (Flex h sp a, _) -> typeRelevance a >>= \case
       RIrr       -> pure ()
-      RMagic m   -> goMagic m
-      _          -> throwIO $! BlockOn (flexHeadMeta h)
+      RMagic m   -> throwIO $ CRMagic m
+      RRel       -> throwIO $! BlockOn (flexHeadMeta h)
+      RBlockOn{} -> throwIO $! BlockOn (flexHeadMeta h)
 
     (_, Flex h sp a) -> typeRelevance a >>= \case
       RIrr       -> pure ()
-      RMagic m   -> goMagic m
-      _          -> throwIO $! BlockOn (flexHeadMeta h)
+      RMagic m   -> throwIO $ CRMagic m
+      RRel       -> throwIO $! BlockOn (flexHeadMeta h)
+      RBlockOn{} -> throwIO $! BlockOn (flexHeadMeta h)
 
     (FlexEq x _ _ _, _) -> throwIO $ BlockOn x
     (_, FlexEq x _ _ _) -> throwIO $ BlockOn x
@@ -717,13 +713,13 @@ conv t u = do
       RIrr       -> pure ()
       RRel       -> throwIO Diff
       RBlockOn x -> throwIO $ BlockOn x
-      RMagic m   -> goMagic m
+      RMagic m   -> throwIO $ CRMagic m
 
     (_, Rigid h' sp' a) -> typeRelevance a >>= \case
       RIrr       -> pure ()
       RRel       -> throwIO Diff
       RBlockOn x -> throwIO $ BlockOn x
-      RMagic m   -> goMagic m
+      RMagic m   -> throwIO $ CRMagic m
 
     -- canonical mismatch is always a failure, because we don't yet
     -- have inductive data in Prop, so mismatch is only possible in Set.
