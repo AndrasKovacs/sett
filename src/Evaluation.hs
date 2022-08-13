@@ -4,7 +4,7 @@ module Evaluation (
   , eval, quote, eval0, quote0, nf, nf0, spine, coe, eq
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeRelevance, Relevance(..), appTy, proj1Ty, proj2Ty
-  , evalIn, forceAllIn
+  , evalIn, forceAllIn, closeVal
   ) where
 
 import Control.Exception
@@ -793,6 +793,9 @@ quote opt t = let
     UnfoldMetas -> cont (runIO (forceMetas t))
     UnfoldNone  -> cont (runIO (force t))
 
+quoteIn :: Lvl -> UnfoldOpt -> Val -> S.Tm
+quoteIn l opt t = let ?lvl = l in quote opt t
+
 eval0 :: S.Tm -> Val
 eval0 t = let ?env = ENil; ?lvl = 0 in eval t
 
@@ -801,3 +804,9 @@ quote0 opt t = let ?lvl = 0 in quote opt t
 
 nf0 :: UnfoldOpt -> S.Tm -> S.Tm
 nf0 opt t = quote0 opt (eval0 t)
+
+-- | Create a closure from a value
+closeVal :: Lvl -> Env -> Val -> Closure
+closeVal l env v = let
+  v' = quoteIn (l + 1) UnfoldNone v
+  in Cl \x -> evalIn ?lvl (EDef env x) v'

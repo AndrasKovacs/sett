@@ -86,6 +86,19 @@ Cl f $$~ ~t = f t
 {-# inline ($$~) #-}
 infixl 0 $$~
 
+
+-- newtype IOClosure = IOCl# {ioUnCl# :: Int# -> Val -> IO Val}
+-- newtype IOWrap# = IOWrap# (LvlArg => Val -> IO Val)
+
+-- pattern IOCl :: (LvlArg => Val -> IO Val) -> IOClosure
+-- pattern IOCl f <- ((\(IOCl# f) -> IOWrap# \v -> case ?lvl of Lvl (I# l) -> f l v) -> IOWrap# f) where
+--   IOCl f = IOCl# \l v -> let ?lvl = Lvl (I# l) in f v
+-- {-# complete IOCl #-}
+
+-- appIOCl :: LvlArg => IOClosure -> Val -> IO Val
+-- appIOCl (IOCl f) t = f t
+-- {-# inline appIOCl #-}
+
 --------------------------------------------------------------------------------
 
 type Ty = Val
