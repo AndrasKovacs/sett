@@ -291,6 +291,8 @@ data Magic
   | MetaOccurs
   deriving (Eq, Show)
 
+instance Exception Magic
+
 --------------------------------------------------------------------------------
 
 data UnfoldOpt = UnfoldMetas | UnfoldAll | UnfoldNone
@@ -298,8 +300,10 @@ data UnfoldOpt = UnfoldMetas | UnfoldAll | UnfoldNone
 
 type UnfoldOptArg = (?unfoldOpt :: UnfoldOpt)
 
-data UnifyState = USRigid | USFlex | USFull | USIrrelevant
+data UnifyState = USRigid Int | USFlex | USFull | USIrrelevant
   deriving (Eq, Show)
+
+type UnifyStateArg = (?unifyState :: UnifyState)
 
 data ConvState = CSRigid | CSFlex | CSFull
   deriving (Eq, Show)

@@ -44,14 +44,31 @@ data Spine
   | SProj2 Spine
   | SProjField Spine Val ~Ty Int -- projected value, its type, field index
 
-reverseSpine :: Spine -> Spine
-reverseSpine = go SId where
+-- | Reversed spine.
+data RevSpine
+  = RSId
+  | RSApp Val Icit RevSpine
+  | RSProj1 RevSpine
+  | RSProj2 RevSpine
+  | RSProjField Val ~Ty Int RevSpine
+
+reverseSpine :: Spine -> RevSpine
+reverseSpine = go RSId where
   go acc = \case
     SId                 -> acc
-    SApp t u i          -> go (SApp acc u i) t
-    SProj1 t            -> go (SProj1 acc) t
-    SProj2 t            -> go (SProj2 acc) t
-    SProjField t tv a n -> go (SProjField acc tv a n) t
+    SApp t u i          -> go (RSApp u i acc) t
+    SProj1 t            -> go (RSProj1 acc) t
+    SProj2 t            -> go (RSProj2 acc) t
+    SProjField t tv a n -> go (RSProjField tv a n acc) t
+
+hasProjection :: Spine -> Bool
+hasProjection = \case
+  SId          -> False
+  SApp t _ _   -> hasProjection t
+  SProj1{}     -> True
+  SProj2{}     -> True
+  SProjField{} -> True
+
 
 --------------------------------------------------------------------------------
 
@@ -86,18 +103,13 @@ Cl f $$~ ~t = f t
 {-# inline ($$~) #-}
 infixl 0 $$~
 
+appClIn :: Lvl -> Closure -> Val -> Val
+appClIn l = let ?lvl = l in ($$)
+{-# inline appClIn #-}
 
--- newtype IOClosure = IOCl# {ioUnCl# :: Int# -> Val -> IO Val}
--- newtype IOWrap# = IOWrap# (LvlArg => Val -> IO Val)
-
--- pattern IOCl :: (LvlArg => Val -> IO Val) -> IOClosure
--- pattern IOCl f <- ((\(IOCl# f) -> IOWrap# \v -> case ?lvl of Lvl (I# l) -> f l v) -> IOWrap# f) where
---   IOCl f = IOCl# \l v -> let ?lvl = Lvl (I# l) in f v
--- {-# complete IOCl #-}
-
--- appIOCl :: LvlArg => IOClosure -> Val -> IO Val
--- appIOCl (IOCl f) t = f t
--- {-# inline appIOCl #-}
+appClInLazy :: Lvl -> Closure -> Val -> Val
+appClInLazy l = let ?lvl = l in ($$~)
+{-# inline appClInLazy #-}
 
 --------------------------------------------------------------------------------
 
@@ -148,6 +160,14 @@ pattern Var' x a b <- Rigid (RHLocalVar x _ b) SId a where
 
 pattern Var x a = Var' x a False
 
+-- | Bump the `Lvl` and get a fresh variable.
+newVar :: Ty -> (LvlArg => Val -> a) -> LvlArg => a
+newVar a cont =
+  let v = Var ?lvl a in
+  let ?lvl = ?lvl + 1 in
+  seq ?lvl (cont v)
+{-# inline newVar #-}
+
 pattern LamP x i a t = Lam P x i a (Cl t)
 pattern LamS x i a t = Lam S x i a (Cl t)
 pattern LamPE x a t = Lam P x Expl a (Cl t)
@@ -165,6 +185,10 @@ pattern PiPI x a b = Pi x Impl a (Cl b)
 
 pattern SgS x a b   = Sg x a (Cl b)
 pattern SgP x a b   = Sg x a (Cl b)
+
+pattern VUndefined  = Magic Undefined
+pattern VNonlinear  = Magic Nonlinear
+pattern VMetaOccurs = Magic MetaOccurs
 
 funP :: Val -> Val -> Val
 funP a b = PiPE NUnused a \_ -> b

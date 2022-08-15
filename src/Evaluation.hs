@@ -4,7 +4,7 @@ module Evaluation (
   , eval, quote, eval0, quote0, nf, nf0, spine, coe, eq
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeRelevance, Relevance(..), appTy, proj1Ty, proj2Ty
-  , evalIn, forceAllIn, closeVal
+  , evalIn, forceAllIn, closeVal, spineIn, quoteIn, quoteWithOpt, appIn
   ) where
 
 import Control.Exception
@@ -60,6 +60,9 @@ app t u i = case t of
   Unfold h sp t a  -> Unfold h (SApp sp u i) (app t u i) (appTy a u)
   Magic m          -> Magic m
   _                -> impossible
+
+appIn :: Lvl -> Val -> Val -> Icit -> Val
+appIn l = let ?lvl = l in app
 
 appE :: LvlArg => Val -> Val -> Val
 appE t u = app t u Expl
@@ -292,6 +295,9 @@ spine v sp =
     SProj2 t           -> proj2 (go t)
     SProjField t _ _ n -> projField (go t) n
 
+spineIn :: Lvl -> Val -> Spine -> Val
+spineIn l v sp = let ?lvl = l in spine v sp
+
 maskEnv :: Env -> S.Locals -> Spine
 maskEnv e ls = case (e, ls) of
   (ENil,     S.LEmpty          ) -> SId
@@ -450,11 +456,13 @@ forceAll' v = case v of
 
 ------------------------------------------------------------
 
--- | Eliminate all unfoldings from the head of a type.
+-- | Eliminate all unfoldings from the head of a type. NOTE: we force *under* `El` as well,
+--   because in many cases we want to match on the `El` of some canonical `Prop`.
 forceSet :: LvlArg => Val -> IO Val
 forceSet v = case v of
   topv@(Flex h sp _)    -> forceSetFlex topv h sp
   Unfold _ _ v _        -> forceSet' v
+  El a                  -> El <$!> forceAll' a
   t                     -> pure t
 {-# inline forceSet #-}
 
@@ -472,6 +480,7 @@ forceSet' :: LvlArg => Val -> IO Val
 forceSet' v = case v of
   topv@(Flex h sp _)    -> forceSetFlex topv h sp
   Unfold _ _ v _        -> forceSet' v
+  El a                  -> El <$!> forceAll' a
   t                     -> pure t
 
 ------------------------------------------------------------
@@ -578,14 +587,6 @@ typeRelevance a = do
 
 -- Conversion
 --------------------------------------------------------------------------------
-
--- | Bump the `Lvl` and get a fresh variable.
-newVar :: Ty -> (LvlArg => Val -> a) -> LvlArg => a
-newVar a cont =
-  let v = Var ?lvl a in
-  let ?lvl = ?lvl + 1 in
-  seq ?lvl (cont v)
-{-# inline newVar #-}
 
 data ConvRes = Same | Diff | BlockOn MetaVar | CRMagic Magic
   deriving Show
@@ -731,10 +732,10 @@ conv t u = do
 -- Quoting
 --------------------------------------------------------------------------------
 
-quoteSp :: LvlArg => UnfoldOpt -> S.Tm -> Spine -> S.Tm
-quoteSp opt hd sp = let
-  go   = quote opt; {-# inline go #-}
-  goSp = quoteSp opt hd; {-# inline goSp #-}
+quoteSpWithOpt :: LvlArg => UnfoldOpt -> S.Tm -> Spine -> S.Tm
+quoteSpWithOpt opt hd sp = let
+  go   = quoteWithOpt opt; {-# inline go #-}
+  goSp = quoteSpWithOpt opt hd; {-# inline goSp #-}
   in case sp of
     SId                 -> hd
     SApp t u i          -> S.App (goSp t) (go u) i
@@ -742,11 +743,11 @@ quoteSp opt hd sp = let
     SProj2 t            -> S.Proj2 (goSp t)
     SProjField t tv x n -> S.ProjField (goSp t) (projFieldName tv x n) n
 
-quote :: LvlArg => UnfoldOpt -> Val -> S.Tm
-quote opt t = let
-  go         = quote opt; {-# inline go #-}
-  goSp       = quoteSp opt; {-# inline goSp #-}
-  goBind a t = newVar a \v -> quote opt (t $$ v); {-# inline goBind #-}
+quoteWithOpt :: LvlArg => UnfoldOpt -> Val -> S.Tm
+quoteWithOpt opt t = let
+  go         = quoteWithOpt opt; {-# inline go #-}
+  goSp       = quoteSpWithOpt opt; {-# inline goSp #-}
+  goBind a t = newVar a \v -> quoteWithOpt opt (t $$ v); {-# inline goBind #-}
 
   goFlexHead = \case
     FHMeta x        -> S.Meta x
@@ -793,20 +794,26 @@ quote opt t = let
     UnfoldMetas -> cont (runIO (forceMetas t))
     UnfoldNone  -> cont (runIO (force t))
 
-quoteIn :: Lvl -> UnfoldOpt -> Val -> S.Tm
-quoteIn l opt t = let ?lvl = l in quote opt t
+quote :: LvlArg => Val -> S.Tm
+quote = quoteWithOpt UnfoldNone
+
+quoteIn :: Lvl -> Val -> S.Tm
+quoteIn l t = let ?lvl = l in quote t
 
 eval0 :: S.Tm -> Val
 eval0 t = let ?env = ENil; ?lvl = 0 in eval t
 
-quote0 :: UnfoldOpt -> Val -> S.Tm
-quote0 opt t = let ?lvl = 0 in quote opt t
+quote0 :: Val -> S.Tm
+quote0 t = let ?lvl = 0 in quote t
+
+quote0WithOpt :: UnfoldOpt -> Val -> S.Tm
+quote0WithOpt opt t = let ?lvl = 0 in quoteWithOpt opt t
 
 nf0 :: UnfoldOpt -> S.Tm -> S.Tm
-nf0 opt t = quote0 opt (eval0 t)
+nf0 opt t = quote0WithOpt opt (eval0 t)
 
--- | Create a closure from a value
+-- | Create a closure from a value.
 closeVal :: Lvl -> Env -> Val -> Closure
 closeVal l env v = let
-  v' = quoteIn (l + 1) UnfoldNone v
+  v' = quoteIn (l + 1) v
   in Cl \x -> evalIn ?lvl (EDef env x) v'

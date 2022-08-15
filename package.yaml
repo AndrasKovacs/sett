@@ -69,6 +69,7 @@ executable:
   - DataKinds
   - DerivingVia
   - FlexibleContexts
+  - FlexibleInstances
   - FunctionalDependencies
   - ImplicitParams
   - KindSignatures

@@ -40,8 +40,8 @@ data Infer = Infer Tm {-# unpack #-} GTy
 
 freshMeta :: LvlArg => LocalsArg => GTy -> IO Tm
 freshMeta (G a fa) = do
-  let closed   = eval0 $ closeTy $ quote UnfoldNone a
-  let ~fclosed = eval0 $ closeTy $ quote UnfoldNone fa
+  let closed   = eval0 $ closeTy $ quote a
+  let ~fclosed = eval0 $ closeTy $ quote fa
   m <- newMeta (G closed fclosed)
   pure $ InsertedMeta m ?locals
 
@@ -127,7 +127,7 @@ checkEl topt (G topa ftopa) = do
 
     -- insert implicit lambda
     (t, V.Pi x Impl a b) -> do
-      let qa = quote UnfoldNone a
+      let qa = quote a
       insertBinder qa (gjoin (V.El a)) \var ->
         S.Lam P x Impl qa <$!> (check t $! gjoin $! V.El (b $$ var))
 
@@ -201,7 +201,7 @@ check topt (G topa ftopa) = do
 
     -- insert implicit lambda
     (t, V.Pi x Impl a b) -> do
-      let qa = quote UnfoldNone a
+      let qa = quote a
       insertBinder qa (gjoin a) \var ->
         S.Lam S x Impl qa <$!> check t (gjoin $! (b $$ var))
 
@@ -295,7 +295,7 @@ infer topt = case topt of
     Infer t tty <- infer t
     Infer u uty <- infer u
     unify topt tty uty
-    let a = quote UnfoldNone (g1 tty)
+    let a = quote (g1 tty)
     pure $! Infer (S.Eq a t u) gProp
 
   P.Exfalso _ -> do

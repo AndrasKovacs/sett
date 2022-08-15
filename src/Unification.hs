@@ -7,9 +7,8 @@ import IO
 import Control.Exception
 
 import qualified Data.IntMap as IM
--- import qualified Data.IntSet as IS
 import qualified Data.Ref.F as RF
-import Lens.Micro.Platform hiding (to)
+import Lens.Micro.Platform
 
 import Values
 import Evaluation
@@ -24,21 +23,22 @@ data UnifyEx = CantUnify | CantSolveFrozenMeta | CantSolveFlexMeta
   deriving (Eq, Show)
 instance Exception UnifyEx
 
--- | Forcing depending on conversion state.
-forceCS :: LvlArg => ConvState -> Val -> IO Val
-forceCS cs v = case cs of
-  CSFull -> forceAll v
-  _      -> force    v
-{-# inline forceCS #-}
-
 -- TODO: optimize
 freshMeta :: LvlArg => S.LocalsArg => GTy -> IO S.Tm
 freshMeta (G a fa) = do
-  let closed   = eval0 $ S.closeTy $ quote UnfoldNone a
-  let ~fclosed = eval0 $ S.closeTy $ quote UnfoldNone fa
+  let closed   = eval0 $ S.closeTy $ quote a
+  let ~fclosed = eval0 $ S.closeTy $ quote fa
   m <- ES.newMeta (G closed fclosed)
   pure $ S.InsertedMeta m ?locals
 
+freshMeta0 :: GTy -> IO S.Tm
+freshMeta0 a = do
+  m <- ES.newMeta a
+  pure $ S.InsertedMeta m S.LEmpty
+
+catchUE :: IO a -> IO a -> IO a
+catchUE act handle = act `catch` \(_ :: UnifyEx) -> handle
+{-# inline catchUE #-}
 
 ----------------------------------------------------------------------------------------------------
 -- Partial substitution
@@ -54,9 +54,8 @@ data PartialSub = PSub {
   , partialSubOcc          :: Maybe MetaVar  -- optional occurs check
   , partialSubDom          :: Lvl            -- size of Γ
   , partialSubCod          :: Lvl            -- size of Δ
-  , partialSubSub          :: IM.IntMap Val  -- Partial map from Δ vars to Γ values. A var which is not
-                                             -- in the map is mapped to a scope error, but note that
-                                             -- PSVal-s can contain scope errors as well.
+  , partialSubSub          :: IM.IntMap Val  -- Map from Δ vars to Γ values. A var which is not
+                                             -- in the map is mapped to VUndefined.
   , partialSubAllowPruning :: AllowPruning   -- Is pruning allowed during partial substitution.
   }
 makeFields ''PartialSub
@@ -227,7 +226,7 @@ psubst psub topt = do
       goBind :: Val -> Closure -> (S.Tm -> S.Tm -> S.Tm) -> IO S.Tm
       goBind a t k = do
         (!a, ~va) <- psubst' psub a
-        t <- psubst (lift psub va) (t $$ Var ?lvl va)
+        t <- psubst (lift psub va) (appClIn (?lvl + 1) t (Var ?lvl va))
         pure $! k a t
       {-# inline goBind #-}
 
@@ -291,359 +290,181 @@ psubst' psub t = do
   t <- psubst psub t
   let ~vt = evalInDom psub t
   pure (t, vt)
+{-# inline psubst' #-}
+
+----------------------------------------------------------------------------------------------------
+-- Eta-expansion
+----------------------------------------------------------------------------------------------------
+
+metaExpansion' :: LvlArg => EnvArg => S.LocalsArg => Ty -> RevSpine -> IO S.Tm
+metaExpansion' a sp = do
+  let go = metaExpansion'; {-# inline go #-}
+
+      bind x a qa k = do
+        let var     = Var ?lvl a
+        let ?lvl    = ?lvl + 1
+        let ?env    = EDef ?env
+        let ?locals = S.LBind ?locals x qa
+        k var
+      {-# inline bind #-}
+
+  a <- forceSet a
+  case (a, sp) of
+    (a, RSId) ->
+      freshMeta (gjoin a)
+    (Pi x i a b, RSApp t _ sp) -> do
+      let qa = quote a
+      bind x a qa \var -> S.Lam S x i qa <$!> go (b $$ var) sp
+    (El (Pi x i a b), RSApp t _ sp) -> do
+      let qa = quote a
+      bind x a qa \var -> S.Lam P x i qa <$!> go (El (b $$ var)) sp
+    (Sg x a b, RSProj1 sp) -> do
+      fst <- go a sp
+      S.Pair S fst <$!> freshMeta (gjoin (b $$~ eval fst))
+    (Sg x a b, RSProj2 sp) -> do
+      fst <- freshMeta (gjoin a)
+      S.Pair S fst <$!> go (b $$~ eval fst) sp
+    (El (Sg x a b), RSProj1 sp) -> do
+      fst <- go (El a) sp
+      S.Pair P fst <$!> freshMeta (gjoin (El (b $$~ eval fst)))
+    (El (Sg x a b), RSProj2 sp) -> do
+      fst <- freshMeta (gjoin (El a))
+      S.Pair P fst <$!> go (El (b $$~ eval fst)) sp
+    (a, RSProjField _  _  0 sp) ->
+      go a (RSProj1 sp)
+    (a, RSProjField tv ta n sp) ->
+      go a (RSProj2 (RSProjField VUndefined VUndefined (n - 1) sp))
+    _ ->
+      impossible
+
+metaExpansion :: Ty -> RevSpine -> IO S.Tm
+metaExpansion a sp = do
+  let ?lvl = 0; ?env = ENil; ?locals = S.LEmpty
+  metaExpansion' a sp
+
+-- | Eta-expand a meta enough so that all projections disappear from the given spine.
+--   Does nothing if the spine doesn't contain projections.
+etaExpandMeta :: MetaVar -> Spine -> IO (MetaVar, Spine)
+etaExpandMeta m sp | not (hasProjection sp) =
+  pure (m, sp)
+etaExpandMeta m sp = do
+  a <- ES.unsolvedMetaType m
+  sol <- metaExpansion a (reverseSpine sp)
+  let vsol = eval0 sol
+  ES.solve m sol vsol
+  case spineIn 0 vsol sp of
+    Flex (FHMeta m) sp _ -> pure (m, sp)
+    _                    -> impossible
 
 
 ----------------------------------------------------------------------------------------------------
 -- Pruning
 ----------------------------------------------------------------------------------------------------
 
--- can we replace pruned things with Top?
--- prunings: lambda, pairing, neutral, undefined
+-- | Structure pointing to parts to prune.
+data PruneVal = PLam PruneVal | PPair PruneVal PruneVal | PKeep | PDrop
 
-data Pr = PLam Pr | PPair Pr Pr | PKeep | PDrop
+-- | Structure pointing to parts to prune.
+data PruneSp = PId | PApp PruneVal PruneSp
 
-{-
-prTy :: LvlArg => Pr -> Ty -> Ty
+mkPPair :: PruneVal -> PruneVal -> PruneVal
+mkPPair PKeep PKeep = PKeep
+mkPPair PDrop PDrop = PDrop
+mkPPair p1    p2    = PPair p1 p2
+
+mkPLam :: PruneVal -> PruneVal
+mkPLam PKeep = PKeep
+mkPLam PDrop = PDrop
+mkPLam p     = PLam p
+
+mkPruneVal :: PartialSub -> Val -> IO PruneVal
+mkPruneVal psub t = forceAllWithPSub psub t >>= \case
+  Pair _ t u      -> mkPPair <$!> mkPruneVal psub t <*!> mkPruneVal psub u
+  Lam _ _ _ a t   -> do (_, ~a') <- psubst' psub a
+                        let ?lvl = psub^.cod
+                        mkPLam <$!> mkPruneVal (lift psub a') (appClIn (?lvl + 1) t (Var ?lvl a))
+  Rigid{}         -> pure PKeep
+  Magic Undefined -> pure PDrop
+  _               -> throwIO CantUnify
+
+mkPruneSp :: PartialSub -> RevSpine -> IO PruneSp
+mkPruneSp psub = \case
+  RSId         -> pure PId
+  RSApp t i sp -> PApp <$!> mkPruneVal psub t <*!> mkPruneSp psub sp
+  _            -> impossible
+
+prArgTy :: LvlArg => PruneVal -> Ty -> Ty
+prArgTy p a = case (p, runIO (forceSet a)) of
+  (PKeep      , a              ) -> a
+  (PDrop      , a              ) -> El Top
+  (PLam p     , Pi x i a b     ) -> Pi x i a $ Cl \x -> prArgTy p (b $$ x)
+  (PLam p     , El (Pi x i a b)) -> Pi x i a $ Cl \x -> prArgTy p (El (b $$ x))
+  (PPair p1 p2, Sg x a b       ) -> Sg x (prArgTy p1 a) $ Cl \x ->
+                                    prArgTy p2 (b $$ fromPrArg p1 a x)
+  (PPair p1 p2, El (Sg x a b)  ) -> Sg x (prArgTy p1 (El a)) $ Cl \x ->
+                                    prArgTy p2 (El (b $$ fromPrArg p1 a x))
+  _                              -> impossible
+
+toPrArg :: LvlArg => PruneVal -> Ty -> Val -> Val
+toPrArg p a t = case (p, runIO (forceSet a)) of
+  (PKeep      , a              ) -> t
+  (PDrop      , a              ) -> Tt
+  (PLam p     , Pi x i a b     ) -> Lam S x i a $ Cl \x -> toPrArg p (b $$ x) (app t x i)
+  (PLam p     , El (Pi x i a b)) -> Lam P x i a $ Cl \x -> toPrArg p (El (b $$ x)) (app t x i)
+  (PPair p1 p2, Sg x a b       ) -> let t1 = proj1 t; t2 = proj2 t in
+                                    Pair S (toPrArg p1 a t1) (toPrArg p2 (b $$ t1) t2)
+  (PPair p1 p2, El (Sg x a b)  ) -> let t1 = proj1 t; t2 = proj2 t in
+                                    Pair P (toPrArg p1 (El a) t1) (toPrArg p2 (El (b $$ t1)) t2)
+  _                              -> impossible
+
+fromPrArg :: LvlArg => PruneVal -> Ty -> Val -> Val
+fromPrArg p a t = case (p, runIO (forceSet a)) of
+  (PKeep      , a              ) -> t
+  (PDrop      , a              ) -> VUndefined
+  (PLam p     , Pi x i a b     ) -> Lam S x i a $ Cl \x -> fromPrArg p (b $$ x) (app t x i)
+  (PLam p     , El (Pi x i a b)) -> Lam P x i a $ Cl \x -> fromPrArg p (El (b $$ x)) (app t x i)
+  (PPair p1 p2, Sg x a b       ) -> let t1 = proj1 t; t2 = proj2 t; fst = fromPrArg p1 a t1 in
+                                    Pair S fst (fromPrArg p2 (b $$ fst) t2)
+  (PPair p1 p2, El (Sg x a b)  ) -> let t1 = proj1 t; t2 = proj2 t; fst = fromPrArg p1 (El a) t1 in
+                                    Pair S fst (fromPrArg p2 (El (b $$ fst)) t2)
+  _                              -> impossible
+
+prTy :: LvlArg => PruneSp -> Ty -> Ty
 prTy p a = case (p, runIO (forceSet a)) of
-  (PPair p1 p2 , Sg x a b  ) -> Sg x (prTy p1 a) $ Cl \x -> prTy p2 (b $$ fromPr p1 a x)
-  (PLam p      , Pi x i a b) -> Pi x i a $ Cl \x -> prTy p (b $$ x)
-  (PKeep       , a         ) -> a
-  (PDrop       , a         ) -> El Top
-
-toPr :: LvlArg => Pr -> Ty -> Val -> Val
-toPr pr a t = case (pr, runIO (forceSet a)) of
-  (PPair p1 p2 , Sg x a b  ) -> let t1 = proj1 t; t2 = proj2 t in
-                                Pair S (toPr p1 a t1) (toPr p2 (b $$ t1) t2)
-  (PLam p      , Pi x i a b) -> Lam S x i a $ Cl \x -> toPr p (b $$ x) (app t x i)
-  (PKeep       , a         ) -> t
-  (PDrop       , a         ) -> Tt
-
-fromPr :: LvlArg => Pr -> Ty -> Val -> Val
-fromPr pr a t = case (pr, runIO (forceSet a)) of
-  (PPair p1 p2 , Sg x a b  ) -> let t1 = proj1 t; t2 = proj2 t; fst = fromPr p1 a t1 in
-                                Pair S fst (fromPr p2 (b $$ fst) t2)
-  (PLam p      , Pi x i a b) -> Lam S x i a $ Cl \x -> fromPr p (b $$ x) (app t x i)
-  (PKeep       , a         ) -> t
-  (PDrop       , a         ) -> Magic Undefined
--}
-
-{-
-prTy :: LvlArg => Pr -> Ty -> Ty
-prTy p a = case (p, runIO (forceSet a)) of
-
-  (PPair p1 p2 , Sg x a b  ) -> case prTy p1 a of
-                                  El Top -> prTy p2 (b $$ fromPr p1 a Tt)
-                                  a'     -> Sg x a' $ Cl \x -> prTy p2 (b $$ fromPr p1 a x)
-
-  (PLam p      , Pi x i a b) -> Pi x i a $ Cl \x -> prTy p (b $$ x)
-  (PKeep       , a         ) -> a
-  (PDrop       , a         ) -> El Top
-
-toPr :: LvlArg => Pr -> Ty -> Val -> Val
-toPr pr a t = case (pr, runIO (forceSet a)) of
-
-  (PPair p1 p2 , Sg x a b  ) -> let t1 = proj1 t; t2 = proj2 t in
-                                case prTy p1 a of
-                                  El Top -> toPr p2 (b $$ t1) t2
-                                  _      -> Pair S (toPr p1 a t1) (toPr p2 (b $$ t1) t2)
-
-  (PLam p      , Pi x i a b) -> Lam S x i a $ Cl \x -> toPr p (b $$ x) (app t x i)
-  (PKeep       , a         ) -> t
-  (PDrop       , a         ) -> Tt
-
-fromPr :: LvlArg => Pr -> Ty -> Val -> Val
-fromPr pr a t = case (pr, runIO (forceSet a)) of
-
-  (PPair p1 p2 , Sg x a b  ) -> case prTy p1 a of
-                                  El Top -> let fst = fromPr p1 a Tt in
-                                            Pair S fst (fromPr p2 (b $$ fst) t)
-                                  _      -> let t1 = proj1 t; t2 = proj2 t; fst = fromPr p1 a t1 in
-                                            Pair S fst (fromPr p2 (b $$ fst) t2)
-
-  (PLam p      , Pi x i a b) -> Lam S x i a $ Cl \x -> fromPr p (b $$ x) (app t x i)
-  (PKeep       , a         ) -> t
-  (PDrop       , a         ) -> Magic Undefined
-
--}
-
-
-{-
-data PrRes = PrRes {ty :: Ty, to :: Val -> Val, from :: Val -> Val}
-
-pr :: LvlArg => Pr -> Ty -> PrRes
-pr p a = case (p, runIO (forceSet a)) of
-  (PPair p1 p2, Sg x a b) ->
-    let PrRes a' toa' froma' = pr p1 a in
-    PrRes
-      (Sg x a' $ Cl \x -> ty (pr p2 (b $$ froma' x)))
-      (\t -> let t1 = proj1 t; t2 = proj2 t in
-             Pair S (toa' t1) (to (pr p2 (b $$ t1)) t2))
-      (\t -> let t1 = proj1 t; t2 = proj2 t; fst = froma' t1 in
-             Pair S fst (from (pr p2 (b $$ fst)) t2))
-
--}
-
-str :: S.Ty -> S.Ty
-str = uf
-
-from :: LvlArg => EnvArg => Ty -> Val -> Val
-from = uf
-
--- pr :: LvlArg => EnvArg => Ty -> S.Ty
--- pr a = case runIO (forceSet a) of
---   Sg x a b -> case pr a of
---     a'@(S.El S.Top) -> let v = Var ?lvl a' in let ?lvl = ?lvl+1; ?env = EDef ?env v
---     a'              -> _
-
-    -- case pr a of
-    -- a' -> let v = Var ?lvl a' in let ?lvl = ?lvl+1; ?env = EDef ?env v in
-    --       case pr (b $$ _) of
-    --         _ -> uf
-
-
-
-
--- curryTy :: Ty -> Ty
--- curryTy = \case
---   Pi x i (Sg y a b) c -> curryTy (Pi x i a $ Cl \a -> Pi nx i (b $$ a) $ Cl \b -> c $$ Pair S a b)
---   Pi x i a b          -> Pi x i a $ Cl \a -> curryTy (b $$ a)
-
--- curryTy :: Ty -> Ty
--- curryTy = \case
---   Pi x i a b -> case curryTy a of
---     Sg y a0 a1 -> curryTy (Pi x i a0 $ Cl \x0 -> Pi nx i (a1 $$ x0) $ Cl \x1 -> _)
---     ca         -> Pi x i ca $ Cl \x -> curryTy (b $$ (from a $$ x))
---   -- Pi x i (Sg y a b) c -> curryTy (Pi x i a $ Cl \a -> Pi nx i (b $$ a) $ Cl \b -> c $$ Pair S a b)
---   -- Pi x i a b          -> Pi x i a $ Cl \a -> curryTy (b $$ a)
-
--- to :: Ty -> Closure
--- to = uf
-
--- from :: Ty -> Closure
--- from = uf
-
-
-
-
-
-
-{-
-prTy :: Ty -> Ty
-prTy = \case
-  Sg x a b -> Sg x (prTy a) (Cl \x -> prTy (b $$ (wkVal a $$ x)))
-  El Top   -> Sg NUnused (El Top) (Cl \_ -> El Top)
-
-prVal :: Ty -> Closure
-prVal = \case
-  Sg x a b -> Cl \t -> Pair S (prVal a $$ proj1 t) (prVal (b $$ proj1 t) $$ proj2 t)
-  El Top   -> Cl \_ -> Pair S Tt Tt
-
-  -- t.1 : a
-  -- prVal a t.1 : prTy a
-
-  -- goal : prTy (b (wkVal a (prVal a t.1)))
-  --      : prTy (b t.1)
-
-  -- t.2 : b t.1
-  -- prVal (b t.1) t.2 : prTy (b t.1)
-
-wkVal :: Ty -> Closure
-wkVal = \case
-  Sg x a b -> Cl \t -> let p1 = wkVal a $$ proj1 t in Pair S p1 (wkVal (b $$ p1) $$ (proj2 t))
-  El Top   -> Cl \_ -> Tt
-
-   -- t.1 : prTy a
-   -- wkVal a t.1 : a
-
-   -- goal :  b (wkVal a t.1)
-
-
-   -- t.2 : prTy (b (wkVal a (t.1)))
-   -- wkVal t.2 :
-
--}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
--- prTy :: LvlArg => EnvArg => Ty -> S.Ty
--- prTy = \case
---   Sg x a b ->
---     let a'   = prTy a in
---     let ~va' = eval a' in
---     let b'   = (let var' = Var ?lvl va' in
---                 let ?lvl = ?lvl + 1
---                     ?env = EDef ?env var' in
---                 prTy (b $$ prVal a var')) in
-
---     S.Sg x a' b'
-
---   El Top -> S.Sg NUnused (S.El S.Top) (S.El S.Top)
-
--- -- wkVal :: LvlArg => EnvArg => Ty -> Val -> Val
--- -- wkVal = uf
-
--- prVal :: LvlArg => EnvArg => Ty -> Val -> Val
--- prVal a t = case a of
---   Sg x a b -> Pair S (prVal a (proj1 t)) _
-
---   -- proj2 t : B (proj1 t)
-
-
-
--- pruneVal :: PartialSub -> Env -> PartialSub -> Ty -> Val -> IO (Ty, Closure, IOClosure)
--- pruneVal psub wk prune ty v = do
-
---   let (forceSetF, quoteF, appClF) = let ?lvl = prune^.cod in (forceSet, quote, ($$))
---   let (quoteP, appIOClP) = let ?lvl = prune^.dom in (quote, appIOCl)
-
---   v  <- forceAllWithPSub psub v
---   ty <- forceSetF ty
---   case (ty, v) of
-
---     (a, Rigid{}) -> do
---       a' <- snd <$!> psubst' prune a
---       pure ( a'
---            , Cl \x -> evalIn (prune^.cod) wk $ quoteP UnfoldNone x
---            , IOCl \x -> snd <$!> psubst' prune x )
-
---     (a, Magic Undefined) -> do
---       pure (El Top
---            , Cl \_ ->  Tt
---            , IOCl \_ -> pure $ Magic Undefined)
-
---     -- closure & Val strengthening is awful
-
---     -- (Sg x a b, Pair _ t u) -> do
---     --   (a', wkA, prA) <- pruneVal psub wk prune a t
---     --   let varF   = Var (prune^.cod) a
---     --   let varP   = Var (prune^.dom) a'
---     --   let wk'    = EDef wk varF
---     --   prAvarP <- appIOClP prA varP
---     --   let prune' = prune & dom +~ 1
---     --                      & cod +~ 1
---     --                      & domVars %~ (`EDef` varP)
---     --                      & sub %~ IM.insert (unLvl (prune^.cod)) prAvarP
---     --   (b', wkB, prB) <- pruneVal psub wk' prune' (appClF b varF) u
---     --   pure (Sg x a' (closeVal (prune^.dom) (prune^.domVars) b')
---     --       , Cl (\ab -> Pair S (wkA $$ proj1 ab) (wkB $$ proj2 ab)) -- TODO: wkB, prB strengthening?
---     --       , IOCl (\ab -> _))
-
-
--- -- ambient PSub, Env Γ Γ, Env Γ Γ*, PSub Γ* Γ, Locals Γ, Locals Γ*, SpineTy, Spine
--- pruneSp :: PartialSub -> Env -> Env -> PartialSub -> S.Locals -> S.Locals -> Ty -> Spine -> IO S.Tm
--- pruneSp psub fvars wk prune fls prls spty sp = do
-
---   let (quoteF, forceSetF, evalF, appClF, freshMetaF) =
---         let ?lvl = prune^.cod; ?env = fvars; ?locals = fls
---         in (quote, forceSet, eval, ($$), freshMeta)
-
---   let (quoteP, freshMetaP, forceSetP, appIOClP) =
---         let ?lvl = prune^.dom; ?locals = prls
---         in (quote, freshMeta, forceSet, appIOCl)
-
---   spty <- forceSetF spty
---   case (spty, sp) of
-
---     (a, SId) -> do
---       (_, a) <- psubst' prune a
---       quoteF UnfoldNone . evalIn (psub^.cod) wk <$!> freshMetaP (gjoin a)
-
---     (Pi x i a b, SApp t u _) -> do
---       (a', wkA, prA) <- pruneVal psub wk prune a u
---       let varF = Var (prune^.cod) a
---       let qa   = quoteF UnfoldNone a
---       forceSetP a' >>= \case
---         El Top -> do
---           sol <- pruneSp psub (EDef fvars varF) wk (prune & cod +~ 1) (S.LBind fls x qa) prls (appClF b varF) t
---           pure $ S.Lam S x i qa sol
---         a' -> do
---           let qa'    = quoteP UnfoldNone a'
---           let varP   = Var (prune^.dom) a'
---           let wk'    = EDef wk $! appClF wkA varF
---           prAvarP <- appIOClP prA varP
---           let prune' = prune & dom +~ 1
---                              & cod +~ 1
---                              & domVars %~ (`EDef` varP)
---                              & sub %~ IM.insert (unLvl (prune^.cod)) prAvarP
---           let prls' = S.LBind prls x qa'
---           let fls'  = S.LBind fls x qa
---           sol <- pruneSp psub (EDef fvars varF) wk' prune' fls' prls' (appClF b varF) t
---           pure $ S.Lam S x i qa sol
-
---     (El (Pi x i a b), SApp t u _) -> do
---       (a', wkA, prA) <- pruneVal psub wk prune a u
---       let varF = Var (prune^.cod) a
---       let qa   = quoteF UnfoldNone a
---       forceSetP a' >>= \case
---         El Top -> do
---           sol <- pruneSp psub (EDef fvars varF) wk (prune & cod +~ 1)
---                         (S.LBind fls x qa) prls (El (appClF b varF)) t
---           pure $ S.Lam S x i qa sol
---         a' -> do
---           let qa'    = quoteP UnfoldNone a'
---           let varP   = Var (prune^.dom) a'
---           let wk'    = EDef wk $! appClF wkA varF
---           prAvarP <- appIOClP prA varP
---           let prune' = prune & dom +~ 1
---                              & cod +~ 1
---                              & domVars %~ (`EDef` varP)
---                              & sub %~ IM.insert (unLvl (prune^.cod)) prAvarP
---           let prls' = S.LBind prls x qa'
---           let fls'  = S.LBind fls x qa
---           sol <- pruneSp psub (EDef fvars varF) wk' prune' fls' prls' (El (appClF b varF)) t
---           pure $ S.Lam P x i qa sol
-
---     (Sg x a b, SProj1 t) -> do
---       fst <- pruneSp psub fvars wk prune fls prls a t
---       snd <- freshMetaF (gjoin (appClF b (evalF fst)))
---       pure $ S.Pair S fst snd
-
---     (Sg x a b, SProj2 t) -> do
---       fst <- freshMetaF (gjoin a)
---       snd <- pruneSp psub wk fvars prune fls prls (appClF b (evalF fst)) t
---       pure $ S.Pair S fst snd
-
---     (El (Sg x a b), SProj1 t) -> do
---       fst <- pruneSp psub fvars wk prune fls prls (El a) t
---       snd <- freshMetaF (gjoin (El (appClF b (evalF fst))))
---       pure $ S.Pair P fst snd
-
---     (El (Sg x a b), SProj2 t) -> do
---       fst <- freshMetaF (gjoin (El a))
---       snd <- pruneSp psub fvars wk prune fls prls (El (appClF b (evalF fst))) t
---       pure $ S.Pair P fst snd
-
---     _ ->
---       impossible
+  (PId, a) ->
+    a
+  (PApp p sp, Pi x i a b) ->
+    Pi x i (prArgTy p a) $ Cl \x -> prTy sp (b $$ fromPrArg p a x)
+  (PApp p sp, El (Pi x i a b)) ->
+    Pi x i (prArgTy p a) $ Cl \x -> prTy sp (El (b $$ fromPrArg p a x))
+  _ ->
+    impossible
+
+fromPrTy :: LvlArg => PruneSp -> Ty -> Val -> Val
+fromPrTy p a t = case (p, runIO (forceSet a)) of
+  (PId, a) ->
+    t
+  (PApp p sp, Pi x i a b) ->
+    Lam S x i a $ Cl \x -> fromPrTy sp (b $$ x) (app t (toPrArg p a x) i)
+  (PApp p sp, El (Pi x i a b)) ->
+    Lam P x i a $ Cl \x -> fromPrTy sp (El (b $$ x)) (app t (toPrArg p a x) i)
+  _ ->
+    impossible
 
 prune :: PartialSub -> MetaVar -> Spine -> IO (MetaVar, Spine)
 prune psub m sp = do
-  uf
-  -- unless (psub^.allowPruning) (throwIO CantUnify)
-  -- a <- ES.unsolvedMetaType m
-  -- let fvars = ENil
-  --     wk     = ENil
-  --     prune  = PSub ENil Nothing 0 0 mempty True
-  -- sol <- pruneSp psub fvars wk prune S.LEmpty S.LEmpty a sp
-  -- let ?lvl = 0
-  --     ?env = ENil
-  -- let vsol = eval sol
-  -- ES.solve m sol vsol
-  -- case spine vsol sp of
-  --   Flex (FHMeta m) sp _ -> pure (m, sp)
-  --   _                    -> impossible
+  unless (psub^.allowPruning) (throwIO CantUnify)
+  let ?lvl = 0
+  (m, sp) <- etaExpandMeta m sp
+  psp     <- mkPruneSp psub (reverseSpine sp)
+  a       <- ES.unsolvedMetaType m
+  a'      <- pure $ prTy psp a
+  _       <- psubst psub a'  -- TODO: is this needed, or how to do it nicer
+  m'      <- fromPrTy psp a . eval0 <$!> freshMeta0 (gjoin a')
+  case spine m' sp of
+    Flex (FHMeta m) sp _ -> pure (m, sp)
+    Magic _              -> throwIO CantUnify
+    _                    -> impossible
 
 ----------------------------------------------------------------------------------------------------
 -- Spine solving
@@ -659,13 +480,14 @@ mergeSp hd sp sp' = case (sp, sp') of
   (_            , SProjField{} ) -> impossible
   _                              -> pure $ S.Magic Nonlinear
 
+-- | Take the least upper bound of values where Undefined is bottom and Nonlinear is top.
 merge :: LvlArg => Val -> Val -> IO S.Tm
 merge topt topu = do
 
   let guardIrr a act = act >>= \case
         S.Magic Nonlinear -> typeRelevance a >>= \case
           RRel       -> pure $ S.Magic Nonlinear
-          RIrr       -> pure $! quote UnfoldNone topt -- TODO: choose the more defined side?
+          RIrr       -> pure $! quote topt -- TODO: choose the more defined side?
           RBlockOn{} -> pure $ S.Magic Nonlinear
           RMagic{}   -> impossible
         t -> pure t
@@ -686,27 +508,27 @@ merge topt topu = do
     (Lam sp x i a t, Lam _ _ _ _ t') -> do
       let var = Var' ?lvl a True
       let ?lvl = ?lvl + 1
-      S.Lam sp x i (quote UnfoldNone a) <$!> merge (t $$ var) (t' $$ var)
+      S.Lam sp x i (quote a) <$!> merge (t $$ var) (t' $$ var)
 
     (Magic m, t) -> case m of
       Nonlinear -> pure $ S.Magic Nonlinear
-      Undefined -> pure $! quote UnfoldNone t
+      Undefined -> pure $! quote t
       _         -> impossible
 
     (t, Magic m) -> case m of
       Nonlinear -> pure $ S.Magic Nonlinear
-      Undefined -> pure $! quote UnfoldNone t
+      Undefined -> pure $! quote t
       _         -> impossible
 
     (Lam sp x i a t, t') -> do
       let var = Var' ?lvl a True
       let ?lvl = ?lvl + 1
-      S.Lam sp x i (quote UnfoldNone a) <$!> merge (t $$ var) (app t' var i)
+      S.Lam sp x i (quote a) <$!> merge (t $$ var) (app t' var i)
 
     (t, Lam sp x i a t') -> do
       let var = Var' ?lvl a True
       let ?lvl = ?lvl + 1
-      S.Lam sp x i (quote UnfoldNone a) <$!> merge (app t var i) (t' $$ var)
+      S.Lam sp x i (quote a) <$!> merge (app t var i) (t' $$ var)
 
     (Pair sp t u, t') ->
       S.Pair S <$!> merge t (proj1 t') <*!> merge u (proj2 t')
@@ -745,14 +567,14 @@ invertVal solvable psub param t rhsSp = do
       unless (solvable <= x && x < psub^.cod) (throw CantUnify)
       (_, ~xty) <- psubst' psub xty
       let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
-      sol <- solveNestedSp (psub^.cod) psub' xty sp (psub^.dom, rhsSp) rhsTy
+      sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom, rhsSp) rhsTy
       updatePSub x (evalInDom psub sol) psub
 
     _ ->
       throwIO CantUnify
 
 
-solveTopSp :: PartialSub -> S.Locals -> Ty -> Spine -> Val -> Ty -> IO S.Tm
+solveTopSp :: PartialSub -> S.Locals -> Ty -> RevSpine -> Val -> Ty -> IO S.Tm
 solveTopSp psub ls a sp rhs rhsty = do
 
   let go psub ls a sp = solveTopSp psub ls a sp rhs rhsty
@@ -765,60 +587,60 @@ solveTopSp psub ls a sp rhs rhsty = do
   a <- forceSet a
   case (a, sp) of
 
-    (a, SId) -> do
+    (a, RSId) -> do
       () <$ psubst psub rhsty
       psubst psub rhs
 
-    (Pi x i a b, SApp t u _) -> do
+    (Pi x i a b, RSApp u _ t) -> do
       let var   = Var' ?lvl a True
-      let qa    = quote UnfoldNone a
+      let qa    = quote a
       let ?lvl  = ?lvl + 1
       psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
       ls    <- pure (S.LBind ls x qa)
       psub  <- invertVal 0 psub (psub^.cod) u SId
       S.Lam S x i qa <$!> go psub ls (b $$ var) t
 
-    (El (Pi x i a b), SApp t u _) -> do
+    (El (Pi x i a b), RSApp u _ t) -> do
       let var   = Var' ?lvl a True
-      let qa    = quote UnfoldNone a
+      let qa    = quote a
       let ?lvl  = ?lvl + 1
       psub <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
       ls   <- pure (S.LBind ls x qa)
       psub <- invertVal 0 psub (psub^.cod) u SId
       S.Lam P x i qa <$!> go psub ls (El (b $$ var)) t
 
-    (Sg x a b, SProj1 t) -> do
+    (Sg x a b, RSProj1 t) -> do
       fst <- go psub ls a t
       let ~vfst = eval fst
       snd <- freshMeta (gjoin (b $$ vfst))
       pure $ S.Pair S fst snd
 
-    (Sg x a b, SProj2 t) -> do
+    (Sg x a b, RSProj2 t) -> do
       fst <- freshMeta (gjoin a)
       let ~vfst = eval fst
       snd <- go psub ls (b $$ vfst) t
       pure $ S.Pair S fst snd
 
-    (El (Sg x a b), SProj1 t) -> do
+    (El (Sg x a b), RSProj1 t) -> do
       fst <- go psub ls (El a) t
       let ~vfst = eval fst
       snd <- freshMeta (gjoin (El (b $$ vfst)))
       pure $ S.Pair P fst snd
 
-    (El (Sg x a b), SProj2 t) -> do
+    (El (Sg x a b), RSProj2 t) -> do
       fst <- freshMeta (gjoin (El a))
       let ~vfst = eval fst
       snd <- go psub ls (El (b $$ vfst)) t
       pure $ S.Pair P fst snd
 
-    (a, SProjField t tv tty n) ->
+    (a, RSProjField tv tty n t) ->
       case n of
-        0 -> go psub ls a (SProj1 t)
-        n -> go psub ls a (SProj2 (SProjField t tv tty (n - 1)))
+        0 -> go psub ls a (RSProj1 t)
+        n -> go psub ls a (RSProj2 (RSProjField VUndefined VUndefined (n - 1) t))
 
     _ -> impossible
 
-solveNestedSp :: Lvl -> PartialSub -> Ty -> Spine -> (Lvl, Spine) -> Ty -> IO S.Tm
+solveNestedSp :: Lvl -> PartialSub -> Ty -> RevSpine -> (Lvl, Spine) -> Ty -> IO S.Tm
 solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
 
   let go psub a sp = solveNestedSp solvable psub a sp (rhsVar, rhsSp) rhsty
@@ -830,42 +652,42 @@ solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
   a <- forceSet a
   case (a, sp) of
 
-    (a, SId) -> do
+    (a, RSId) -> do
       _ <- psubst psub rhsty
       psubstSp psub (S.LocalVar (lvlToIx rhsVar)) rhsSp
 
-    (Pi x i a b, SApp t u _) -> do
+    (Pi x i a b, RSApp u _ t) -> do
       let var   = Var' ?lvl a True
-      let qa    = quote UnfoldNone a
+      let qa    = quote a
       let ?lvl  = ?lvl + 1
       psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
       psub  <- invertVal solvable psub (psub^.cod) u SId
       S.Lam S x i qa <$!> go psub (b $$ var) t
 
-    (El (Pi x i a b), SApp t u _) -> do
+    (El (Pi x i a b), RSApp u _ t) -> do
       let var   = Var' ?lvl a True
-      let qa    = quote UnfoldNone a
+      let qa    = quote a
       let ?lvl  = ?lvl + 1
       psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
       psub  <- invertVal solvable psub (psub^.cod) u SId
       S.Lam P x i qa <$!> go psub (El (b $$ var)) t
 
-    (Sg x a b, SProj1 t) ->
+    (Sg x a b, RSProj1 t) ->
       S.Pair S <$!> go psub a t <*!> pure (S.Magic Undefined)
 
-    (Sg x a b, SProj2 t) ->
+    (Sg x a b, RSProj2 t) ->
       S.Pair S (S.Magic Undefined) <$!> go psub (b $$ Magic Undefined) t
 
-    (El (Sg x a b), SProj1 t) ->
+    (El (Sg x a b), RSProj1 t) ->
       S.Pair P <$!> go psub (El a) t <*!> pure (S.Magic Undefined)
 
-    (El (Sg x a b), SProj2 t) -> do
+    (El (Sg x a b), RSProj2 t) -> do
       S.Pair P (S.Magic Undefined) <$!> go psub (El (b $$ Magic Undefined)) t
 
-    (a, SProjField t tv tty n) ->
+    (a, RSProjField tv tty n t) ->
       case n of
-        0 -> go psub a (SProj1 t)
-        n -> go psub a (SProj2 (SProjField t tv tty (n - 1)))
+        0 -> go psub a (RSProj1 t)
+        n -> go psub a (RSProj2 (RSProjField tv tty (n - 1) t))
 
     _ -> impossible
 
@@ -892,10 +714,96 @@ solve x sp rhs rhsty = do
     RIrr       -> goIrrelevant
     RMagic{}   -> impossible
 
+solveEtaShort :: LvlArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+solveEtaShort m sp rhs rhsty =
+  catchUE (let ?allowPruning = False in solve m sp rhs rhsty)
+          (solveEtaLong m sp rhs rhsty)
+
+solveEtaLong :: LvlArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+solveEtaLong = uf
+
 ----------------------------------------------------------------------------------------------------
 -- Unification
 ----------------------------------------------------------------------------------------------------
 
+unifyEq :: Eq a => a -> a -> IO ()
+unifyEq x y = when (x /= y) $ throwIO CantUnify
+{-# inline unifyEq #-}
 
-unify :: LvlArg => UnifyState -> G -> G -> IO ()
-unify st t t' = uf
+unifySp :: LvlArg => UnifyStateArg => Spine -> Spine -> IO ()
+unifySp sp sp' = uf
+
+unify :: LvlArg => UnifyStateArg => G -> G -> IO ()
+unify (G topt ftopt) (G topt' ftopt') = do
+
+  let forceUS t = case ?unifyState of
+        USRigid{} -> forceAllButEq t
+        USFull    -> forceAll t
+        _         -> force t
+      {-# inline forceUS #-}
+
+  let go = unify; {-# inline go #-}
+      goJoin t t' = go (gjoin t) (gjoin t'); {-# inline goJoin #-}
+      goSp = unifySp; {-# inline goSp #-}
+
+      goBind a t t' =
+        newVar a \v -> unify (gjoin $! (t $$ v)) (gjoin $! (t' $$ v))
+      {-# inline goBind #-}
+
+      irr :: (UnifyStateArg => IO ()) -> IO ()
+      irr act = (let ?unifyState = USIrrelevant in act) `catch` (\(_ :: UnifyEx) -> pure ())
+      {-# inline irr #-}
+
+      withSP :: SP -> (UnifyStateArg => IO ()) -> IO ()
+      withSP sp act = case sp of P -> irr act; _ -> act
+      {-# inline withSP #-}
+
+      withRelevance :: Ty -> (UnifyStateArg => IO ()) -> IO ()
+      withRelevance a act = typeRelevance a >>= \case
+        RRel     -> act
+        RMagic{} -> impossible
+        _        -> irr act
+      {-# inline withRelevance #-}
+
+      goRH = uf
+
+      goFlexFlex h sp a h' sp' = uf
+
+  ftopt  <- forceUS ftopt
+  ftopt' <- forceUS ftopt'
+  case (ftopt, ftopt') of
+
+    -- canonical & rigid
+    ------------------------------------------------------------
+
+    (Pi x i a b , Pi x' i' a' b' ) -> unifyEq i i' >> goJoin a a' >> goBind a b b'
+    (Sg x a b   , Sg x' a' b'    ) -> goJoin a a' >> goBind a b b
+    (Set        , Set            ) -> pure ()
+    (Prop       , Prop           ) -> pure ()
+    (Top        , Top            ) -> pure ()
+    (Bot        , Bot            ) -> pure ()
+    (El a       , El a'          ) -> goJoin a a'
+    (Tt         , Tt             ) -> pure ()
+
+    (Rigid h sp a   , Rigid h' sp' _   ) -> withRelevance a (goRH h h' >> goSp sp sp')
+    (Lam hl x i a t , Lam _ _ _ _ t'   ) -> withSP hl $ goBind a t t'
+    (Pair hl t u    , Pair _ t' u'     ) -> withSP hl $ goJoin t t' >> goJoin u u'
+    (RigidEq a t u  , RigidEq a' t' u' ) -> goJoin a a' >> goJoin t t' >> goJoin u u'
+
+
+    ------------------------------------------------------------
+    (Magic m, _) -> impossible
+    (_, Magic m) -> impossible
+
+    -- eta-short solutions
+    ------------------------------------------------------------
+
+    (Flex h sp a, Flex h' sp' _) -> goFlexFlex h sp a h' sp'
+    (Flex (FHMeta m) sp a, rhs)  -> solveEtaShort m sp rhs a
+    (rhs, Flex (FHMeta m) sp a)  -> solveEtaShort m sp rhs a
+
+    --
+    ------------------------------------------------------------
+
+    (Unfold h sp t a, Unfold h' sp' t' _) -> case ?unifyState of
+      USRigid 0 -> _

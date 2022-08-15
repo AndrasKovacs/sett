@@ -1,5 +1,7 @@
 
 resolver: nightly-2022-07-07
+# compiler: ghc-9.4.1
+# compiler-check: match-minor
 
 packages:
 - .
