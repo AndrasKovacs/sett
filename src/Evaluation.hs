@@ -1,10 +1,10 @@
 
 module Evaluation (
     app, appE, appI, proj1, proj2, projField
-  , eval, quote, eval0, quote0, nf, nf0, spine, coe, eq
+  , eval, quote, eval0, quote0, nf, nf0, spine, spine0, spineIn, coe, eq
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeRelevance, Relevance(..), appTy, proj1Ty, proj2Ty
-  , evalIn, forceAllIn, closeVal, spineIn, quoteIn, quoteWithOpt, appIn
+  , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn
   ) where
 
 import Control.Exception
@@ -84,6 +84,8 @@ proj1 t = case t of
   Magic m         -> Magic m
   _               -> impossible
 
+-- | Args: type which is a sigma, value for the first projection, returns type of the
+--   second projection.
 proj2Ty :: LvlArg => Ty -> Val -> Ty
 proj2Ty a proj1 = runIO $ forceSet a >>= \case
   Sg _ _ b -> pure $! (b $$ proj1)
@@ -297,6 +299,9 @@ spine v sp =
 
 spineIn :: Lvl -> Val -> Spine -> Val
 spineIn l v sp = let ?lvl = l in spine v sp
+
+spine0 :: Val -> Spine -> Val
+spine0 = spineIn 0
 
 maskEnv :: Env -> S.Locals -> Spine
 maskEnv e ls = case (e, ls) of
@@ -790,12 +795,13 @@ quoteWithOpt opt t = let
     Magic m            -> S.Magic m
 
   in case opt of
-    UnfoldAll   -> cont (runIO (forceAll t))
-    UnfoldMetas -> cont (runIO (forceMetas t))
-    UnfoldNone  -> cont (runIO (force t))
+    UnfoldEverything -> cont (runIO (forceAll t))
+    UnfoldMetas      -> cont (runIO (forceMetas t))
+    UnfoldNothing    -> cont (runIO (force t))
 
+-- | Quote with `UnfoldNone` as default option.
 quote :: LvlArg => Val -> S.Tm
-quote = quoteWithOpt UnfoldNone
+quote = quoteWithOpt UnfoldNothing
 
 quoteIn :: Lvl -> Val -> S.Tm
 quoteIn l t = let ?lvl = l in quote t

@@ -295,17 +295,34 @@ instance Exception Magic
 
 --------------------------------------------------------------------------------
 
-data UnfoldOpt = UnfoldMetas | UnfoldAll | UnfoldNone
+-- TODO: bit-pack UnifyState and ConvState
+
+data UnfoldOpt = UnfoldMetas | UnfoldEverything | UnfoldNothing
   deriving (Eq, Show)
 
 type UnfoldOptArg = (?unfoldOpt :: UnfoldOpt)
 
-data UnifyState = USRigid Int | USFlex | USFull | USIrrelevant
+data UnifyState
+  = USRigid Int  -- ^ Starting state from which speculation can be initiated.
+                 --   The `Int` contains the number of shots we get at speculation. We
+                 --   can solve arbitrary metas.
+  | USFlex       -- ^ We're in this state during speculation. We can't compute unfoldings
+                 --   in this state, and can only solve irrelevant metas.
+  | USFull       -- ^ We're in this state after we've exhausted the speculation budget.
+                 --   We immediately compute all unfoldings and we can solve metas.
+  | USIrrelevant -- ^ We're in this state when we unify inside irrelevant values.
+                 --   We can only solve irrelevant metas. All failure is caught and
+                 --   converted to success.
   deriving (Eq, Show)
 
 type UnifyStateArg = (?unifyState :: UnifyState)
 
-data ConvState = CSRigid | CSFlex | CSFull
+data ConvState
+  = CSRigid Int -- ^ Starting state from which speculation can be initiated.
+                --   The `Int` contains the number of shots we get at speculation.
+  | CSFlex      -- ^ We're in this state during speculation. We can't compute unfoldings.
+  | CSFull      -- ^ We're in this state we've exhausted the speculation budget. We immediately
+                --   compute all unfoldings.
   deriving (Eq, Show)
 
 -- Timing

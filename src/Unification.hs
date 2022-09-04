@@ -19,7 +19,15 @@ import qualified Syntax as S
 ----------------------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------------------
 
-data UnifyEx = CantUnify | CantSolveFrozenMeta | CantSolveFlexMeta
+data UnifyEx
+  = CantUnify
+  | CantSolveFrozenMeta
+  | CantSolveMetaInNonRigidState
+  | CantPartialSubst
+  | CantPartialQuote
+  | CantInvertSpine
+  | CantPruneSpine
+  | PruningNotAllowed
   deriving (Eq, Show)
 instance Exception UnifyEx
 
@@ -45,8 +53,9 @@ catchUE act handle = act `catch` \(_ :: UnifyEx) -> handle
 ----------------------------------------------------------------------------------------------------
 
 type AllowPruning = Bool
-type AllowPruningArg = (?allowPruning :: Bool)
+type AllowPruningArg = (?allowPruning :: AllowPruning)
 
+-- TODO: use mutable array instead
 data PartialSub = PSub {
     partialSubDomVars      :: Vars           -- Identity env from Γ to Γ, serves as the list of Γ types.
                                              -- We need this when we want to evaluate the result term of
@@ -72,6 +81,8 @@ lift (PSub idenv occ dom cod sub allowpr) ~asub =
   in PSub (EDef idenv var) occ (dom + 1) (cod + 1)
           (IM.insert (coerce cod) var sub) allowpr
 
+-- | Compute a value under a partial subsitution to head form, leave unfoldings
+--   in place.
 forceWithPSub :: PartialSub -> Val -> IO Val
 forceWithPSub psub topt = do
   let ?lvl = psub^.cod
@@ -107,6 +118,8 @@ forceWithPSub psub topt = do
     t ->
       pure t
 
+-- | Compute a value under a partial substitution to head form while
+--   also computing all unfoldings.
 forceAllWithPSub :: PartialSub -> Val -> IO Val
 forceAllWithPSub psub topt = do
   let ?lvl = psub^.cod
@@ -283,7 +296,7 @@ psubst psub topt = do
     Sym a x y p        -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
     Trans a x y z p q  -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
     Ap a b f x y p     -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
-    Magic m            -> throwIO CantUnify
+    Magic m            -> throwIO CantPartialSubst
 
 psubst' :: PartialSub -> Val -> IO (S.Tm, Val)
 psubst' psub t = do
@@ -361,6 +374,30 @@ etaExpandMeta m sp = do
 -- Pruning
 ----------------------------------------------------------------------------------------------------
 
+{-
+1. Eta-expand meta to get rid of projections.
+
+2. Create a `PruneSp` from the spine. This only contains the "shape" of parts to
+   prune, nothing else. We can fail at this point if the spine contains some
+   non-prunable things. Only pairs, lambdas and rigid neutrals are prunable.
+
+3. Compute the pruned type by direct recursion on the meta type and the
+   `PruneSp`. This can produce a type which contains `Undefined`-s. At the same
+   time we define back-and forth maps to the pruned type. We propagate
+   `Undefined`-s in these maps.
+
+4. Create a fresh meta with the pruned type, transport to original type,then
+   solve the original meta with it. We need to check here that the solution is
+   fully defined. For this, we use `psubst` to quote the solution
+   value. Unfortunately we can't use vanilla `quote` here because it preserves
+   Undefined without throwing any error. So we mostly just copy code from
+   `quote` to `partialQuote` which does ensure that the output is fully defined.
+
+TODO (long term): handle pruning contractible types! In that case we should insert
+  the unique value instead of Undefined.
+
+-}
+
 -- | Structure pointing to parts to prune.
 data PruneVal = PLam PruneVal | PPair PruneVal PruneVal | PKeep | PDrop
 
@@ -385,7 +422,7 @@ mkPruneVal psub t = forceAllWithPSub psub t >>= \case
                         mkPLam <$!> mkPruneVal (lift psub a') (appClIn (?lvl + 1) t (Var ?lvl a))
   Rigid{}         -> pure PKeep
   Magic Undefined -> pure PDrop
-  _               -> throwIO CantUnify
+  _               -> throwIO CantPruneSpine
 
 mkPruneSp :: PartialSub -> RevSpine -> IO PruneSp
 mkPruneSp psub = \case
@@ -403,7 +440,9 @@ prArgTy p a = case (p, runIO (forceSet a)) of
                                     prArgTy p2 (b $$ fromPrArg p1 a x)
   (PPair p1 p2, El (Sg x a b)  ) -> Sg x (prArgTy p1 (El a)) $ Cl \x ->
                                     prArgTy p2 (El (b $$ fromPrArg p1 a x))
+  (_          , VUndefined     ) -> VUndefined
   _                              -> impossible
+
 
 toPrArg :: LvlArg => PruneVal -> Ty -> Val -> Val
 toPrArg p a t = case (p, runIO (forceSet a)) of
@@ -415,6 +454,7 @@ toPrArg p a t = case (p, runIO (forceSet a)) of
                                     Pair S (toPrArg p1 a t1) (toPrArg p2 (b $$ t1) t2)
   (PPair p1 p2, El (Sg x a b)  ) -> let t1 = proj1 t; t2 = proj2 t in
                                     Pair P (toPrArg p1 (El a) t1) (toPrArg p2 (El (b $$ t1)) t2)
+  (_          , VUndefined     ) -> VUndefined
   _                              -> impossible
 
 fromPrArg :: LvlArg => PruneVal -> Ty -> Val -> Val
@@ -427,6 +467,7 @@ fromPrArg p a t = case (p, runIO (forceSet a)) of
                                     Pair S fst (fromPrArg p2 (b $$ fst) t2)
   (PPair p1 p2, El (Sg x a b)  ) -> let t1 = proj1 t; t2 = proj2 t; fst = fromPrArg p1 (El a) t1 in
                                     Pair S fst (fromPrArg p2 (El (b $$ fst)) t2)
+  (_          , VUndefined     ) -> VUndefined
   _                              -> impossible
 
 prTy :: LvlArg => PruneSp -> Ty -> Ty
@@ -437,6 +478,8 @@ prTy p a = case (p, runIO (forceSet a)) of
     Pi x i (prArgTy p a) $ Cl \x -> prTy sp (b $$ fromPrArg p a x)
   (PApp p sp, El (Pi x i a b)) ->
     Pi x i (prArgTy p a) $ Cl \x -> prTy sp (El (b $$ fromPrArg p a x))
+  (_, VUndefined) ->
+    VUndefined
   _ ->
     impossible
 
@@ -448,23 +491,92 @@ fromPrTy p a t = case (p, runIO (forceSet a)) of
     Lam S x i a $ Cl \x -> fromPrTy sp (b $$ x) (app t (toPrArg p a x) i)
   (PApp p sp, El (Pi x i a b)) ->
     Lam P x i a $ Cl \x -> fromPrTy sp (El (b $$ x)) (app t (toPrArg p a x) i)
+  (_, VUndefined) ->
+    VUndefined
   _ ->
     impossible
 
+prTy0     = let ?lvl = 0 in prTy
+fromPrTy0 = let ?lvl = 0 in fromPrTy
+
+-- | Prune dependencies from a metavar, solve it with pruned solution,
+--   return new meta and spine. TODO: review.
 prune :: PartialSub -> MetaVar -> Spine -> IO (MetaVar, Spine)
 prune psub m sp = do
-  unless (psub^.allowPruning) (throwIO CantUnify)
-  let ?lvl = 0
+  unless (psub^.allowPruning) (throwIO PruningNotAllowed)
   (m, sp) <- etaExpandMeta m sp
   psp     <- mkPruneSp psub (reverseSpine sp)
   a       <- ES.unsolvedMetaType m
-  a'      <- pure $ prTy psp a
-  _       <- psubst psub a'  -- TODO: is this needed, or how to do it nicer
-  m'      <- fromPrTy psp a . eval0 <$!> freshMeta0 (gjoin a')
-  case spine m' sp of
+  pra     <- pure $! prTy0 psp a
+  qpra    <- partialQuote0 pra
+  sol     <- fromPrTy0 psp a . eval0 <$!> freshMeta0 (gjoin pra)
+  qsol    <- partialQuote0 sol
+  ES.solve m qsol sol
+  case spine0 sol sp of
     Flex (FHMeta m) sp _ -> pure (m, sp)
-    Magic _              -> throwIO CantUnify
     _                    -> impossible
+
+
+partialQuoteSp :: LvlArg => S.Tm -> Spine -> IO S.Tm
+partialQuoteSp hd sp = let
+  go   = partialQuote;      {-# inline go #-}
+  goSp = partialQuoteSp hd; {-# inline goSp #-}
+  in case sp of
+    SId                 -> pure hd
+    SApp t u i          -> S.App <$!> goSp t <*!> go u <*!> pure i
+    SProj1 t            -> S.Proj1 <$!> goSp t
+    SProj2 t            -> S.Proj2 <$!> goSp t
+    SProjField t tv x n -> S.ProjField <$!> goSp t <*!> (pure $! projFieldName tv x n) <*!> pure n
+
+-- | Quote a value but ensure that the output contains no `Magic`.
+partialQuote :: LvlArg => Val -> IO S.Tm
+partialQuote t = do
+  let
+    go         = partialQuote;   {-# inline go #-}
+    goSp       = partialQuoteSp; {-# inline goSp #-}
+    goBind a t = newVar a \v -> partialQuote (t $$ v); {-# inline goBind #-}
+
+    goFlexHead = \case
+      FHMeta x        -> pure (S.Meta x)
+      FHCoe x a b p t -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
+
+    goRigidHead = \case
+      RHLocalVar x _ _ -> pure $! S.LocalVar (lvlToIx x)
+      RHPostulate x a  -> pure $ S.Postulate x a
+      RHCoe a b p t    -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
+      RHExfalso a t    -> S.Exfalso <$!> go a <*!> go t
+
+    goUnfoldHead ~v = \case
+      UHSolvedMeta x -> pure $ S.Meta x
+      UHTopDef x v a -> pure $ S.TopDef x v a
+      UHCoe a b p t  -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
+
+  force t >>= \case
+    Flex h sp a        -> do {h <- goFlexHead h; goSp h sp}
+    FlexEq x a t u     -> S.Eq <$!> go a <*!> go t <*!> go u
+    Rigid h sp a       -> do {h <- goRigidHead h; goSp h sp}
+    RigidEq a t u      -> S.Eq <$!> go a <*!> go t <*!> go u
+    Unfold h sp v a    -> do {h <- goUnfoldHead v h; goSp h sp}
+    UnfoldEq a t u v   -> S.Eq <$!> go a <*!> go t <*!> go u
+    TraceEq a t u v    -> go v
+    Pair hl t u        -> S.Pair hl <$!> go t <*!> go u
+    Lam hl x i a t     -> S.Lam hl x i <$!> go a <*!> goBind a t
+    Sg x a b           -> S.Sg x <$!> go a <*!> goBind a b
+    Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a b
+    Set                -> pure S.Set
+    Prop               -> pure S.Prop
+    El a               -> S.El <$!> go a
+    Top                -> pure S.Top
+    Tt                 -> pure S.Tt
+    Bot                -> pure S.Bot
+    Refl a t           -> S.Refl <$!> go a <*!> go t
+    Sym a x y p        -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
+    Trans a x y z p q  -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
+    Ap a b f x y p     -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
+    Magic m            -> throwIO CantPartialQuote
+
+partialQuote0 :: Val -> IO S.Tm
+partialQuote0 t = let ?lvl = 0 in partialQuote t
 
 ----------------------------------------------------------------------------------------------------
 -- Spine solving
@@ -538,7 +650,6 @@ merge topt topu = do
 
     _ -> impossible
 
--- TODO: use lookupinsert
 updatePSub :: Lvl -> Val -> PartialSub -> IO PartialSub
 updatePSub (Lvl x) t psub = case IM.lookup x (psub^.sub) of
   Nothing -> do
@@ -564,14 +675,14 @@ invertVal solvable psub param t rhsSp = do
       invertVal solvable psub ?lvl (t $$ var) (SApp rhsSp var i)
 
     Rigid (RHLocalVar x xty _) sp rhsTy -> do
-      unless (solvable <= x && x < psub^.cod) (throw CantUnify)
+      unless (solvable <= x && x < psub^.cod) (throw CantInvertSpine)
       (_, ~xty) <- psubst' psub xty
       let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
       sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom, rhsSp) rhsTy
       updatePSub x (evalInDom psub sol) psub
 
     _ ->
-      throwIO CantUnify
+      throwIO CantInvertSpine
 
 
 solveTopSp :: PartialSub -> S.Locals -> Ty -> RevSpine -> Val -> Ty -> IO S.Tm
@@ -692,21 +803,33 @@ solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
     _ -> impossible
 
 -- | Solve (?x sp ?= rhs : A).
-solve :: LvlArg => AllowPruningArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+solve :: LvlArg => UnifyStateArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solve x sp rhs rhsty = do
-  a <- ES.unsolvedMetaType x
 
   let goRelevant = do
-        sol <- solveTopSp (PSub ENil (Just x) 0 ?lvl mempty ?allowPruning)
+
+        case ?unifyState of
+          USRigid{} -> pure ()
+          USFull    -> pure ()
+          _         -> throwIO CantSolveMetaInNonRigidState
+
+        a <- ES.unsolvedMetaType x
+        sol <- solveTopSp (PSub ENil (Just x) 0 ?lvl mempty True)
                           S.LEmpty a (reverseSpine sp) rhs rhsty
         ES.solve x sol (eval0 sol)
 
-      goIrrelevant =
-        (do sol <- solveTopSp (PSub ENil (Just x) 0 ?lvl mempty ?allowPruning)
-                              S.LEmpty a (reverseSpine sp) rhs rhsty
-            ES.solve x sol (eval0 sol))
-        `catch`
-        \(_ :: UnifyEx) -> pure () -- TODO: clean up unused expansion metas in this branch!
+      goIrrelevant = do
+        metaCxtSize <- ES.nextMeta
+
+        catchUE
+          (do a <- ES.unsolvedMetaType x
+              sol <- solveTopSp (PSub ENil (Just x) 0 ?lvl mempty False)
+                                S.LEmpty a (reverseSpine sp) rhs rhsty
+              ES.solve x sol (eval0 sol))
+
+          -- clean up unnecessary eta-expansion metas
+          (do ES.resetMetaCxt metaCxtSize)
+
 
   typeRelevance rhsty >>= \case
     RRel       -> goRelevant
@@ -714,13 +837,36 @@ solve x sp rhs rhsty = do
     RIrr       -> goIrrelevant
     RMagic{}   -> impossible
 
-solveEtaShort :: LvlArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+solveEtaShort :: LvlArg => UnifyStateArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solveEtaShort m sp rhs rhsty =
-  catchUE (let ?allowPruning = False in solve m sp rhs rhsty)
-          (solveEtaLong m sp rhs rhsty)
+  catchUE (solve m sp rhs rhsty)
+          (unifyEtaLong m sp rhs rhsty)
 
-solveEtaLong :: LvlArg => MetaVar -> Spine -> Val -> Ty -> IO ()
-solveEtaLong = uf
+intersect :: LvlArg => UnifyStateArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
+intersect = uf -- TODO
+
+unifyEtaLong :: LvlArg => UnifyStateArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+unifyEtaLong m sp rhs rhsty = forceAll rhs >>= \case
+  Lam hl x i a t -> do
+    newVar a \v -> unifyEtaLong m (SApp sp v i) (t $$ v) (appTy rhsty v)
+  Pair hl t u -> do
+    unifyEtaLong m (SProj1 sp) t (proj1Ty rhsty)
+    unifyEtaLong m (SProj2 sp) u (proj2Ty rhsty t)
+  Flex (FHMeta m') sp' rhsty ->
+    if m == m' then unifySp sp sp' -- TODO: intersect
+               else uf
+  rhs ->
+    solve m sp rhs rhsty
+
+-- | Try to unify when the sides are headed by different metas. We only retry in case of inversion
+--   failure because we can't backtrack from destructive updates.
+unifyMetaMeta :: LvlArg => UnifyStateArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
+unifyMetaMeta m sp m' sp' ty =
+  catch
+    (solve m sp (Flex (FHMeta m') sp' ty) ty)
+    (\case
+        CantInvertSpine -> solve m' sp' (Flex (FHMeta m) sp ty) ty
+        e               -> throwIO e)
 
 ----------------------------------------------------------------------------------------------------
 -- Unification
@@ -736,23 +882,38 @@ unifySp sp sp' = uf
 unify :: LvlArg => UnifyStateArg => G -> G -> IO ()
 unify (G topt ftopt) (G topt' ftopt') = do
 
-  let forceUS t = case ?unifyState of
-        USRigid{} -> forceAllButEq t
-        USFull    -> forceAll t
-        _         -> force t
-      {-# inline forceUS #-}
+  let go :: LvlArg => UnifyStateArg => G -> G -> IO ()
+      go = unify
+      {-# inline go #-}
 
-  let go = unify; {-# inline go #-}
-      goJoin t t' = go (gjoin t) (gjoin t'); {-# inline goJoin #-}
-      goSp = unifySp; {-# inline goSp #-}
+      goJoin :: LvlArg => UnifyStateArg => Val -> Val -> IO ()
+      goJoin t t' = go (gjoin t) (gjoin t')
+      {-# inline goJoin #-}
 
+      goSp :: LvlArg => UnifyStateArg => Spine -> Spine -> IO ()
+      goSp = unifySp
+      {-# inline goSp #-}
+
+      rigid :: Int -> (UnifyStateArg => IO ()) -> IO ()
+      rigid n act = let ?unifyState = USRigid n in act
+      {-# inline rigid #-}
+
+      flex :: (UnifyStateArg => IO ()) -> IO ()
+      flex act = let ?unifyState = USFlex in act
+      {-# inline flex #-}
+
+      irr :: (UnifyStateArg => IO ()) -> IO ()
+      irr act = catchUE (let ?unifyState = USIrrelevant in act) (pure ())
+      {-# inline irr #-}
+
+      full :: (UnifyStateArg => IO ()) -> IO ()
+      full act = let ?unifyState = USFull in act
+      {-# inline full #-}
+
+      goBind :: UnifyStateArg => Ty -> Closure -> Closure -> IO ()
       goBind a t t' =
         newVar a \v -> unify (gjoin $! (t $$ v)) (gjoin $! (t' $$ v))
       {-# inline goBind #-}
-
-      irr :: (UnifyStateArg => IO ()) -> IO ()
-      irr act = (let ?unifyState = USIrrelevant in act) `catch` (\(_ :: UnifyEx) -> pure ())
-      {-# inline irr #-}
 
       withSP :: SP -> (UnifyStateArg => IO ()) -> IO ()
       withSP sp act = case sp of P -> irr act; _ -> act
@@ -765,9 +926,32 @@ unify (G topt ftopt) (G topt' ftopt') = do
         _        -> irr act
       {-# inline withRelevance #-}
 
-      goRH = uf
+      goRH :: UnifyStateArg => RigidHead -> RigidHead -> IO ()
+      goRH h h' = uf
 
-      goFlexFlex h sp a h' sp' = uf
+      goFH :: UnifyStateArg => FlexHead -> Spine -> FlexHead -> Spine -> Ty -> IO ()
+      goFH h sp h' sp' a = case (h, h') of
+        (FHCoe _ a b p t, FHCoe _ a' b' p' t') ->
+          goJoin a a' >> goJoin b b' >> irr (goJoin p p') >> goJoin t t'
+        (FHMeta m, FHMeta m') ->
+          if m == m' then unifySp sp sp' -- TODO: intersect
+                     else unifyMetaMeta m sp m' sp' a
+        (FHMeta m, h') -> solve m sp (Flex h' sp' a) a
+        (h, FHMeta m') -> solve m' sp' (Flex h sp a) a
+
+      goUH :: UnifyStateArg => UnfoldHead -> UnfoldHead -> IO ()
+      goUH h h' = case (h, h') of
+        (UHSolvedMeta m, UHSolvedMeta m'  ) -> unifyEq m m'
+        (UHTopDef x _ _, UHTopDef x' _ _  ) -> unifyEq x x'
+        (UHCoe a b p t , UHCoe a' b' p' t') -> goJoin a a' >> goJoin b b'
+                                               >> irr (goJoin p p') >> goJoin t t'
+        _                                   -> throwIO CantUnify
+
+  let forceUS t = case ?unifyState of
+        USRigid{} -> forceAllButEq t
+        USFull    -> forceAll t
+        _         -> force t
+      {-# inline forceUS #-}
 
   ftopt  <- forceUS ftopt
   ftopt' <- forceUS ftopt'
@@ -798,7 +982,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
     -- eta-short solutions
     ------------------------------------------------------------
 
-    (Flex h sp a, Flex h' sp' _) -> goFlexFlex h sp a h' sp'
+    (Flex h sp a, Flex h' sp' _) -> goFH h sp h' sp' a
     (Flex (FHMeta m) sp a, rhs)  -> solveEtaShort m sp rhs a
     (rhs, Flex (FHMeta m) sp a)  -> solveEtaShort m sp rhs a
 
@@ -806,4 +990,20 @@ unify (G topt ftopt) (G topt' ftopt') = do
     ------------------------------------------------------------
 
     (Unfold h sp t a, Unfold h' sp' t' _) -> case ?unifyState of
-      USRigid 0 -> _
+      USRigid n
+        | case (h, h') of
+            (UHSolvedMeta m, UHSolvedMeta m'  ) -> m == m'
+            (UHTopDef x _ _, UHTopDef x' _ _  ) -> x == x' -> do
+          catchUE (flex (goSp sp sp')) (case n of 0 -> full (unify (G topt t) (G topt' t'))
+                                                  n -> rigid (n - 1) (unify (G topt t) (G topt' t')))
+        | case (h, h') of
+            (UHCoe{}, UHCoe
+
+
+
+        -- catchUE (flex (goUH h h' >> goSp sp sp'))
+        --         (case n of 0 -> full (unify (G topt t) (G topt' t'))
+        --                    n -> rigid (n - 1) (unify (G topt t) (G topt' t')))
+
+      USFlex -> goUH h h' >> goSp sp sp'
+      USFull -> impossible

@@ -49,6 +49,13 @@ solve x t tv = do
       cache <- RF.new (-1)
       ADL.write metaCxt (coerce x) (MESolved cache t tv a)
 
+-- | Trim the size of the metacontext to `Lvl`.
+resetMetaCxt :: Lvl -> IO ()
+resetMetaCxt size = do
+  currSize <- nextMeta
+  if size < currSize then ADL.pop metaCxt >> resetMetaCxt size
+                     else pure ()
+
 unsolvedMetaType :: MetaVar -> IO V.Ty
 unsolvedMetaType x = readMeta x >>= \case
   MEUnsolved (G _ a) -> pure a
