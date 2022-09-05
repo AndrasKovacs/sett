@@ -49,12 +49,10 @@ insertBinder a ga k =
   in forceCxt (k v)
 {-# inline insertBinder #-}
 
--- | Run starting with the empty context.
-withEmptyCxt :: InCxt a -> a
-withEmptyCxt k =
+initializeCxt :: N.NameTableArg => InCxt a -> a
+initializeCxt k =
   let ?lvl       = 0 :: Lvl
       ?env       = ENil
       ?locals    = S.LEmpty
-      ?nameTable = mempty :: N.NameTable
   in k
-{-# inline withEmptyCxt #-}
+{-# inline initializeCxt #-}

@@ -10,6 +10,7 @@ import Syntax
 import Values
 import ElabState
 import Evaluation
+-- import TopCxt
 
 import qualified Presyntax as P
 import qualified Unification as Unif
@@ -24,7 +25,6 @@ TODO
  - postponings
  - pair, lambda inference
  - specialized checking cases for fully applied primitive symbols
- - top elaboration
 -}
 
 --------------------------------------------------------------------------------
@@ -233,6 +233,7 @@ check topt (G topa ftopa) = do
       Infer t tty <- infer topt
       subtype topt t (g2 tty) ftopa
 
+
 -- infer
 --------------------------------------------------------------------------------
 
@@ -423,3 +424,51 @@ infer topt = case topt of
     define x a (gjoin va) t (eval t) do
       Infer u uty <- infer u
       pure $ Infer (S.Let (NSpan x) a t u) uty
+
+
+-- top-level
+--------------------------------------------------------------------------------
+
+inferTop :: NT.NameTableArg => TopLvlArg => P.TopLevel -> IO ()
+inferTop = \case
+
+  P.Nil -> pure ()
+
+  P.Define x ma t top -> initializeCxt do
+    (a, va) <- case ma of
+      Nothing -> do
+        a' <- freshMeta gSet
+        let va' = eval a'
+        pure (a', va')
+      Just a -> do
+        a <- check a gSet
+        pure (a, eval a)
+    t <- check t (gjoin va)
+
+    frz <- freezeMetas
+    pushTop (TEDef x a t frz)
+    let ?nameTable = NT.insert (Bind x) (NT.Top ?topLvl a (gjoin va) (eval t)) ?nameTable
+        ?topLvl    = ?topLvl + 1
+
+    inferTop top
+
+  P.Postulate x a top -> initializeCxt do
+    a <- check a gSet
+    let ~va = eval a
+        v   = Rigid (RHPostulate ?topLvl va) SId va
+
+    frz <- freezeMetas
+    pushTop (TEPostulate x a (gjoin va) frz)
+
+    let ?nameTable = NT.insert (Bind x) (NT.Top ?topLvl a (gjoin va) v) ?nameTable
+        ?topLvl    = ?topLvl + 1
+
+    inferTop top
+
+-- | Reset ElabState, elaborate top-level presyntax, fill up `topInfo`.
+elab :: P.TopLevel -> IO ()
+elab top = do
+  reset
+  let ?nameTable = mempty
+      ?topLvl    = 0
+  inferTop top

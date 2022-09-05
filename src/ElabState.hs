@@ -4,6 +4,7 @@ module ElabState where
 import IO
 import qualified Data.Array.Dynamic.L as ADL
 import qualified Data.Ref.F           as RF
+import qualified Data.Array.LI        as LI
 
 import Common
 import Values
@@ -27,7 +28,7 @@ metaCxt :: ADL.Array MetaEntry
 metaCxt = runIO ADL.empty
 {-# noinline metaCxt #-}
 
-nextMeta :: IO Lvl
+nextMeta :: IO MetaVar
 nextMeta = coerce <$!> ADL.size metaCxt
 
 readMeta :: MetaVar -> IO MetaEntry
@@ -50,7 +51,7 @@ solve x t tv = do
       ADL.write metaCxt (coerce x) (MESolved cache t tv a)
 
 -- | Trim the size of the metacontext to `Lvl`.
-resetMetaCxt :: Lvl -> IO ()
+resetMetaCxt :: MetaVar -> IO ()
 resetMetaCxt size = do
   currSize <- nextMeta
   if size < currSize then ADL.pop metaCxt >> resetMetaCxt size
@@ -65,10 +66,11 @@ unsolvedMetaType x = readMeta x >>= \case
 --------------------------------------------------------------------------------
 
 data TopEntry
-  = TEDef P.Name S.Ty S.Tm MetaVar -- ^ Name, type, definition, marker for frozen metas.
-  | TEPostulate S.Ty V.GTy MetaVar -- ^ Type, type val, marker for frozen metas.
+  = TEDef P.Name S.Ty S.Tm MetaVar        -- ^ Name, type, definition, marker for frozen metas.
+  | TEPostulate P.Name S.Ty V.GTy MetaVar -- ^ Type, type val, marker for frozen metas.
 
 type TopInfo = ADL.Array TopEntry
+type TopInfoArg = (?topInfo :: TopInfo)
 
 topInfo :: TopInfo
 topInfo = runIO $ ADL.empty
@@ -77,17 +79,39 @@ topInfo = runIO $ ADL.empty
 readTopInfo :: Lvl -> IO TopEntry
 readTopInfo x = ADL.read topInfo (coerce x)
 
+pushTop :: TopEntry -> IO ()
+pushTop = ADL.push topInfo
+
 frozen :: RF.Ref MetaVar
 frozen = runIO $ RF.new 0
 {-# noinline frozen #-}
 
-readFrozen :: IO MetaVar
-readFrozen = RF.read frozen
-
-writeFrozen :: MetaVar -> IO ()
-writeFrozen = RF.write frozen
+-- | Freeze all current metas, return size of metacontext.
+freezeMetas :: IO MetaVar
+freezeMetas = do
+  frz <- nextMeta
+  RF.write frozen frz
+  pure frz
 
 isFrozen :: MetaVar -> IO Bool
 isFrozen x = do
-  frz <- readFrozen
+  frz <- RF.read frozen
   pure $! x < frz
+
+-- | Get all top-level names as strings.
+topNames :: IO (LI.Array String)
+topNames = do
+  entries <- ADL.freeze topInfo
+  let go = \case
+        TEDef x _ _ _       -> spanToString x
+        TEPostulate x _ _ _ -> spanToString x
+  pure $! LI.map go entries
+
+
+--------------------------------------------------------------------------------
+
+reset :: IO ()
+reset = do
+  ADL.clear metaCxt
+  RF.write frozen 0
+  ADL.clear topInfo

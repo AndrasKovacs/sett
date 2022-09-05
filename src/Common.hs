@@ -135,6 +135,7 @@ newtype Lvl = Lvl {unLvl :: Int}
   deriving (Eq, Ord, Show, Num, Enum, Bits, Flat) via Int
 
 type LvlArg = (?lvl :: Lvl)
+type TopLvlArg = (?topLvl :: Lvl)
 
 -- | Ordinary metavariable.
 newtype MetaVar = MkMetaVar Int

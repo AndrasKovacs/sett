@@ -1,11 +1,12 @@
 
 module Pretty where
 
+import IO
 import qualified Data.Array.LI as LI
 
 import Common
 import Syntax
-import TopCxt
+import ElabState
 
 -- TODO: shadowing
 --------------------------------------------------------------------------------
@@ -107,8 +108,7 @@ goTm prec topns ns t = go prec ns t where
       Nonlinear  -> ("nonlinear"++)
       MetaOccurs -> ("metaoccurs"++)
 
-showTm :: TopInfoArg => LocalsArg => Tm -> IO String
-showTm t = do
+showTm :: LocalsArg => Tm -> String
+showTm t = runIO do
   topns <- topNames
-  let ns = localNames
-  pure $! goTm pairp topns ns t []
+  pure $! goTm pairp topns localNames t []
