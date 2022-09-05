@@ -1,13 +1,21 @@
 
-module Errors where
+module Errors (Error(..), ErrorInCxt(..)) where
 
+import IO
 import Control.Exception
 
 import Syntax
 import Common
 import Values
+import Pretty
 import qualified Presyntax as P
 import qualified Values as V
+
+import qualified FlatParse.Stateful as FP
+import qualified Data.ByteString.Char8 as B
+
+import Evaluation
+import ElabState
 
 data Error
   = UnifyError Val Val
@@ -22,9 +30,56 @@ data Error
   | AmbiguousUniverse
   | ExpectedSetProp
 
-data ErrorInCxt = ErrorInCxt Locals P.Tm Error
+data ErrorInCxt = ErrorInCxt Locals Lvl P.Tm Error
 
 instance Show ErrorInCxt where
-  show = uf
+  show (ErrorInCxt ls l t err) =
+    let ?locals = ls
+        ?lvl = l in
+    let span      = P.span t
+        src       = runIO getSourceFile
+        showVal v = showTm (quoteWithOpt UnfoldMetas v)
+        msg = case err of
+          UnifyError t u ->
+            "Can't unify\n\n  " ++ showVal t ++ "\n\nwith\n\n  "
+            ++ showVal u ++ "\n"
+          NameNotInScope x ->
+            "Name not in scope: " ++ "\"" ++ show x ++ "\""
+          NoSuchField x ->
+            "No such field name: " ++ "\"" ++ show x ++ "\""
+          NoNamedImplicitArg x ->
+            "No such named implicit argument: " ++ "\"" ++ show x ++ "\""
+          IcitMismatch i i' ->
+            "Function implicitness mismatch" -- TODO
+          NoNamedLambdaInference ->
+            "Can't infer type for lambda expression with named argument"
+          ExpectedSg a ->
+            "Expected a sigma type, inferred\n\n  " ++ showVal a ++ "\n"
+          ExpectedFunOrForall a ->
+            "Expected a function type, inferred\n\n  " ++ showVal a ++ "\n"
+          GenericError msg ->
+            msg
+          AmbiguousUniverse ->
+            "Ambiguous Set/Prop universe"
+          ExpectedSetProp ->
+            "Expected a type in Set or Prop"
+
+    in render src span msg
 
 instance Exception ErrorInCxt
+
+-- | Display an error with source position. We only use of the first position in
+--   the span.
+render :: B.ByteString -> Span -> String -> String
+render src (Span pos _) msg = let
+  ls     = FP.lines src
+  (l, c) = head $ FP.posLineCols src [rawPos pos]
+  line   = if l < length ls then ls !! l else ""
+  linum  = show (l + 1)
+  lpad   = map (const ' ') linum
+  in linum  ++ ":" ++ show c ++ ":\n" ++
+     lpad   ++ "|\n" ++
+     linum  ++ "| " ++ line ++ "\n" ++
+     lpad   ++ "| " ++ replicate c ' ' ++ "^\n" ++
+     msg
+{-# noinline render #-}

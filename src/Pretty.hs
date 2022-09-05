@@ -1,18 +1,17 @@
 
-module Pretty where
+module Pretty (showTm) where
 
 import IO
-import qualified Data.Array.LI as LI
 
 import Common
 import Syntax
 import ElabState
 
--- TODO: shadowing
+-- TODO: shadowing is not handled at all now!
 --------------------------------------------------------------------------------
 
 -- printing precedences
-atomp  = 7  :: Int
+-- atomp  = 7  :: Int
 projp  = 6  :: Int
 appp   = 5  :: Int
 eqp    = 4  :: Int
@@ -31,8 +30,8 @@ braces s = ('{':).s.('}':)
 
 ws = (' ':)
 
-goTm :: Int -> LI.Array String -> [String] -> Tm -> ShowS
-goTm prec topns ns t = go prec ns t where
+goTm :: Int -> [String] -> Tm -> ShowS
+goTm prec ns t = go prec ns t where
 
   piBind ns x Expl a = ('(':) . (x++) . (" : "++) . go letp ns a .(')':)
   piBind ns x Impl a = braces  ((x++) . (" : "++) . go letp ns a)
@@ -50,7 +49,11 @@ goTm prec topns ns t = go prec ns t where
       "_" -> (('@':show x)++)
       x   -> (x++)
 
-    TopDef (Lvl x) _ _ -> (topns LI.! x++)
+    TopDef x _ _ -> runIO do
+      str <- readTopInfo x >>= \case
+        TEDef x _ _ _       -> pure $! spanToString x
+        _                   -> impossible
+      pure $! (str++)
 
     Lam _ (show -> x) i a t -> par p letp $ ("λ "++) . lamBind x i . goLam (x:ns) t where
       goLam ns (Lam _ (show -> x) i a t) = ws . lamBind x i . goLam (x:ns) t
@@ -79,7 +82,11 @@ goTm prec topns ns t = go prec ns t where
     Sg (show -> x) a b ->
       par p sigmap $ sgBind ns x a . (" × "++) . go sigmap (x:ns) b
 
-    Postulate (Lvl x) _ -> (topns LI.! x++)
+    Postulate x _ -> runIO do
+      str <- readTopInfo x >>= \case
+        TEPostulate x _ _ _ -> pure $! spanToString x
+        _                   -> impossible
+      pure $! (str++)
 
     InsertedMeta x ls -> ("?"++).(show x++).("(..)"++)
 
@@ -109,6 +116,4 @@ goTm prec topns ns t = go prec ns t where
       MetaOccurs -> ("metaoccurs"++)
 
 showTm :: LocalsArg => Tm -> String
-showTm t = runIO do
-  topns <- topNames
-  pure $! goTm pairp topns localNames t []
+showTm t = goTm pairp localNames t []

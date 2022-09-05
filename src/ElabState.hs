@@ -4,13 +4,15 @@ module ElabState where
 import IO
 import qualified Data.Array.Dynamic.L as ADL
 import qualified Data.Ref.F           as RF
-import qualified Data.Array.LI        as LI
+import qualified Data.Ref.L           as RL
+import qualified Data.ByteString.Char8 as B
 
 import Common
 import Values
 import qualified Values as V
 import qualified Syntax as S
 import qualified Presyntax as P
+
 
 
 -- Metacontext
@@ -82,6 +84,12 @@ readTopInfo x = ADL.read topInfo (coerce x)
 pushTop :: TopEntry -> IO ()
 pushTop = ADL.push topInfo
 
+topSize :: IO Lvl
+topSize = coerce <$!> ADL.size topInfo
+
+-- Frozen metas
+--------------------------------------------------------------------------------
+
 frozen :: RF.Ref MetaVar
 frozen = runIO $ RF.new 0
 {-# noinline frozen #-}
@@ -98,20 +106,22 @@ isFrozen x = do
   frz <- RF.read frozen
   pure $! x < frz
 
--- | Get all top-level names as strings.
-topNames :: IO (LI.Array String)
-topNames = do
-  entries <- ADL.freeze topInfo
-  let go = \case
-        TEDef x _ _ _       -> spanToString x
-        TEPostulate x _ _ _ -> spanToString x
-  pure $! LI.map go entries
 
+-- Source file
+--------------------------------------------------------------------------------
+
+sourceFile :: RL.Ref B.ByteString
+sourceFile = runIO $ RL.new B.empty
+{-# noinline sourceFile #-}
+
+getSourceFile :: IO B.ByteString
+getSourceFile = RL.read sourceFile
 
 --------------------------------------------------------------------------------
 
 reset :: IO ()
 reset = do
   ADL.clear metaCxt
+  RL.write sourceFile B.empty
   RF.write frozen 0
   ADL.clear topInfo

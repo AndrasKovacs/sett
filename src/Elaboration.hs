@@ -29,8 +29,8 @@ TODO
 
 --------------------------------------------------------------------------------
 
-elabError :: LocalsArg => P.Tm -> Error -> IO a
-elabError t err = throwIO $ ErrorInCxt ?locals t err
+elabError :: LocalsArg => LvlArg => P.Tm -> Error -> IO a
+elabError t err = throwIO $ ErrorInCxt ?locals ?lvl t err
 
 unify :: LvlArg => LocalsArg => P.Tm -> G -> G -> IO ()
 unify t l r = do
