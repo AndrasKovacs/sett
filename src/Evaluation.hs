@@ -1,6 +1,6 @@
 
 module Evaluation (
-    app, appE, appI, proj1, proj2, projField
+    app, appE, appI, proj1, proj2, gproj1, gproj2, projField
   , eval, quote, eval0, quote0, nf, nf0, spine, spine0, spineIn, coe, eq
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeRelevance, Relevance(..), appTy, proj1Ty, proj2Ty
@@ -31,7 +31,6 @@ NOTE
 
 TODO
  - use approximate unfoldings including TraceEq, use ConvState
- - handle conversion between field proj and iterated primitive proj
 -}
 
 --------------------------------------------------------------------------------
@@ -83,6 +82,14 @@ proj1 t = case t of
   Unfold h sp t a -> Unfold h (SProj1 sp) (proj1 t) (proj1Ty a)
   Magic m         -> Magic m
   _               -> impossible
+
+gproj1 :: LvlArg => G -> G
+gproj1 (G t ft) = G (proj1 t) (proj1 ft)
+{-# inline gproj1 #-}
+
+gproj2 :: LvlArg => G -> G
+gproj2 (G t ft) = G (proj2 t) (proj2 ft)
+{-# inline gproj2 #-}
 
 -- | Args: type which is a sigma, value for the first projection, returns type of the
 --   second projection.
@@ -605,6 +612,7 @@ convEq :: Eq a => a -> a -> IO ()
 convEq x y = when (x /= y) $ throwIO Diff
 {-# inline convEq #-}
 
+-- TODO: handle fieldProj vs proj1/2
 convSp :: LvlArg => Spine -> Spine -> IO ()
 convSp sp sp' = do
   let go   = conv; {-# inline go #-}
@@ -642,6 +650,7 @@ convRigidRel h sp h' sp' = case (h, h') of
   (RHExfalso a p   , RHExfalso a' p'   ) -> convExfalso a a' sp sp'
   _                                      -> throwIO Diff
 
+-- TODO: approx unfolding
 conv :: LvlArg => Val -> Val -> IO ()
 conv t u = do
   let go = conv

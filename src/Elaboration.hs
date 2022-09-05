@@ -24,6 +24,7 @@ TODO
  - postponings
  - pair, lambda inference
  - specialized checking cases for fully applied primitive symbols
+ - top elaboration
 -}
 
 --------------------------------------------------------------------------------
@@ -32,8 +33,9 @@ elabError :: LocalsArg => P.Tm -> Error -> IO a
 elabError t err = throwIO $ ErrorInCxt ?locals t err
 
 unify :: LvlArg => LocalsArg => P.Tm -> G -> G -> IO ()
-unify t l r =
-  Unif.unify USRigid l r `catch` \case
+unify t l r = do
+  let ?unifyState = USRigid conversionSpeculation
+  Unif.unify l r `catch` \case
     (e :: Unif.UnifyEx) -> elabError t (UnifyError (g1 l) (g1 r))
 
 data Infer = Infer Tm {-# unpack #-} GTy

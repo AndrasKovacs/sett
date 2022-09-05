@@ -852,9 +852,9 @@ unifyEtaLong m sp rhs rhsty = forceAll rhs >>= \case
   Pair hl t u -> do
     unifyEtaLong m (SProj1 sp) t (proj1Ty rhsty)
     unifyEtaLong m (SProj2 sp) u (proj2Ty rhsty t)
-  Flex (FHMeta m') sp' rhsty ->
+  Flex (FHMeta m') sp' _ ->
     if m == m' then unifySp sp sp' -- TODO: intersect
-               else uf
+               else unifyMetaMeta m sp m' sp' rhsty
   rhs ->
     solve m sp rhs rhsty
 
@@ -876,8 +876,16 @@ unifyEq :: Eq a => a -> a -> IO ()
 unifyEq x y = when (x /= y) $ throwIO CantUnify
 {-# inline unifyEq #-}
 
+-- TODO: handle FieldProj vs Proj1/2
 unifySp :: LvlArg => UnifyStateArg => Spine -> Spine -> IO ()
-unifySp sp sp' = uf
+unifySp sp sp' = case (sp, sp') of
+  (SId                , SId                 ) -> pure ()
+  (SApp t u i         , SApp t' u' i'       ) -> unifySp t t' >> unify (gjoin u) (gjoin u')
+  (SProj1 t           , SProj1 t'           ) -> unifySp t t'
+  (SProj2 t           , SProj2 t'           ) -> unifySp t t'
+  (SProjField t _ _ n , SProjField t' _ _ n') -> unifySp t t' >> unifyEq n n'
+  _                                           -> throwIO CantUnify
+
 
 unify :: LvlArg => UnifyStateArg => G -> G -> IO ()
 unify (G topt ftopt) (G topt' ftopt') = do
@@ -921,13 +929,20 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
       withRelevance :: Ty -> (UnifyStateArg => IO ()) -> IO ()
       withRelevance a act = typeRelevance a >>= \case
-        RRel     -> act
-        RMagic{} -> impossible
-        _        -> irr act
+        RRel        -> act
+        RBlockOn{}  -> act -- TODO: postpone
+        RMagic{}    -> impossible
+        RIrr        -> irr act
       {-# inline withRelevance #-}
 
       goRH :: UnifyStateArg => RigidHead -> RigidHead -> IO ()
-      goRH h h' = uf
+      goRH h h' = case (h, h') of
+        (RHLocalVar x _ _ , RHLocalVar x' _ _ ) -> unifyEq x x'
+        (RHPostulate x _  , RHPostulate x' _  ) -> unifyEq x x'
+        (RHExfalso a p    , RHExfalso a' p'   ) -> goJoin a a' >> irr (goJoin p p')
+        (RHCoe a b p t    , RHCoe a' b' p' t' ) -> goJoin a a' >> goJoin b b' >>
+                                                   irr (goJoin p p') >> goJoin t t'
+        _                                       -> throwIO CantUnify
 
       goFH :: UnifyStateArg => FlexHead -> Spine -> FlexHead -> Spine -> Ty -> IO ()
       goFH h sp h' sp' a = case (h, h') of
@@ -939,14 +954,6 @@ unify (G topt ftopt) (G topt' ftopt') = do
         (FHMeta m, h') -> solve m sp (Flex h' sp' a) a
         (h, FHMeta m') -> solve m' sp' (Flex h sp a) a
 
-      goUH :: UnifyStateArg => UnfoldHead -> UnfoldHead -> IO ()
-      goUH h h' = case (h, h') of
-        (UHSolvedMeta m, UHSolvedMeta m'  ) -> unifyEq m m'
-        (UHTopDef x _ _, UHTopDef x' _ _  ) -> unifyEq x x'
-        (UHCoe a b p t , UHCoe a' b' p' t') -> goJoin a a' >> goJoin b b'
-                                               >> irr (goJoin p p') >> goJoin t t'
-        _                                   -> throwIO CantUnify
-
   let forceUS t = case ?unifyState of
         USRigid{} -> forceAllButEq t
         USFull    -> forceAll t
@@ -957,7 +964,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
   ftopt' <- forceUS ftopt'
   case (ftopt, ftopt') of
 
-    -- canonical & rigid
+    -- matching sides
     ------------------------------------------------------------
 
     (Pi x i a b , Pi x' i' a' b' ) -> unifyEq i i' >> goJoin a a' >> goBind a b b'
@@ -974,10 +981,65 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (Pair hl t u    , Pair _ t' u'     ) -> withSP hl $ goJoin t t' >> goJoin u u'
     (RigidEq a t u  , RigidEq a' t' u' ) -> goJoin a a' >> goJoin t t' >> goJoin u u'
 
+    (FlexEq _ a t u, FlexEq _ a' t' u') -> do
+      goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
-    ------------------------------------------------------------
-    (Magic m, _) -> impossible
-    (_, Magic m) -> impossible
+    (TraceEq a t u v, TraceEq a' t' u' v') -> do
+
+      let unfold :: UnifyStateArg => IO ()
+          unfold = go (G topt v) (G topt' v')
+
+          dontunfold :: UnifyStateArg => IO ()
+          dontunfold = goJoin a a' >> goJoin t t' >> goJoin u u'
+
+          retry :: Int -> IO ()
+          retry n = case n of 0 -> full unfold
+                              n -> rigid (n - 1) unfold
+
+      case ?unifyState of
+        USRigid n    -> catchUE (flex dontunfold) (retry n)
+        USFlex       -> dontunfold
+        USIrrelevant -> dontunfold
+        USFull       -> impossible
+
+    (Unfold h sp t a, Unfold h' sp' t' _) -> do
+
+      let dontunfold = case (h, h') of
+           (UHSolvedMeta m, UHSolvedMeta m'  ) -> unifyEq m m' >> goSp sp sp'
+           (UHTopDef x _ _, UHTopDef x' _ _  ) -> unifyEq x x' >> goSp sp sp'
+           (UHCoe a b p t , UHCoe a' b' p' t') -> goJoin a a' >> goJoin b b'
+                                                  >> irr (goJoin p p') >> goJoin t t'
+                                                  >> goSp sp sp'
+           _                                   -> throwIO CantUnify
+
+      let unfold :: UnifyStateArg => IO ()
+          unfold = go (G topt t) (G topt' t')
+
+      case ?unifyState of
+
+        USRigid n -> do
+
+          let retry = case n of
+                0 -> full unfold
+                n -> rigid (n - 1) unfold
+
+          let speculateSp = catchUE (flex (goSp sp sp')) retry
+
+          let speculateCoe a b p t a' b' p' t' =
+                catchUE (flex (goJoin a a' >> goJoin b b' >> irr (goJoin p p') >> goJoin t t'
+                               >> goSp sp sp'))
+                        retry
+
+          case (h, h') of
+            (UHSolvedMeta m, UHSolvedMeta m'  ) -> if m == m' then speculateSp else unfold
+            (UHTopDef x _ _, UHTopDef x' _ _  ) -> if x == x' then speculateSp else unfold
+            (UHCoe a b p t , UHCoe a' b' p' t') -> speculateCoe a b p t a' b' p' t'
+            _                                   -> unfold
+
+        USFlex       -> dontunfold
+        USIrrelevant -> dontunfold
+        USFull       -> impossible
+
 
     -- eta-short solutions
     ------------------------------------------------------------
@@ -986,24 +1048,43 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (Flex (FHMeta m) sp a, rhs)  -> solveEtaShort m sp rhs a
     (rhs, Flex (FHMeta m) sp a)  -> solveEtaShort m sp rhs a
 
-    --
+    -- lopsided unfold
     ------------------------------------------------------------
 
-    (Unfold h sp t a, Unfold h' sp' t' _) -> case ?unifyState of
-      USRigid n
-        | case (h, h') of
-            (UHSolvedMeta m, UHSolvedMeta m'  ) -> m == m'
-            (UHTopDef x _ _, UHTopDef x' _ _  ) -> x == x' -> do
-          catchUE (flex (goSp sp sp')) (case n of 0 -> full (unify (G topt t) (G topt' t'))
-                                                  n -> rigid (n - 1) (unify (G topt t) (G topt' t')))
-        | case (h, h') of
-            (UHCoe{}, UHCoe
+    (Unfold _ _ t _, t') -> case ?unifyState of
+      USRigid _    -> go (G topt t) (G topt' t')
+      USFlex       -> throwIO CantUnify
+      USIrrelevant -> throwIO CantUnify
+      USFull       -> impossible
 
+    (t, Unfold _ _ t' _) -> case ?unifyState of
+      USRigid _    -> go (G topt t) (G topt' t')
+      USFlex       -> throwIO CantUnify
+      USIrrelevant -> throwIO CantUnify
+      USFull       -> impossible
 
+    -- lopsided equality
+    ------------------------------------------------------------
 
-        -- catchUE (flex (goUH h h' >> goSp sp sp'))
-        --         (case n of 0 -> full (unify (G topt t) (G topt' t'))
-        --                    n -> rigid (n - 1) (unify (G topt t) (G topt' t')))
+    (FlexEq _ a t u, RigidEq a' t' u')   -> goJoin a a' >> goJoin t t' >> goJoin u u'
+    (FlexEq _ a t u, TraceEq a' t' u' _) -> goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
-      USFlex -> goUH h h' >> goSp sp sp'
-      USFull -> impossible
+    (RigidEq a t u  , FlexEq _ a' t' u') -> goJoin a a' >> goJoin t t' >> goJoin u u'
+    (TraceEq a t u _, FlexEq _ a' t' u') -> goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
+
+    -- syntax-directed eta
+    ------------------------------------------------------------
+    (Lam _ _ i a t, t') -> goBind a t (Cl \u -> app t' u i)
+    (t, Lam _ _ i' a' t') -> goBind a' (Cl \u -> app t u i') t'
+
+    (Pair _ t u, t')  -> go (gjoin t) (gproj1 (G topt' t')) >> go (gjoin u) (gproj2 (G topt' t'))
+    (t, Pair _ t' u') -> go (gproj1 (G topt t)) (gjoin t') >> go (gproj2 (G topt t)) (gjoin u')
+
+    (Tt, _) -> pure ()
+    (_, Tt) -> pure ()
+
+    ------------------------------------------------------------
+
+    (Magic m, _) -> impossible
+    (_, Magic m) -> impossible
+    _            -> throwIO CantUnify

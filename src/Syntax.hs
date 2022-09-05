@@ -37,6 +37,12 @@ locals :: (LocalsArg => a) -> (LocalsArg => a)
 locals a = seq ?locals a
 {-# inline locals #-}
 
+localNames :: LocalsArg => [String]
+localNames = go ?locals where
+  go LEmpty = []
+  go (LDefine ls x _ _) = show x:go ls
+  go (LBind ls x _)     = show x : go ls
+
 closeTy :: LocalsArg => Ty -> Ty
 closeTy b = go ?locals b where
   go ls b = case ls of

@@ -35,6 +35,7 @@ Precedence summary from strongest to weakest:
   - function application   (left assoc)
   - equality type          (infix, no assoc)
   - sigma                  (right assoc)
+  - pi                     (right assoc)
   - lam/let                (right assoc)
   - pairs                  (right assoc)
 

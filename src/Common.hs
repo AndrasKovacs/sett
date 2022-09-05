@@ -49,6 +49,13 @@ debug' strs = putStrLn (intercalate " | " strs ++ " END")
 debugging' :: IO () -> IO ()
 debugging' act = act
 
+-- Configuration
+--------------------------------------------------------------------------------
+
+-- | How many times can we backtrack in unification/conversion checking.
+conversionSpeculation :: Int
+conversionSpeculation = 3
+
 -- Misc
 --------------------------------------------------------------------------------
 
