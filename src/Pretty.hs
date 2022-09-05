@@ -1,5 +1,5 @@
 
-module Pretty (showTm) where
+module Pretty (showTm, showTm0) where
 
 import IO
 
@@ -117,3 +117,6 @@ goTm prec ns t = go prec ns t where
 
 showTm :: LocalsArg => Tm -> String
 showTm t = goTm pairp localNames t []
+
+showTm0 :: Tm -> String
+showTm0 t = let ?locals = LEmpty in showTm t

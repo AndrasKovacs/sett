@@ -429,10 +429,10 @@ infer topt = case topt of
 -- top-level
 --------------------------------------------------------------------------------
 
-inferTop :: NT.NameTableArg => TopLvlArg => P.TopLevel -> IO ()
+inferTop :: NT.NameTableArg => TopLvlArg => P.TopLevel -> IO NT.NameTable
 inferTop = \case
 
-  P.Nil -> pure ()
+  P.Nil -> pure ?nameTable
 
   P.Define x ma t top -> initializeCxt do
     (a, va) <- case ma of
@@ -466,7 +466,7 @@ inferTop = \case
     inferTop top
 
 -- | Reset ElabState, elaborate top-level presyntax, fill up `topInfo`.
-elab :: P.TopLevel -> IO ()
+elab :: P.TopLevel -> IO NT.NameTable
 elab top = do
   reset
   let ?nameTable = mempty

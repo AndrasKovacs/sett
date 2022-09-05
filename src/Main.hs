@@ -1,21 +1,23 @@
 
 module Main where
 
-import qualified Data.Array.Dynamic.L as ADL
-import qualified Data.Array.LM as ALM
-import qualified Data.ByteString as B
-import qualified Control.Exception as Ex
-import qualified FlatParse.Stateful as FP
 import System.IO
-import Control.Monad
+import qualified Control.Exception    as Ex
+import qualified Data.Array.Dynamic.L as ADL
+import qualified Data.ByteString      as B
+import qualified Data.Ref.L           as RL
+import qualified FlatParse.Stateful   as FP
+
 
 import Common
-import Evaluation
-import Parser
-import Lexer
 import ElabState
-
-
+import Elaboration
+import Errors
+import Evaluation
+import Lexer
+import Parser
+import Pretty
+import qualified NameTable as NT
 
 --------------------------------------------------------------------------------
 
@@ -24,180 +26,128 @@ main = do
   hSetBuffering stdout NoBuffering
   putStrLn "sett 0.1.0.0"
   putStrLn "enter :? for help"
-  -- loop Nothing
+  loop
 
-data State = State {
-    path   :: FilePath
-  , src    :: B.ByteString
-  }
-
-load :: FilePath -> IO (Maybe State)
-load path = do
-  (res, time) <- timed $
+loadFile :: FilePath -> IO ()
+loadFile path = do
+  reset
+  (_, time) <- timed $
     Ex.try (B.readFile path) >>= \case
       Left (e :: Ex.SomeException) -> do
         putStrLn (Ex.displayException e)
-        pure Nothing
-      Right src -> do
-        timedPure (parseFile src) >>= \case
+      Right bstr -> do
+        let src = File path bstr
+        timedPure (runParser parse src) >>= \case
           (FP.Err e, _) -> do
             putStrLn (path ++ ":")
             putStrLn (prettyError src e)
-            pure Nothing
           (FP.Fail, _) -> do
             putStrLn "unknown parse error"
-            pure Nothing
           (FP.OK top _ _, time) -> do
             putStrLn (path ++ " parsed in " ++ show time)
-            timed (elab src top) >>= \case
-              (Left e, _) -> do
-                putStrLn (showException src e)
-                pure Nothing
-              (Right topCxt, time) -> do
-                putStrLn (path ++ " elaborated in " ++ show time)
+            timed (Ex.try (elab top)) >>= \case
+              (Left (e :: ErrorInCxt), time) -> do
+                print e
+              (Right ntbl, time) -> do
+                RL.write topNameTable ntbl
                 metas   <- nextMeta
                 topsize <- topSize
+                putStrLn (path ++ " elaborated in " ++ show time)
                 putStrLn ("created " ++ show metas ++ " metavariables")
-                -- putStrLn ("loaded " ++ show (Top.lvl topCxt) ++ " definitions")
-                pure (Just (State path src topCxt))
+                putStrLn ("loaded " ++ show topsize ++ " definitions")
+                RL.write loadedFile (Just path)
   putStrLn ("total load time: " ++ show time)
-  pure res
 
--- loop :: Maybe State -> IO ()
--- loop st = do
---   let whenLoaded action =
---         maybe (putStrLn "no file loaded" >> loop st) action st
---       {-# inline whenLoaded #-}
+loop :: IO ()
+loop = do
 
---   let dropSp = dropWhile (==' ')
+  let dropSp = dropWhile (==' ')
 
---   let loadTopDef str act = whenLoaded \st -> do
---         let x = packUTF8 str
---         ST.lookupByteString x (Top.tbl (topCxt st)) >>= \case
---           UJust (ST.Top a ga t _) -> do
---             act st a t
---           _ -> do
---             putStrLn "no such top-level name"
---             loop (Just st)
---       {-# inline loadTopDef #-}
+  let whenLoaded action = RL.read loadedFile >>= \case
+        Nothing   -> putStrLn "no file loaded" >> loop
+        Just path -> action path
 
---   let showTm0 st =
---         CoreTypes.showTm0 (Top.mcxt (topCxt st)) (src st) (Top.info (topCxt st))
+  let renderElab = do
+       size <- topSize
 
---   let nf0 (State _ _ cxt) = Evaluation.nf0 (Top.mcxt cxt)
---       {-# inline nf0 #-}
+       let goMetaBlock frz m | m == frz = pure ()
+           goMetaBlock frz m = do
+             readMeta m >>= \case
+               MEUnsolved _     -> putStrLn $ show m ++ " unsolved"
+               MESolved _ t _ _ -> putStrLn $ show m ++ " = " ++ showTm0 t
+             goMetaBlock frz (m + 1)
 
---   let zonk0 (State _ _ cxt) = Evaluation.zonk (Top.mcxt cxt) ENil 0
---       {-# inline zonk0 #-}
+       let goTop :: MetaVar -> Lvl -> IO ()
+           goTop m i | i == size = pure ()
+           goTop m i = readTopInfo i >>= \case
+               TEDef x a t frz ->  do
+                 goMetaBlock frz m
+                 when (m /= frz) (putStrLn "")
+                 putStrLn $ show x ++ " : " ++ showTm0 a
+                 putStrLn $ "  = " ++ showTm0 t
+                 putStrLn ""
+                 goTop frz (i + 1)
+               TEPostulate x a _ frz -> do
+                 goMetaBlock frz m
+                 when (m /= frz) (putStrLn "")
+                 putStrLn $ show x ++ " : " ++ showTm0 a
+                 putStrLn ""
+                 goTop frz (i + 1)
 
---   let renderElab st = do
---        let size = Top.lvl (topCxt st)
+       goTop 0 0
 
---        let go :: MetaVar -> Lvl -> IO ()
---            go m i | i == size = pure ()
---            go m i =
---              ALM.read (Top.info (topCxt st)) (coerce i) >>= \case
---                TopEntry x a t frz -> do
---                  let go' m | m == frz = pure ()
---                      go' m = do
---                        ADL.read (Top.mcxt (topCxt st)) (coerce m) >>= \case
---                          Unsolved _ ->
---                            putStrLn $ show m ++ " unsolved"
---                          Solved _ _ t _ ->
---                            putStrLn $ show m ++ " = " ++ showTm0 st t
---                        go' (m + 1)
---                  go' m
---                  when (m /= frz) (putStrLn "")
---                  putStrLn $ showSpan (src st) x ++ " : " ++ showTm0 st a
---                  putStrLn $ "  = " ++ showTm0 st t
---                  putStrLn ""
---                  go frz (i + 1)
---        go 0 0
+  let renderBro = do
+        ADL.for topInfo \case
+          TEDef x a _ _       -> putStrLn $ show x ++ " : " ++ showTm0 a
+          TEPostulate x a _ _ -> putStrLn $ show x ++ " : " ++ showTm0 a
 
---   let renderZonkedElab st = do
---        let size = Top.lvl (topCxt st)
+  let loadTop x act = whenLoaded \_ -> do
+        ntbl <- RL.read topNameTable
+        case NT.lookupBS (FP.packUTF8 x) ntbl of
+          Just (NT.Top l a va v) -> act l a va v
+          _ -> putStrLn "name not in scope" >> loop
 
---        let go :: MetaVar -> Lvl -> IO ()
---            go m i | i == size = pure ()
---            go m i =
---              ALM.read (Top.info (topCxt st)) (coerce i) >>= \case
---                TopEntry x a t frz -> do
---                  putStrLn $ showSpan (src st) x ++ " : " ++ showTm0 st (zonk0 st a)
---                  putStrLn $ "  = " ++ showTm0 st (zonk0 st t)
---                  putStrLn ""
---                  go frz (i + 1)
---        go 0 0
+  RL.read loadedFile >>= \case
+    Nothing   -> putStr "> "
+    Just path -> putStr $ path ++ "> "
 
---   let renderBro st = do
---         ALM.for (Top.info (topCxt st)) \(TopEntry x a t frz) ->
---           putStrLn $ showSpan (src st) x ++ " : " ++ showTm0 st a
+  l <- getLine
+  case l of
+    ':':'l':' ':(dropSp -> rest) ->
+      loadFile rest >> loop
+    ':':'r':_ ->
+      whenLoaded \path -> loadFile path >> loop
+    ':':'t':' ':(dropSp -> rest) ->
+      loadTop rest \_ a _ _ -> do
+        putStrLn $ showTm0 a
+        loop
+    ':':'n':'t':' ':(dropSp -> rest) ->
+      loadTop rest \_ a _ _ -> do
+        putStrLn $ showTm0 $ nf0 UnfoldEverything a
+        loop
+    ':':'n':' ':(dropSp -> rest) ->
+      loadTop rest \_ _ _ v -> do
+        putStrLn $ showTm0 $ quote0WithOpt UnfoldEverything v
+        loop
+    ':':'o':'u':'t':_ ->
+      whenLoaded \_ -> renderElab >> loop
+    ':':'b':'r':'o':_ ->
+      whenLoaded \_ -> renderBro >> loop
 
---   putStr (maybe "" path st ++ "> ")
---   l <- getLine
---   case l of
---     ':':'l':' ':(dropSp -> rest) ->
---       loop =<< load rest
---     ':':'r':_ ->
---       whenLoaded \st -> load (path st) >>= \case
---         Nothing -> loop (Just st)
---         Just st -> loop (Just st)
---     ':':'t':' ':(dropSp -> rest) ->
---       loadTopDef rest \st a t -> do
---         putStrLn $ showTm0 st a
---         loop (Just st)
---     ':':'z':'t':' ':(dropSp -> rest) ->
---       loadTopDef rest \st a t -> do
---         putStrLn $ showTm0 st (zonk0 st a)
---         loop (Just st)
---     ':':'n':'t':' ':(dropSp -> rest) ->
---       loadTopDef rest \st a t -> do
---         (nf, t) <- timedPure (nf0 st UnfoldAll a)
---         putStrLn $ showTm0 st nf
---         putStrLn $ "normalized in " ++ show t
---         loop (Just st)
---     ':':'n':' ':(dropSp -> rest) ->
---       loadTopDef rest \st a t -> do
---         (nf, t) <- timedPure (nf0 st UnfoldAll t)
---         putStrLn $ showTm0 st nf
---         putStrLn $ "normalized in " ++ show t
---         loop (Just st)
---     ':':'z':' ':(dropSp -> rest) ->
---       loadTopDef rest \st a t -> do
---         putStrLn $ showTm0 st (zonk0 st t)
---         loop (Just st)
---     ':':'e':' ':(dropSp -> rest) ->
---       loadTopDef rest \st a t -> do
---         putStrLn $ showTm0 st t
---         loop (Just st)
---     ':':'o':'u':'t':_ ->
---       whenLoaded \st -> do
---         renderElab st
---         loop (Just st)
---     ':':'z':'o':'u':'t':_ ->
---       whenLoaded \st -> do
---         renderZonkedElab st
---         loop (Just st)
---     ':':'b':'r':'o':_ ->
---       whenLoaded \st -> renderBro st >> loop (Just st)
-
---     ':':'?':_ -> do
---       putStrLn ":l <file>    load file"
---       putStrLn ":r           reload file"
---       putStrLn ":e  <name>   show elaborated version of top-level definition"
---       putStrLn ":n  <name>   show normal form of top-level definition"
---       putStrLn ":z  <name>   show zonked form of top-level definition"
---       putStrLn ":t  <name>   show elaborated type of top-level definition"
---       putStrLn ":nt <name>   show normal type of top-level definition"
---       putStrLn ":zt <name>   show zonked type of top-level definition"
---       putStrLn ":out         show whole elaboration output"
---       putStrLn ":zout        show zonked whole elaboration output"
---       putStrLn ":bro         show defined top-level names and their types"
---       putStrLn ":q           quit"
---       putStrLn ":?           show this message"
---       loop st
---     ':':'q':_ -> do
---       pure ()
---     _ -> do
---       putStrLn "unknown command"
---       putStrLn "use :? for help"
---       loop st
+    ':':'?':_ -> do
+      putStrLn ":l <file>    load file"
+      putStrLn ":r           reload file"
+      putStrLn ":n  <name>   show normal form of top-level definition"
+      putStrLn ":t  <name>   show elaborated type of top-level definition"
+      putStrLn ":nt <name>   show normal type of top-level definition"
+      putStrLn ":out         show whole elaboration output"
+      putStrLn ":bro         show defined top-level names and their types"
+      putStrLn ":q           quit"
+      putStrLn ":?           show this message"
+      loop
+    ':':'q':_ -> do
+      pure ()
+    _ -> do
+      putStrLn "unknown command"
+      putStrLn "use :? for help"
+      loop

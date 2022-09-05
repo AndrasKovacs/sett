@@ -21,6 +21,9 @@ nameTable :: (NameTableArg => a) -> (NameTableArg => a)
 nameTable a = seq ?nameTable a
 {-# inline nameTable #-}
 
+lookupBS :: B.ByteString -> NameTable -> Maybe Entry
+lookupBS = HM.lookup
+
 lookup :: Span -> NameTable -> Maybe Entry
 lookup x = HM.lookup (spanToBs x)
 

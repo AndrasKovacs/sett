@@ -4,7 +4,7 @@ module Evaluation (
   , eval, quote, eval0, quote0, nf, nf0, spine, spine0, spineIn, coe, eq
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeRelevance, Relevance(..), appTy, proj1Ty, proj2Ty
-  , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn
+  , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt
   ) where
 
 import Control.Exception

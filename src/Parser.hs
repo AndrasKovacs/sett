@@ -1,5 +1,5 @@
 
-module Parser (parseFile, parseString) where
+module Parser (parse, parseFile, parseString, parseBS) where
 
 import FlatParse.Stateful
   hiding (Parser, runParser, string, char, cut, err,
@@ -355,12 +355,23 @@ topLevel = branch (exactLvl 0 >> ident)
       pure Nil
   )
 
+parse :: Parser TopLevel
+parse = ws *> topLevel
+
 --------------------------------------------------------------------------------
 
 parseFile :: FilePath -> IO (Src, TopLevel)
 parseFile path = do
   src <- File path <$!> B.readFile path
-  case runParser (ws *> topLevel) src of
+  case runParser parse src of
+    OK a _ _ -> pure (src, a)
+    Fail     -> impossible
+    Err e    -> putStrLn (prettyError src e) >> error "parse error"
+
+parseBS :: FilePath -> B.ByteString -> IO (Src, TopLevel)
+parseBS path bs = do
+  let src = File path bs
+  case runParser parse src of
     OK a _ _ -> pure (src, a)
     Fail     -> impossible
     Err e    -> putStrLn (prettyError src e) >> error "parse error"
@@ -368,7 +379,7 @@ parseFile path = do
 parseString :: String -> IO (Src, TopLevel)
 parseString str = do
   let src = Interactive (packUTF8 str)
-  case runParser (ws *> topLevel) src of
+  case runParser parse src of
     OK a _ _ -> pure (src, a)
     Fail     -> impossible
     Err e    -> putStrLn (prettyError src e) >> error "parse error"

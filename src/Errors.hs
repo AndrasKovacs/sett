@@ -1,7 +1,6 @@
 
 module Errors (Error(..), ErrorInCxt(..)) where
 
-import IO
 import Control.Exception
 
 import Syntax
@@ -15,7 +14,6 @@ import qualified FlatParse.Stateful as FP
 import qualified Data.ByteString.Char8 as B
 
 import Evaluation
-import ElabState
 
 data Error
   = UnifyError Val Val
@@ -37,7 +35,7 @@ instance Show ErrorInCxt where
     let ?locals = ls
         ?lvl = l in
     let span      = P.span t
-        src       = runIO getSourceFile
+        bs        = spanToBs span
         showVal v = showTm (quoteWithOpt UnfoldMetas v)
         msg = case err of
           UnifyError t u ->
@@ -64,16 +62,16 @@ instance Show ErrorInCxt where
           ExpectedSetProp ->
             "Expected a type in Set or Prop"
 
-    in render src span msg
+    in render bs span msg
 
 instance Exception ErrorInCxt
 
 -- | Display an error with source position. We only use of the first position in
 --   the span.
 render :: B.ByteString -> Span -> String -> String
-render src (Span pos _) msg = let
-  ls     = FP.lines src
-  (l, c) = head $ FP.posLineCols src [rawPos pos]
+render bs (Span pos _) msg = let
+  ls     = FP.lines bs
+  (l, c) = head $ FP.posLineCols bs [rawPos pos]
   line   = if l < length ls then ls !! l else ""
   linum  = show (l + 1)
   lpad   = map (const ' ') linum

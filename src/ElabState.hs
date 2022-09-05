@@ -5,10 +5,10 @@ import IO
 import qualified Data.Array.Dynamic.L as ADL
 import qualified Data.Ref.F           as RF
 import qualified Data.Ref.L           as RL
-import qualified Data.ByteString.Char8 as B
 
 import Common
 import Values
+import NameTable
 import qualified Values as V
 import qualified Syntax as S
 import qualified Presyntax as P
@@ -106,22 +106,27 @@ isFrozen x = do
   frz <- RF.read frozen
   pure $! x < frz
 
-
--- Source file
+-- Loaded filepath
 --------------------------------------------------------------------------------
 
-sourceFile :: RL.Ref B.ByteString
-sourceFile = runIO $ RL.new B.empty
-{-# noinline sourceFile #-}
+loadedFile :: RL.Ref (Maybe FilePath)
+loadedFile = runIO $ RL.new Nothing
+{-# noinline loadedFile #-}
 
-getSourceFile :: IO B.ByteString
-getSourceFile = RL.read sourceFile
+
+-- Top-level nametable
+--------------------------------------------------------------------------------
+
+topNameTable :: RL.Ref NameTable
+topNameTable = runIO $ RL.new mempty
+{-# noinline topNameTable #-}
 
 --------------------------------------------------------------------------------
 
 reset :: IO ()
 reset = do
   ADL.clear metaCxt
-  RL.write sourceFile B.empty
   RF.write frozen 0
   ADL.clear topInfo
+  RL.write loadedFile Nothing
+  RL.write topNameTable mempty
