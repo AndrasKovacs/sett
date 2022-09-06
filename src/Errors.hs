@@ -28,15 +28,13 @@ data Error
   | AmbiguousUniverse
   | ExpectedSetProp
 
-data ErrorInCxt = ErrorInCxt Locals Lvl P.Tm Error
+data ErrorInCxt = ErrorInCxt Src Locals Lvl P.Tm Error
 
 instance Show ErrorInCxt where
-  show (ErrorInCxt ls l t err) =
+  show (ErrorInCxt src ls l t err) =
     let ?locals = ls
         ?lvl = l in
-    let span      = P.span t
-        bs        = spanToBs span
-        showVal v = showTm (quoteWithOpt UnfoldMetas v)
+    let showVal v = showTm (quoteWithOpt UnfoldMetas v)
         msg = case err of
           UnifyError t u ->
             "Can't unify\n\n  " ++ showVal t ++ "\n\nwith\n\n  "
@@ -62,9 +60,10 @@ instance Show ErrorInCxt where
           ExpectedSetProp ->
             "Expected a type in Set or Prop"
 
-    in render bs span msg
+    in render (srcToBs src) (P.span t) msg
 
 instance Exception ErrorInCxt
+
 
 -- | Display an error with source position. We only use of the first position in
 --   the span.

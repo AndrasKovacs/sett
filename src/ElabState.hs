@@ -5,6 +5,7 @@ import IO
 import qualified Data.Array.Dynamic.L as ADL
 import qualified Data.Ref.F           as RF
 import qualified Data.Ref.L           as RL
+import qualified Data.ByteString      as B
 
 import Common
 import Values
@@ -112,6 +113,20 @@ isFrozen x = do
 loadedFile :: RL.Ref (Maybe FilePath)
 loadedFile = runIO $ RL.new Nothing
 {-# noinline loadedFile #-}
+
+
+-- Source of code being elaborated
+--------------------------------------------------------------------------------
+
+elabSource :: RL.Ref (Maybe Src)
+elabSource = runIO $ RL.new Nothing
+{-# noinline elabSource #-}
+
+readElabSource :: IO (Maybe Src)
+readElabSource = RL.read elabSource
+
+writeElabSource :: Maybe Src -> IO ()
+writeElabSource msrc = RL.write elabSource msrc
 
 
 -- Top-level nametable

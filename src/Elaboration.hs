@@ -31,8 +31,14 @@ TODO
 
 --------------------------------------------------------------------------------
 
+
+
 elabError :: LocalsArg => LvlArg => P.Tm -> Error -> IO a
-elabError t err = throwIO $ ErrorInCxt ?locals ?lvl t err
+elabError t err = do
+  src <- readElabSource >>= \case
+    Just src -> pure src
+    Nothing  -> impossible
+  throwIO $ ErrorInCxt src ?locals ?lvl t err
 
 unify :: LvlArg => LocalsArg => P.Tm -> G -> G -> IO ()
 unify t l r = do

@@ -38,6 +38,7 @@ loadFile path = do
         putStrLn (Ex.displayException e)
       Right bstr -> do
         let src = File path bstr
+        writeElabSource (Just src)
         timedPure (runParser parse src) >>= \case
           (FP.Err e, _) -> do
             putStrLn (path ++ ":")
@@ -68,8 +69,8 @@ t1 = justElab $ unlines [
 
 t2 :: IO ()
 t2 = justElab $ unlines [
-  "idSet  : Set -> Set := λ x. x",
-  "idProp : Prop -> Prop := λ x. x"
+    "idSet  : Set -> Set := λ x. x"
+  , "idProp : Prop -> Prop := λ x. x"
   ]
 
 t3 :: IO ()
@@ -89,9 +90,10 @@ t5 = justElab $ unlines [
     "Pair : (A B : Set) → A → B → A × B := λ A B a b. (a, b)"
   ]
 
+-- invalid position
 t6 :: IO ()
 t6 = justElab $ unlines [
-    "foo : (A : Set) × (B : Set) × Set → Set := λ x. x.A"
+    "foo : (A : Set) × A → Set := λ x. x.1"
   ]
 
 ------------------------------------------------------------
@@ -100,6 +102,7 @@ justElab :: String -> IO ()
 justElab src = do
   reset
   (src, top) <- parseString src
+  writeElabSource (Just src)
   ntbl <- elab top
   renderElab
 
