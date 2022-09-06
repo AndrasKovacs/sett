@@ -17,6 +17,7 @@ import Evaluation
 import Lexer
 import Parser
 import Pretty
+import Values
 import qualified NameTable as NT
 
 --------------------------------------------------------------------------------
@@ -58,6 +59,61 @@ loadFile path = do
                 RL.write loadedFile (Just path)
   putStrLn ("total load time: " ++ show time)
 
+t1 :: IO ()
+t1 = justElab $ unlines [
+  "idSet : Set -> Set := λ x. x"
+  ]
+
+t2 :: IO ()
+t2 = justElab $ unlines [
+  "idSet  : Set -> Set := λ x. x",
+  "idProp : Prop -> Prop := λ x. x"
+  ]
+
+t3 :: IO ()
+t3 = justElab $ unlines [
+  "id : (A : Set) -> A -> A := λ A x. x"
+  ]
+
+justElab :: String -> IO ()
+justElab src = do
+  reset
+  (src, top) <- parseString src
+  ntbl <- elab top
+  renderElab
+
+renderElab :: IO ()
+renderElab = do
+ size <- topSize
+
+ let goMetaBlock frz m | m == frz = pure ()
+     goMetaBlock frz m = do
+       readMeta m >>= \case
+         MEUnsolved a     -> putStrLn $ show m ++ " : "
+                              ++ showTm0 (quote0 (g1 a)) ++ " unsolved"
+         MESolved _ t _ a -> putStrLn $ show m ++ " : "
+                              ++ showTm0 (quote0 (g1 a)) ++ " = " ++ showTm0 t
+       goMetaBlock frz (m + 1)
+
+ let goTop :: MetaVar -> Lvl -> IO ()
+     goTop m i | i == size = pure ()
+     goTop m i = readTopInfo i >>= \case
+         TEDef x a t frz ->  do
+           goMetaBlock frz m
+           when (m /= frz) (putStrLn "")
+           putStrLn $ show x ++ " : " ++ showTm0 a
+           putStrLn $ "  = " ++ showTm0 t
+           putStrLn ""
+           goTop frz (i + 1)
+         TEPostulate x a _ frz -> do
+           goMetaBlock frz m
+           when (m /= frz) (putStrLn "")
+           putStrLn $ show x ++ " : " ++ showTm0 a
+           putStrLn ""
+           goTop frz (i + 1)
+ goTop 0 0
+
+
 loop :: IO ()
 loop = do
 
@@ -66,35 +122,6 @@ loop = do
   let whenLoaded action = RL.read loadedFile >>= \case
         Nothing   -> putStrLn "no file loaded" >> loop
         Just path -> action path
-
-  let renderElab = do
-       size <- topSize
-
-       let goMetaBlock frz m | m == frz = pure ()
-           goMetaBlock frz m = do
-             readMeta m >>= \case
-               MEUnsolved _     -> putStrLn $ show m ++ " unsolved"
-               MESolved _ t _ _ -> putStrLn $ show m ++ " = " ++ showTm0 t
-             goMetaBlock frz (m + 1)
-
-       let goTop :: MetaVar -> Lvl -> IO ()
-           goTop m i | i == size = pure ()
-           goTop m i = readTopInfo i >>= \case
-               TEDef x a t frz ->  do
-                 goMetaBlock frz m
-                 when (m /= frz) (putStrLn "")
-                 putStrLn $ show x ++ " : " ++ showTm0 a
-                 putStrLn $ "  = " ++ showTm0 t
-                 putStrLn ""
-                 goTop frz (i + 1)
-               TEPostulate x a _ frz -> do
-                 goMetaBlock frz m
-                 when (m /= frz) (putStrLn "")
-                 putStrLn $ show x ++ " : " ++ showTm0 a
-                 putStrLn ""
-                 goTop frz (i + 1)
-
-       goTop 0 0
 
   let renderBro = do
         ADL.for topInfo \case

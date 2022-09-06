@@ -189,14 +189,14 @@ check topt (G topa ftopa) = do
                      P.Named x'  -> NSpan x' == x && i == Impl) -> do
 
       (a, va) <- case ma of
-        Just a  -> do
-          a <- check a gSet
-          pure (a, eval a)
-        Nothing -> do
-          a' <- freshMeta gSet
+        Just a' -> do
+          a' <- check a' gSet
           let va' = eval a'
-          unify topt (gjoin a) (gjoin va')
+          unify topt (gjoin va') (gjoin a)
           pure (a', va')
+        Nothing -> do
+          let qa = quote a
+          pure (qa, a)
 
       bind x' a (gjoin va) \var ->
         S.Lam S (bindToName x') i a <$!> check t (gjoin $! (b $$ var))

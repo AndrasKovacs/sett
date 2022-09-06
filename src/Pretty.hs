@@ -88,9 +88,10 @@ goTm prec ns t = go prec ns t where
         _                   -> impossible
       pure $! (str++)
 
-    InsertedMeta x ls -> ("?"++).(show x++).("(..)"++)
+    InsertedMeta x LEmpty -> (show x++)
+    InsertedMeta x ls     -> (show x++).("(..)"++)
 
-    Meta x -> ("?"++).(show x++)
+    Meta x -> (show x++)
 
     Let (show -> x) a t u ->
       par p letp $ ("let "++) . (x++) . (" : "++) . go letp ns a
@@ -120,3 +121,6 @@ showTm t = goTm pairp localNames t []
 
 showTm0 :: Tm -> String
 showTm0 t = let ?locals = LEmpty in showTm t
+
+-- showTm0 :: Tm -> String
+-- showTm0 t = show t

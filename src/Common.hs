@@ -15,6 +15,7 @@ import GHC.Exts
 import Data.Bits
 import Data.Flat
 import Data.Time.Clock
+import GHC.Stack
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
@@ -23,12 +24,12 @@ import qualified FlatParse.Stateful as FP
 -- Debug printing, toggled by "debug" cabal flag
 --------------------------------------------------------------------------------
 
--- define DEBUG
+#define DEBUG
 #ifdef DEBUG
 type Dbg = HasCallStack
 
 debug :: [String] -> IO ()
-debug strs = U.io $ putStrLn (intercalate " | " strs ++ " END")
+debug strs = putStrLn (intercalate " | " strs ++ " END")
 
 debugging :: IO () -> IO ()
 debugging act = act
@@ -209,7 +210,10 @@ instance Ord Pos where
 
 -- | Source span. The left position must not be larger than the right one.
 data Span = Span# Src FP.Pos FP.Pos
-  deriving Show via Hide Span
+  -- deriving Show via Hide Span
+
+instance Show Span where
+  show = spanToString
 
 pattern Span :: Pos -> Pos -> Span
 pattern Span x y <- ((\(Span# src x y) -> (Pos src x, Pos src y)) -> (x, y)) where
@@ -263,7 +267,7 @@ nh = NLit "h"
 
 instance Show Name where
   showsPrec d NUnused   acc = '_':acc
-  showsPrec d (NSpan x) acc = showsPrec d x acc
+  showsPrec d (NSpan x) acc = spanToString x++acc
   showsPrec d (NLit s)  acc = s ++ acc
 
 bindToName :: Bind -> Name
