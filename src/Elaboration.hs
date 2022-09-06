@@ -18,6 +18,8 @@ import qualified Syntax as S
 import qualified Values as V
 import qualified NameTable as NT
 
+import Pretty
+
 --------------------------------------------------------------------------------
 
 {-
@@ -167,7 +169,12 @@ checkEl topt (G topa ftopa) = do
 
 check :: InCxt (P.Tm -> GTy -> IO S.Tm)
 check topt (G topa ftopa) = do
+
   ftopa <- forceAll ftopa
+
+  debug ["check", show topt, showTm (quote ftopa)]
+
+
   case (topt, ftopa) of
 
     (P.Pi _ x i a b, V.Prop) -> do
@@ -231,6 +238,7 @@ check topt (G topa ftopa) = do
 
     (topt, ftopa) -> do
       Infer t tty <- infer topt
+      debug ["subtype", showTm (quote (g2 tty)), showTm (quote ftopa)]
       subtype topt t (g2 tty) ftopa
 
 

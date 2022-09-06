@@ -15,6 +15,7 @@ import Evaluation
 import qualified ElabState as ES
 -- import Errors
 import qualified Syntax as S
+import Pretty
 
 ----------------------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------------------
@@ -674,11 +675,14 @@ invertVal solvable psub param t rhsSp = do
       let ?lvl = param + 1
       invertVal solvable psub ?lvl (t $$ var) (SApp rhsSp var i)
 
+    -- Rigid (RHLocalVar x xty _) SId rhsTy -> do
+    --   updatePSub x (Var _ _) psub
+
     Rigid (RHLocalVar x xty _) sp rhsTy -> do
       unless (solvable <= x && x < psub^.cod) (throw CantInvertSpine)
       (_, ~xty) <- psubst' psub xty
       let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
-      sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom, rhsSp) rhsTy
+      sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom - 1, rhsSp) rhsTy
       updatePSub x (evalInDom psub sol) psub
 
     _ ->
@@ -696,11 +700,15 @@ solveTopSp psub ls a sp rhs rhsty = do
       ?locals = ls
 
   a <- forceSet a
+
   case (a, sp) of
 
     (a, RSId) -> do
       () <$ psubst psub rhsty
       psubst psub rhs
+
+    --
+    -- ?0 x ?= Set
 
     (Pi x i a b, RSApp u _ t) -> do
       let var   = Var' ?lvl a True

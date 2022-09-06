@@ -59,6 +59,8 @@ loadFile path = do
                 RL.write loadedFile (Just path)
   putStrLn ("total load time: " ++ show time)
 
+------------------------------------------------------------
+
 t1 :: IO ()
 t1 = justElab $ unlines [
   "idSet : Set -> Set := λ x. x"
@@ -74,6 +76,15 @@ t3 :: IO ()
 t3 = justElab $ unlines [
   "id : (A : Set) -> A -> A := λ A x. x"
   ]
+
+t4 :: IO ()
+t4 = justElab $ unlines [
+    "id : {A : Set} -> A -> A := λ x. x"
+  -- , "id2 : Set := id Set"
+  , "id2 : Set → Set := λ x. id x"
+  ]
+
+------------------------------------------------------------
 
 justElab :: String -> IO ()
 justElab src = do

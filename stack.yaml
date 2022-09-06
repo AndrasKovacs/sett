@@ -6,6 +6,10 @@ resolver: nightly-2022-07-07
 packages:
 - .
 
+build:
+  library-profiling: true
+  executable-profiling: true
+
 ghc-options:
     "$everything": -split-sections
 

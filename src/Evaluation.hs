@@ -36,10 +36,10 @@ TODO
 --------------------------------------------------------------------------------
 
 localVar :: EnvArg => Ix -> Val
-localVar x = go ?env x where
+localVar topx = go ?env topx where
   go (EDef _ v) 0 = v
   go (EDef e _) x = go e (x - 1)
-  go _          _ = impossible
+  go _          _ = error $ show topx
 
 meta :: MetaVar -> Val
 meta x = runIO $ readMeta x >>= \case
