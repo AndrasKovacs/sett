@@ -84,6 +84,16 @@ t4 = justElab $ unlines [
   , "id2 : Set → Set := λ x. id x"
   ]
 
+t5 :: IO ()
+t5 = justElab $ unlines [
+    "Pair : (A B : Set) → A → B → A × B := λ A B a b. (a, b)"
+  ]
+
+t6 :: IO ()
+t6 = justElab $ unlines [
+    "foo : (A : Set) × (B : Set) × Set → Set := λ x. x.A"
+  ]
+
 ------------------------------------------------------------
 
 justElab :: String -> IO ()
@@ -103,7 +113,7 @@ renderElab = do
          MEUnsolved a     -> putStrLn $ show m ++ " : "
                               ++ showTm0 (quote0 (g1 a)) ++ " unsolved"
          MESolved _ t _ a -> putStrLn $ show m ++ " : "
-                              ++ showTm0 (quote0 (g1 a)) ++ " = " ++ showTm0 t
+                              ++ showTm0 (quote0 (g1 a)) ++ " := " ++ showTm0 t
        goMetaBlock frz (m + 1)
 
  let goTop :: MetaVar -> Lvl -> IO ()
@@ -113,7 +123,7 @@ renderElab = do
            goMetaBlock frz m
            when (m /= frz) (putStrLn "")
            putStrLn $ show x ++ " : " ++ showTm0 a
-           putStrLn $ "  = " ++ showTm0 t
+           putStrLn $ "  := " ++ showTm0 t
            putStrLn ""
            goTop frz (i + 1)
          TEPostulate x a _ frz -> do

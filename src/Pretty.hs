@@ -118,14 +118,14 @@ goTm prec ns t = go prec ns t where
       Nonlinear  -> ("nonlinear"++)
       MetaOccurs -> ("metaoccurs"++)
 
--- showTm :: LocalsArg => Tm -> String
--- showTm t = goTm pairp localNames t []
-
--- showTm0 :: Tm -> String
--- showTm0 t = let ?locals = LEmpty in showTm t
-
 showTm :: LocalsArg => Tm -> String
-showTm t = show t
+showTm t = goTm pairp localNames t []
 
 showTm0 :: Tm -> String
-showTm0 t = show t
+showTm0 t = let ?locals = LEmpty in showTm t
+
+-- showTm :: LocalsArg => Tm -> String
+-- showTm t = show t
+
+-- showTm0 :: Tm -> String
+-- showTm0 t = show t

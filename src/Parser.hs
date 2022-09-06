@@ -233,7 +233,7 @@ piBinder =
 pi' :: Parser Tm
 pi' = (do
   pos <- getPos
-  branch (some piBinder)
+  branch (try (some piBinder)) -- TODO: lookahead instead of try
 
     (\case
         -- pi/sigma ambiguity resolution
