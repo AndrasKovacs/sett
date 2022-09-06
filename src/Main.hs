@@ -90,10 +90,15 @@ t5 = justElab $ unlines [
     "Pair : (A B : Set) → A → B → A × B := λ A B a b. (a, b)"
   ]
 
--- invalid position
 t6 :: IO ()
 t6 = justElab $ unlines [
-    "foo : (A : Set) × A → Set := λ x. x.1"
+    "foo : (A : Set) × A → Set := λ x. x.A"
+  ]
+
+t7 :: IO ()
+t7 = justElab $ unlines [
+    "Graph : Set := (V : Set) × (E : V → V → Set) × ⊤"
+  , "foo : (G : Graph) → G.V → G.V → Set := λ g. g.E"
   ]
 
 ------------------------------------------------------------

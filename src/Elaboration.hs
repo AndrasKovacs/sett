@@ -260,184 +260,188 @@ ensureSP topt a = forceAll a >>= \case
   _      -> elabError topt ExpectedSetProp
 
 infer :: InCxt (P.Tm -> IO Infer)
-infer topt = case topt of
+infer topt = do
 
-  P.Var x -> case NT.lookup x ?nameTable of
-    Nothing ->
-      elabError topt $ NameNotInScope x
-    Just (NT.Top x a ga v) ->
-      pure $! Infer (S.TopDef x v (g2 ga)) ga
-    Just (NT.Local x ga) ->
-      pure $! Infer (S.LocalVar (lvlToIx x)) ga
+  debug ["infer", show topt]
 
-  P.Pi _ x i topa topb -> do
-    a <- check topa gSet
-    bindWithTy x a \_ -> do
-      Infer b (G bty fbty) <- infer topb
-      sp <- ensureSP topb fbty
-      pure $! Infer (S.Pi (bindToName x) i a b) (gU sp)
+  case topt of
 
-  P.Sg _ x topa topb -> do
-    Infer a (G aty faty) <- infer topa
-    bindWithTy x a \_ -> do
-      ensureSP topa faty >>= \case
-        S -> do
-          b <- check topb gSet
-          pure $! Infer (S.Sg (bindToName x) a b) gSet
-        P -> do
-          Infer b (G bty fbty) <- infer topb
-          sp <- ensureSP topb fbty
-          pure $! Infer (S.Sg (bindToName x) (S.El a) b) (gU sp)
+    P.Var x -> case NT.lookup x ?nameTable of
+      Nothing ->
+        elabError topt $ NameNotInScope x
+      Just (NT.Top x a ga v) ->
+        pure $! Infer (S.TopDef x v (g2 ga)) ga
+      Just (NT.Local x ga) ->
+        pure $! Infer (S.LocalVar (lvlToIx x)) ga
 
-  P.Set _ ->
-    pure $ Infer S.Set gSet
+    P.Pi _ x i topa topb -> do
+      a <- check topa gSet
+      bindWithTy x a \_ -> do
+        Infer b (G bty fbty) <- infer topb
+        sp <- ensureSP topb fbty
+        pure $! Infer (S.Pi (bindToName x) i a b) (gU sp)
 
-  P.Prop _ ->
-    pure $ Infer S.Prop gSet
+    P.Sg _ x topa topb -> do
+      Infer a (G aty faty) <- infer topa
+      bindWithTy x a \_ -> do
+        ensureSP topa faty >>= \case
+          S -> do
+            b <- check topb gSet
+            pure $! Infer (S.Sg (bindToName x) a b) gSet
+          P -> do
+            Infer b (G bty fbty) <- infer topb
+            sp <- ensureSP topb fbty
+            pure $! Infer (S.Sg (bindToName x) (S.El a) b) (gU sp)
 
-  P.Top _ ->
-    pure $ Infer S.Top gProp
+    P.Set _ ->
+      pure $ Infer S.Set gSet
 
-  P.Bot _ ->
-    pure $ Infer S.Bot gProp
+    P.Prop _ ->
+      pure $ Infer S.Prop gSet
 
-  P.Tt _ ->
-    pure $! Infer S.Tt (gjoin (V.El V.Top))
+    P.Top _ ->
+      pure $ Infer S.Top gProp
 
-  P.El _ a -> do
-    a <- check a gProp
-    pure $! Infer (S.El a) gSet
+    P.Bot _ ->
+      pure $ Infer S.Bot gProp
 
-  topt@(P.Eq t u) -> do
-    Infer t tty <- infer t
-    Infer u uty <- infer u
-    unify topt tty uty
-    let a = quote (g1 tty)
-    pure $! Infer (S.Eq a t u) gProp
+    P.Tt _ ->
+      pure $! Infer S.Tt (gjoin (V.El V.Top))
 
-  P.Exfalso _ -> do
-    let ty = V.PiSI na V.Set \a -> funS (V.El V.Bot) a
-    pure $! Infer S.ExfalsoSym (gjoin ty)
+    P.El _ a -> do
+      a <- check a gProp
+      pure $! Infer (S.El a) gSet
 
-  P.Refl _ -> do
-    let ty = V.PiPI na V.Set \a -> V.PiPI nx a \x -> V.El (eq a x x)
-    pure $! Infer S.ReflSym (gjoin ty)
-
-  P.Coe _ -> do
-    let ty = V.PiSI na V.Set \a -> V.PiSI nb V.Set \b ->
-             funS (V.El (eqSet a b)) $ funS a b
-    pure $! Infer S.CoeSym (gjoin ty)
-
-  P.Sym _ -> do
-    let ty = V.PiPI na V.Set \a -> V.PiPI ny a \x -> V.PiPI ny a \y -> V.PiPE np (V.El (eq a x y)) \p ->
-             eq a y x
-    pure $! Infer S.SymSym (gjoin ty)
-
-  P.Trans _ -> do
-    let ty = V.PiPI na V.Set \a -> V.PiPI nx a \x -> V.PiPI ny a \y -> V.PiPI nz a \z ->
-             V.PiPE np (eq a x y) \p -> V.PiPE nq (eq a y z) \q ->
-             eq a x z
-    pure $! Infer S.TransSym (gjoin ty)
-
-  P.Ap _ -> do
-    let ty = V.PiPI na V.Set \a -> V.PiPI nb V.Set \b -> V.PiPE nf (funS a b) \f -> V.PiPI nx a \x ->
-             V.PiPI ny a \y -> V.PiPE np (eq a x y) \p ->
-             eq b (f `appE` x) (f `appE` y)
-    pure $! Infer S.ApSym (gjoin ty)
-
-  P.Hole _ -> do
-    ty <- freshMeta gSet
-    let gty = gjoin (eval ty)
-    tm <- freshMeta gty
-    pure $! Infer tm gty
-
-  P.App topt topu i -> do
-
-    (i, t, a, fa) <- case i of
-      P.NoName Impl -> do
-        Infer t (G a fa) <- infer topt
-        pure (Impl, t, a, fa)
-      P.NoName Expl -> do
-        Infer t (G a fa) <- insertApps' $ infer topt
-        pure (Expl, t, a, fa)
-      P.Named x -> do
-        Infer t (G a fa) <- insertAppsUntilName topt x $ infer topt
-        pure (Impl, t, a , fa)
-
-    forceAll fa >>= \case
-
-      V.Pi x _ a b -> do
-        u <- check topu (gjoin a)
-        pure $! Infer (S.App t u i) (gjoin (b $$~ eval u))
-
-      V.El (V.Pi x i a b) -> do
-        u <- check topu (gjoin a)
-        pure $! Infer (S.App t u i) (gjoin (V.El (b $$~ eval u)))
-
-      fa ->
-        elabError topt $ ExpectedFunOrForall a
-
-  -- TODO: infer, postpone if ambiguous S/P
-  P.Lam{} ->
-    elabError topt $ GenericError "can't infer type for lambda"
-
-  -- TODO: infer simple product type, postpone if ambiguous S/P
-  P.Pair{} ->
-    elabError topt $ GenericError "can't infer type for pair"
-
-  P.Proj1 topt _ -> do
-    Infer t (G ty fty) <- infer topt
-    forceAll fty >>= \case
-      V.Sg x a b        -> pure $! Infer (Proj1 t) (gjoin a)
-      V.El (V.Sg x a b) -> pure $! Infer (Proj1 t) (gjoin (V.El a))
-      -- todo: postpone
-      fty               -> elabError topt $! ExpectedSg ty
-
-  P.Proj2 topt _ -> do
-    Infer t (G ty fty) <- infer topt
-    forceAll fty >>= \case
-      V.Sg x a b        -> pure $! Infer (Proj2 t) (gjoin (b $$~ proj1 (eval t)))
-      V.El (V.Sg x a b) -> pure $! Infer (Proj2 t) (gjoin (V.El (b $$~ proj1 (eval t))))
-      -- todo: postpone
-      fty                 -> elabError topt $! ExpectedSg ty
-
-  P.ProjField t x -> do
-    let fieldName = NSpan x
-    Infer t ga <- infer topt
-    let ~vt = eval t
-
-    let go a ix = forceAll a >>= \case
-          V.Sg x' a b | fieldName == x' -> do
-            pure (ix, a)
-          V.Sg x' a b -> do
-            go (b $$ projField vt ix) (ix + 1)
-          V.El (V.Sg x' a b) | fieldName == x' -> do
-            pure (ix, V.El a)
-          V.El (V.Sg x' a b) -> do
-            go (b $$ projField vt ix) (ix + 1)
-          -- todo: postpone
-          _ ->
-            elabError topt $ NoSuchField x
-
-    (ix, b) <- go (g2 ga) 0
-    pure $! Infer (S.ProjField t fieldName ix) (gjoin b)
-
-  P.Let _ x ma t u -> do
-
-    (a, va) <- case ma of
-      Just a  -> do
-        a <- check a gSet
-        pure (a, eval a)
-      Nothing -> do
-        a' <- freshMeta gSet
-        let va' = eval a'
-        pure (a', va')
-
-    t <- check t (gjoin va)
-
-    define x a (gjoin va) t (eval t) do
+    topt@(P.Eq t u) -> do
+      Infer t tty <- infer t
       Infer u uty <- infer u
-      pure $ Infer (S.Let (NSpan x) a t u) uty
+      unify topt tty uty
+      let a = quote (g1 tty)
+      pure $! Infer (S.Eq a t u) gProp
+
+    P.Exfalso _ -> do
+      let ty = V.PiSI na V.Set \a -> funS (V.El V.Bot) a
+      pure $! Infer S.ExfalsoSym (gjoin ty)
+
+    P.Refl _ -> do
+      let ty = V.PiPI na V.Set \a -> V.PiPI nx a \x -> V.El (eq a x x)
+      pure $! Infer S.ReflSym (gjoin ty)
+
+    P.Coe _ -> do
+      let ty = V.PiSI na V.Set \a -> V.PiSI nb V.Set \b ->
+               funS (V.El (eqSet a b)) $ funS a b
+      pure $! Infer S.CoeSym (gjoin ty)
+
+    P.Sym _ -> do
+      let ty = V.PiPI na V.Set \a -> V.PiPI ny a \x -> V.PiPI ny a \y -> V.PiPE np (V.El (eq a x y)) \p ->
+               eq a y x
+      pure $! Infer S.SymSym (gjoin ty)
+
+    P.Trans _ -> do
+      let ty = V.PiPI na V.Set \a -> V.PiPI nx a \x -> V.PiPI ny a \y -> V.PiPI nz a \z ->
+               V.PiPE np (eq a x y) \p -> V.PiPE nq (eq a y z) \q ->
+               eq a x z
+      pure $! Infer S.TransSym (gjoin ty)
+
+    P.Ap _ -> do
+      let ty = V.PiPI na V.Set \a -> V.PiPI nb V.Set \b -> V.PiPE nf (funS a b) \f -> V.PiPI nx a \x ->
+               V.PiPI ny a \y -> V.PiPE np (eq a x y) \p ->
+               eq b (f `appE` x) (f `appE` y)
+      pure $! Infer S.ApSym (gjoin ty)
+
+    P.Hole _ -> do
+      ty <- freshMeta gSet
+      let gty = gjoin (eval ty)
+      tm <- freshMeta gty
+      pure $! Infer tm gty
+
+    P.App topt topu i -> do
+
+      (i, t, a, fa) <- case i of
+        P.NoName Impl -> do
+          Infer t (G a fa) <- infer topt
+          pure (Impl, t, a, fa)
+        P.NoName Expl -> do
+          Infer t (G a fa) <- insertApps' $ infer topt
+          pure (Expl, t, a, fa)
+        P.Named x -> do
+          Infer t (G a fa) <- insertAppsUntilName topt x $ infer topt
+          pure (Impl, t, a , fa)
+
+      forceAll fa >>= \case
+
+        V.Pi x _ a b -> do
+          u <- check topu (gjoin a)
+          pure $! Infer (S.App t u i) (gjoin (b $$~ eval u))
+
+        V.El (V.Pi x i a b) -> do
+          u <- check topu (gjoin a)
+          pure $! Infer (S.App t u i) (gjoin (V.El (b $$~ eval u)))
+
+        fa ->
+          elabError topt $ ExpectedFunOrForall a
+
+    -- TODO: infer, postpone if ambiguous S/P
+    P.Lam{} ->
+      elabError topt $ GenericError "can't infer type for lambda"
+
+    -- TODO: infer simple product type, postpone if ambiguous S/P
+    P.Pair{} ->
+      elabError topt $ GenericError "can't infer type for pair"
+
+    P.Proj1 topt _ -> do
+      Infer t (G ty fty) <- infer topt
+      forceAll fty >>= \case
+        V.Sg x a b        -> pure $! Infer (Proj1 t) (gjoin a)
+        V.El (V.Sg x a b) -> pure $! Infer (Proj1 t) (gjoin (V.El a))
+        -- todo: postpone
+        fty               -> elabError topt $! ExpectedSg ty
+
+    P.Proj2 topt _ -> do
+      Infer t (G ty fty) <- infer topt
+      forceAll fty >>= \case
+        V.Sg x a b        -> pure $! Infer (Proj2 t) (gjoin (b $$~ proj1 (eval t)))
+        V.El (V.Sg x a b) -> pure $! Infer (Proj2 t) (gjoin (V.El (b $$~ proj1 (eval t))))
+        -- todo: postpone
+        fty                 -> elabError topt $! ExpectedSg ty
+
+    P.ProjField t x -> do
+      let fieldName = NSpan x
+      Infer t ga <- infer t
+      let ~vt = eval t
+
+      let go a ix = forceAll a >>= \case
+            V.Sg x' a b | fieldName == x' -> do
+              pure (ix, a)
+            V.Sg x' a b -> do
+              go (b $$ projField vt ix) (ix + 1)
+            V.El (V.Sg x' a b) | fieldName == x' -> do
+              pure (ix, V.El a)
+            V.El (V.Sg x' a b) -> do
+              go (b $$ projField vt ix) (ix + 1)
+            -- todo: postpone
+            _ ->
+              elabError topt $ NoSuchField x
+
+      (ix, b) <- go (g2 ga) 0
+      pure $! Infer (S.ProjField t fieldName ix) (gjoin b)
+
+    P.Let _ x ma t u -> do
+
+      (a, va) <- case ma of
+        Just a  -> do
+          a <- check a gSet
+          pure (a, eval a)
+        Nothing -> do
+          a' <- freshMeta gSet
+          let va' = eval a'
+          pure (a', va')
+
+      t <- check t (gjoin va)
+
+      define x a (gjoin va) t (eval t) do
+        Infer u uty <- infer u
+        pure $ Infer (S.Let (NSpan x) a t u) uty
 
 
 -- top-level
