@@ -1124,12 +1124,10 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
     (FlexEq _ a t u, RigidEq a' t' u')   -> goJoin a a' >> goJoin t t' >> goJoin u u'
     (FlexEq _ a t u, TraceEq a' t' u' _) -> do
-      debug ["FOOOOOOOOOOOOO"]
       goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
     (RigidEq a t u  , FlexEq _ a' t' u') -> goJoin a a' >> goJoin t t' >> goJoin u u'
     (TraceEq a t u _, FlexEq _ a' t' u') -> do
-      debug ["FOOOOOOOOOOOOO"]
       goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
     -- syntax-directed eta

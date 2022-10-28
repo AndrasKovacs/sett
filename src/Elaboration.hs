@@ -423,17 +423,22 @@ infer topt = do
       Infer t (G ty fty) <- infer topt
       forceAll fty >>= \case
         V.Sg x a b        -> pure $! Infer (Proj1 t) (gjoin a)
-        V.El (V.Sg x a b) -> pure $! Infer (Proj1 t) (gjoin (V.El a))
+        V.El a -> forceAll a >>= \case
+          V.Sg x a b -> pure $! Infer (Proj1 t) (gjoin (V.El a))
+          a          -> elabError topt $! ExpectedSg (V.El a)
+
         -- todo: postpone
-        fty               -> elabError topt $! ExpectedSg ty
+        _ -> elabError topt $! ExpectedSg ty
 
     P.Proj2 topt _ -> do
       Infer t (G ty fty) <- infer topt
       forceAll fty >>= \case
         V.Sg x a b        -> pure $! Infer (Proj2 t) (gjoin (b $$~ proj1 (eval t)))
-        V.El (V.Sg x a b) -> pure $! Infer (Proj2 t) (gjoin (V.El (b $$~ proj1 (eval t))))
+        V.El a -> forceAll a >>= \case
+          V.Sg x a b -> pure $! Infer (Proj2 t) (gjoin (V.El (b $$~ proj1 (eval t))))
+          _          -> elabError topt $! ExpectedSg (V.El a)
         -- todo: postpone
-        fty                 -> elabError topt $! ExpectedSg ty
+        _ -> elabError topt $! ExpectedSg ty
 
     P.ProjField topt x -> do
       let fieldName = NSpan x
