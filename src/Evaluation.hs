@@ -67,8 +67,9 @@ meta x = runIO $ readMeta x >>= \case
 
 appTy :: LvlArg => Ty -> Val -> Ty
 appTy a t = runIO $ forceSet a >>= \case
-  Pi _ _ _ b -> pure $! (b $$ t)
-  _          -> impossible
+  Pi _ _ _ b      -> pure $! (b $$ t)
+  El (Pi _ _ _ b) -> pure $! El (b $$ t)
+  _               -> impossible
 
 app :: LvlArg => Val -> Val -> Icit -> Val
 app t u i = case t of
@@ -90,8 +91,9 @@ appI t u = app t u Impl
 
 proj1Ty :: LvlArg => Ty -> Ty
 proj1Ty a = runIO $ forceSet a >>= \case
-  Sg _ a _ -> pure a
-  _        -> impossible
+  Sg _ a _      -> pure a
+  El (Sg _ a _) -> pure $! El a
+  _             -> impossible
 
 proj1 :: LvlArg => Val -> Val
 proj1 t = case t of
@@ -114,8 +116,9 @@ gproj2 (G t ft) = G (proj2 t) (proj2 ft)
 --   second projection.
 proj2Ty :: LvlArg => Ty -> Val -> Ty
 proj2Ty a proj1 = runIO $ forceSet a >>= \case
-  Sg _ _ b -> pure $! (b $$ proj1)
-  _        -> impossible
+  Sg _ _ b      -> pure $! (b $$ proj1)
+  El (Sg _ _ b) -> pure $! El (b $$ proj1)
+  _             -> impossible
 
 proj2 :: LvlArg => Val -> Val
 proj2 topt = case topt of
