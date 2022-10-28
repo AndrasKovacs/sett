@@ -142,8 +142,8 @@ t10 = justElab $ unlines [
 
 t11 :: IO ()
 t11 = justElab $ unlines [
-  "testrefl : {A : Set}(x : A) → x = x",
-  "  := λ x. refl"
+  "testrefl : (A : Set)(x : A) → x = x",
+  "  := λ A x. refl {A} {x}"
   ]
 
 t12 :: IO ()
