@@ -47,9 +47,15 @@ goTm prec ns t = go prec ns t where
   go :: Int -> [String] -> Tm -> ShowS
   go p ns = \case
 
-    LocalVar (Ix x) -> case ns !! x of
-      "_" -> (('@':show x)++)
-      x   -> (x++)
+    -- LocalVar (Ix x) -> case ns !! x of
+    --   "_" -> (('@':show x)++)
+    --   x   -> (x++)
+
+    LocalVar (Ix x) | x < length ns ->
+      case ns !! x of
+        "_" -> (('@':show x)++)
+        x   -> (x++)
+    LocalVar (Ix x) -> (('@':show x)++)
 
     TopDef x _ _ -> runIO do
       str <- readTopInfo x >>= \case

@@ -70,6 +70,11 @@ data PartialSub = PSub {
   }
 makeFields ''PartialSub
 
+
+-- showPSub :: PartialSub -> String
+-- showPSub (PSub domvars occ dom cod sub allowpruning) = _
+
+
 -- | Evaluate something in the domain of the `PartialSub`.
 evalInDom :: PartialSub -> S.Tm -> Val
 evalInDom psub t = let ?env = psub^.domVars; ?lvl = psub^.dom in eval t
@@ -86,6 +91,7 @@ lift (PSub idenv occ dom cod sub allowpr) ~asub =
 --   in place.
 forceWithPSub :: PartialSub -> Val -> IO Val
 forceWithPSub psub topt = do
+  -- debug ["forceWithPSub"]
   let ?lvl = psub^.cod
   let go = forceWithPSub psub; {-# inline go #-}
   case topt of
@@ -110,12 +116,15 @@ forceWithPSub psub topt = do
       u <- go u
       go $! eq a t u
 
-    Rigid (RHLocalVar (Lvl x) _ inDom) sp _ ->
+    Rigid (RHLocalVar (Lvl x) _ inDom) sp _ -> do
+      -- debug ["loop", show x, show inDom]
       if inDom then
         pure topt
       else case IM.lookup x (psub^.sub) of
         Nothing -> pure $ Magic Undefined
-        Just v  -> go $! spine v sp
+        Just v  -> do
+           -- debug ["loop looked up"]
+           go $! spine v sp
     t ->
       pure t
 
@@ -230,6 +239,8 @@ psubstSp psub hd sp = do
 psubst :: PartialSub -> Val -> IO S.Tm
 psubst psub topt = do
 
+  debug ["psubst"]
+
   let ?lvl = psub^.cod
 
   let goSp     = psubstSp psub; {-# inline goSp #-}
@@ -249,7 +260,7 @@ psubst psub topt = do
 
       goRigid h sp = do
         h <- case h of
-          RHLocalVar x a True  -> pure (S.LocalVar (lvlToIx x))
+          RHLocalVar x a True  -> let ?lvl = psub^.dom in pure (S.LocalVar (lvlToIx x))
           RHLocalVar x a False -> impossible
           RHPostulate x a      -> pure (S.Postulate x a)
           RHExfalso a p        -> S.Exfalso <$!> go a <*!> go p
@@ -654,9 +665,11 @@ merge topt topu = do
 updatePSub :: Lvl -> Val -> PartialSub -> IO PartialSub
 updatePSub (Lvl x) t psub = case IM.lookup x (psub^.sub) of
   Nothing -> do
+    debug ["foo"]
     pure $! (psub & sub %~ IM.insert x t)
   Just t' -> do
     let ?lvl = psub^.dom
+    debug ["bar"]
     merged <- evalInDom psub <$!> merge t t'
     pure $! (psub & sub %~ IM.insert x merged)
 
@@ -666,24 +679,30 @@ invertVal solvable psub param t rhsSp = do
   t <- let ?lvl = param in forceAll t
   case t of
 
-    Pair _ t u -> do
-      psub <- invertVal solvable psub param t (SProj1 rhsSp)
-      invertVal solvable psub param t (SProj2 rhsSp)
+    -- Pair _ t u -> do
+    --   psub <- invertVal solvable psub param t (SProj1 rhsSp)
+    --   invertVal solvable psub param t (SProj2 rhsSp)
 
-    Lam sp x i a t -> do
-      let var  = Var' param a True
-      let ?lvl = param + 1
-      invertVal solvable psub ?lvl (t $$ var) (SApp rhsSp var i)
+    -- Lam sp x i a t -> do
+    --   let var  = Var' param a True
+    --   let ?lvl = param + 1
+    --   invertVal solvable psub ?lvl (t $$ var) (SApp rhsSp var i)
 
-    -- Rigid (RHLocalVar x xty _) SId rhsTy -> do
-    --   updatePSub x (Var _ _) psub
+    Rigid (RHLocalVar x xty _) SId rhsTy -> do
+      -- unless (solvable <= x && x < psub^.cod) (throw CantInvertSpine)
 
-    Rigid (RHLocalVar x xty _) sp rhsTy -> do
-      unless (solvable <= x && x < psub^.cod) (throw CantInvertSpine)
-      (_, ~xty) <- psubst' psub xty
-      let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
-      sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom - 1, rhsSp) rhsTy
-      updatePSub x (evalInDom psub sol) psub
+      -- let var = evalInDom psub (S.LocalVar 0)
+      debug ["updatePSub", show x, show (psub^.dom - 1)]
+      res <- updatePSub x (Var' (psub^.dom - 1) undefined True) psub
+      debug ["updatedPSub"]
+      pure res
+
+    -- Rigid (RHLocalVar x xty _) sp rhsTy -> do
+    --   unless (solvable <= x && x < psub^.cod) (throw CantInvertSpine)
+    --   (_, ~xty) <- psubst' psub xty
+    --   let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
+    --   sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom - 1, rhsSp) rhsTy
+    --   updatePSub x (evalInDom psub sol) psub
 
     _ ->
       throwIO CantInvertSpine
@@ -704,11 +723,13 @@ solveTopSp psub ls a sp rhs rhsty = do
   case (a, sp) of
 
     (a, RSId) -> do
-      () <$ psubst psub rhsty
-      psubst psub rhs
-
-    --
-    -- ?0 x ?= Set
+      debug ["pre rhstysub", showVal rhsty]
+      ty' <- psubst psub rhsty  -- LOOOPPP
+      debug ["post rhstysub"]
+      debug ["rhstype", show ty']
+      res <- psubst psub rhs
+      debug ["psubresult", showVal rhs, show res]
+      pure res
 
     (Pi x i a b, RSApp u _ t) -> do
       let var   = Var' ?lvl a True
@@ -716,7 +737,9 @@ solveTopSp psub ls a sp rhs rhsty = do
       let ?lvl  = ?lvl + 1
       psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
       ls    <- pure (S.LBind ls x qa)
+      debug ["invertval"]
       psub  <- invertVal 0 psub (psub^.cod) u SId
+      debug ["invertedval"]
       S.Lam S x i qa <$!> go psub ls (b $$ var) t
 
     (El (Pi x i a b), RSApp u _ t) -> do
@@ -822,6 +845,7 @@ solve x sp rhs rhsty = do
           _         -> throwIO CantSolveMetaInNonRigidState
 
         a <- ES.unsolvedMetaType x
+        debug ["solverelevant"]
         sol <- solveTopSp (PSub ENil (Just x) 0 ?lvl mempty True)
                           S.LEmpty a (reverseSpine sp) rhs rhsty
         ES.solve x sol (eval0 sol)
@@ -1054,7 +1078,10 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
     (Flex h sp a, Flex h' sp' _) -> goFH h sp h' sp' a
     (Flex (FHMeta m) sp a, rhs)  -> solveEtaShort m sp rhs a
-    (rhs, Flex (FHMeta m) sp a)  -> solveEtaShort m sp rhs a
+
+    (rhs, lhs@(Flex (FHMeta m) sp a))  -> do
+      debug ["XXXXXXXXXXXXXXXX", show (quote a)]
+      solveEtaShort m sp rhs a
 
     -- lopsided unfold
     ------------------------------------------------------------

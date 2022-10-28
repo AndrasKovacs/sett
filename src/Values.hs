@@ -229,3 +229,11 @@ envLength e = Lvl (go 0 e) where
   go n (EDef e _) = go (n + 1) e
 
 type Vars = Env
+
+--------------------------------------------------------------------------------
+
+showVal :: Val -> String
+showVal = \case
+  Rigid (RHLocalVar x _ _) _ _ -> "(LocalVar "++ show x ++ ")"
+  Set -> "Set"
+  _ -> uf

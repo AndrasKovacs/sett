@@ -39,7 +39,7 @@ localVar :: EnvArg => Ix -> Val
 localVar topx = go ?env topx where
   go (EDef _ v) 0 = v
   go (EDef e _) x = go e (x - 1)
-  go _          _ = error $ show topx
+  go _          _ = impossible
 
 meta :: MetaVar -> Val
 meta x = runIO $ readMeta x >>= \case
@@ -310,19 +310,25 @@ spineIn l v sp = let ?lvl = l in spine v sp
 spine0 :: Val -> Spine -> Val
 spine0 = spineIn 0
 
-maskEnv :: Env -> S.Locals -> Spine
-maskEnv e ls = case (e, ls) of
-  (ENil,     S.LEmpty          ) -> SId
-  (EDef e _, S.LDefine ls _ _ _) -> maskEnv e ls
-  (EDef e v, S.LBind ls _ _    ) -> SApp (maskEnv e ls) v Expl
+-- Compute the spine which applies a meta to all bound vars,
+-- return the resulting type of the neutral application as well.
+maskEnv :: LvlArg => Env -> S.Locals -> Ty -> (Spine, Ty)
+maskEnv e ls ty = case (e, ls) of
+  (ENil,     S.LEmpty          ) -> (SId, ty)
+  (EDef e _, S.LDefine ls _ _ _) -> maskEnv e ls ty
+  (EDef e v, S.LBind ls _ _    ) -> case maskEnv e ls ty of
+                                      (sp, ty) -> (SApp sp v Expl, appTy ty v)
   _                              -> impossible
 
 insertedMeta :: LvlArg => EnvArg => MetaVar -> S.Locals -> Val
 insertedMeta x locals = runIO do
-  let sp = maskEnv ?env locals
   readMeta x >>= \case
-    MEUnsolved (G _ a)     -> pure (Flex (FHMeta x) sp a)
-    MESolved _ _ v (G _ a) -> pure (Unfold (UHSolvedMeta x) sp (spine v sp) a)
+    MEUnsolved (G _ a) -> do
+      let (sp, ty) = maskEnv ?env locals a
+      pure (Flex (FHMeta x) sp ty)
+    MESolved _ _ v (G _ a) -> do
+      let (sp, ty) = maskEnv ?env locals a
+      pure (Unfold (UHSolvedMeta x) sp (spine v sp) ty)
 
 eqSym, coeSym, symSym, apSym, transSym, elSym, reflSym, exfalsoSym :: Val
 eqSym      = LamSI na Set \a -> LamSE nx a \x -> LamSE ny a \y -> eq a x y

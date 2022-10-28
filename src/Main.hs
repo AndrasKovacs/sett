@@ -19,6 +19,7 @@ import Parser
 import Pretty
 import Values
 import qualified NameTable as NT
+import qualified Syntax as S
 
 --------------------------------------------------------------------------------
 
@@ -101,6 +102,50 @@ t7 = justElab $ unlines [
   , "foo : (G : Graph) → G.V → G.V → Set := λ g. g.E"
   ]
 
+t8 :: IO ()
+t8 = justElab $ unlines [
+    "fst : {A : Set}{B : A → Set} → (a : A) × B a → A := λ x. x.1"
+  , "snd : {A : Set}{B : A → Set} → (x : (a : A) × B a) → B (fst {_}{B} x) := λ x. x.2"
+  ]
+
+-- m A B x =? A
+
+t9 :: IO ()
+t9 = justElab $ unlines [
+  "Eq : (A : Set) → A → A → Set",
+  "  := λ A x y. (P : A → Set) → P x → P y",
+  "",
+  "Refl : (A : Set)(x : A) → Eq A x x",
+  "  := λ A x P px. px",
+
+  -- "m : Set → Set",
+  -- " := _",
+
+  -- "p : (A : Set) → Eq Set (m A) A",
+  -- " := λ A. Refl Set A"
+
+  "m : (A : Set)(B : A → Set)(x : (a : A) × B a) → Set",
+  " := _",
+
+  "p : (A : Set)(B : A → Set)(x : (a : A) × B a) → Eq Set (m A B x) A",
+  " := λ A B x. Refl Set A"
+  ]
+
+
+
+
+  -- m : (A : Set) -> Set
+
+  -- m A =? A
+  --
+
+  -- A is 1
+  -- 0 ↦ 0
+
+  --    0 1 2
+  -- ?0 t u v =? rhs
+
+
 ------------------------------------------------------------
 
 justElab :: String -> IO ()
@@ -142,26 +187,28 @@ renderElab = do
            goTop frz (i + 1)
  goTop 0 0
 
+renderBrowse :: IO ()
+renderBrowse = do
+  ADL.for topInfo \case
+    TEDef x a _ _       -> putStrLn $ show x ++ " : " ++ showTm0 a
+    TEPostulate x a _ _ -> putStrLn $ show x ++ " : " ++ showTm0 a
+
+whenLoaded :: (FilePath -> IO ()) -> IO ()
+whenLoaded action = RL.read loadedFile >>= \case
+  Nothing   -> putStrLn "no file loaded" >> loop
+  Just path -> action path
+
+loadTopEntry :: String -> (Lvl -> S.Ty -> GTy -> Val -> IO ()) -> IO ()
+loadTopEntry x act = whenLoaded \_ -> do
+  ntbl <- RL.read topNameTable
+  case NT.lookupBS (FP.packUTF8 x) ntbl of
+    Just (NT.Top l a va v) -> act l a va v
+    _ -> putStrLn "name not in scope" >> loop
 
 loop :: IO ()
 loop = do
 
   let dropSp = dropWhile (==' ')
-
-  let whenLoaded action = RL.read loadedFile >>= \case
-        Nothing   -> putStrLn "no file loaded" >> loop
-        Just path -> action path
-
-  let renderBro = do
-        ADL.for topInfo \case
-          TEDef x a _ _       -> putStrLn $ show x ++ " : " ++ showTm0 a
-          TEPostulate x a _ _ -> putStrLn $ show x ++ " : " ++ showTm0 a
-
-  let loadTop x act = whenLoaded \_ -> do
-        ntbl <- RL.read topNameTable
-        case NT.lookupBS (FP.packUTF8 x) ntbl of
-          Just (NT.Top l a va v) -> act l a va v
-          _ -> putStrLn "name not in scope" >> loop
 
   RL.read loadedFile >>= \case
     Nothing   -> putStr "> "
@@ -174,21 +221,21 @@ loop = do
     ':':'r':_ ->
       whenLoaded \path -> loadFile path >> loop
     ':':'t':' ':(dropSp -> rest) ->
-      loadTop rest \_ a _ _ -> do
+      loadTopEntry rest \_ a _ _ -> do
         putStrLn $ showTm0 a
         loop
     ':':'n':'t':' ':(dropSp -> rest) ->
-      loadTop rest \_ a _ _ -> do
+      loadTopEntry rest \_ a _ _ -> do
         putStrLn $ showTm0 $ nf0 UnfoldEverything a
         loop
     ':':'n':' ':(dropSp -> rest) ->
-      loadTop rest \_ _ _ v -> do
+      loadTopEntry rest \_ _ _ v -> do
         putStrLn $ showTm0 $ quote0WithOpt UnfoldEverything v
         loop
     ':':'o':'u':'t':_ ->
       whenLoaded \_ -> renderElab >> loop
     ':':'b':'r':'o':_ ->
-      whenLoaded \_ -> renderBro >> loop
+      whenLoaded \_ -> renderBrowse >> loop
 
     ':':'?':_ -> do
       putStrLn ":l <file>    load file"

@@ -405,9 +405,9 @@ infer topt = do
         -- todo: postpone
         fty                 -> elabError topt $! ExpectedSg ty
 
-    P.ProjField t x -> do
+    P.ProjField topt x -> do
       let fieldName = NSpan x
-      Infer t ga <- infer t
+      Infer t ga <- infer topt
       let ~vt = eval t
 
       let go a ix = forceAll a >>= \case
