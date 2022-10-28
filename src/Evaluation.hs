@@ -421,7 +421,8 @@ forceFlexEq topv x a t u = unblock x topv \_ _ -> do
 
 forceFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
 forceFlex hsp h sp = case h of
-  FHMeta x        -> unblock x hsp \v a -> pure $ Unfold (UHSolvedMeta x) sp v a
+  FHMeta x ->
+    unblock x hsp \v a -> pure $ Unfold (UHSolvedMeta x) sp (spine v sp) a
   FHCoe x a b p t -> unblock x hsp \_ _ -> do
     a <- forceSet a
     b <- forceSet b
