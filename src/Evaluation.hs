@@ -33,6 +33,25 @@ TODO
  - use approximate unfoldings including TraceEq, use ConvState
 -}
 
+-- pattern synonyms
+--------------------------------------------------------------------------------
+
+pattern Refl :: LvlArg => Val -> Val -> Val
+pattern Refl a t <- Rigid (RHRefl a t) SId _ where
+  Refl a t = Rigid (RHRefl a t) SId (El (eq a t t))
+
+pattern Sym :: LvlArg => Val -> Val -> Val -> Val -> Val
+pattern Sym a x y p <- Rigid (RHSym a x y p) SId _ where
+  Sym a x y p = Rigid (RHSym a x y p) SId (El (eq a y x))
+
+pattern Ap :: LvlArg => Val -> Val -> Val -> Val -> Val -> Val -> Val
+pattern Ap a b f x y p <- Rigid (RHAp a b f x y p) SId _ where
+  Ap a b f x y p = Rigid (RHAp a b f x y p) SId (El (eq b (appE f x) (appE f y)))
+
+pattern Trans :: LvlArg => Val -> Val -> Val -> Val -> Val -> Val -> Val
+pattern Trans a x y z p q <- Rigid (RHTrans a x y z p q) SId _ where
+  Trans a x y z p q = Rigid (RHTrans a x y z p q) SId (El (eq a x z))
+
 --------------------------------------------------------------------------------
 
 localVar :: EnvArg => Ix -> Val
@@ -775,10 +794,14 @@ quoteWithOpt opt t = let
     FHCoe x a b p t -> S.Coe (go a) (go b) (go p) (go t)
 
   goRigidHead = \case
-    RHLocalVar x _ _ -> S.LocalVar (lvlToIx x)
-    RHPostulate x a  -> S.Postulate x a
-    RHCoe a b p t    -> S.Coe (go a) (go b) (go p) (go t)
-    RHExfalso a t    -> S.Exfalso (go a) (go t)
+    RHLocalVar x _ _    -> S.LocalVar (lvlToIx x)
+    RHPostulate x a     -> S.Postulate x a
+    RHCoe a b p t       -> S.Coe (go a) (go b) (go p) (go t)
+    RHExfalso a t       -> S.Exfalso (go a) (go t)
+    RHRefl a t          -> S.Refl (go a) (go t)
+    RHSym a x y p       -> S.Sym (go a) (go x) (go y) (go p)
+    RHTrans a x y z p q -> S.Trans (go a) (go x) (go y) (go z) (go p) (go q)
+    RHAp a b f x y p    -> S.Ap (go a) (go b) (go f) (go x) (go y) (go p)
 
   goUnfoldHead ~v = \case
     UHSolvedMeta x -> S.Meta x
@@ -793,7 +816,7 @@ quoteWithOpt opt t = let
     RigidEq a t u      -> S.Eq (go a) (go t) (go u)
     Unfold h sp v a    -> goSp (goUnfoldHead v h) sp
     UnfoldEq a t u v   -> S.Eq (go a) (go t) (go u)
-    TraceEq a t u v    -> go v
+    TraceEq a t u v    -> S.Eq (go a) (go t) (go u)
     Pair hl t u        -> S.Pair hl (go t) (go u)
     Lam hl x i a t     -> S.Lam hl x i (go a) (goBind a t)
     Sg x a b           -> S.Sg x (go a) (goBind a b)
@@ -804,10 +827,6 @@ quoteWithOpt opt t = let
     Top                -> S.Top
     Tt                 -> S.Tt
     Bot                -> S.Bot
-    Refl a t           -> S.Refl (go a) (go t)
-    Sym a x y p        -> S.Sym (go a) (go x) (go y) (go p)
-    Trans a x y z p q  -> S.Trans (go a) (go x) (go y) (go z) (go p) (go q)
-    Ap a b f x y p     -> S.Ap (go a) (go b) (go f) (go x) (go y) (go p)
     Magic m            -> S.Magic m
 
   in case opt of

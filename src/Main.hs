@@ -155,6 +155,13 @@ t12 = justElab $ unlines [
   "  :=  λ A x y p. p"
   ]
 
+t13 :: IO ()
+t13 = justElab $ unlines [
+  "foo : Set = Set → Set = Set",
+  "  := λ (p : Set = Set). sym {Set}{_}{_} p"
+
+  ]
+
 
 ------------------------------------------------------------
 

@@ -15,7 +15,7 @@ import Evaluation
 import qualified ElabState as ES
 -- import Errors
 import qualified Syntax as S
-import Pretty
+-- import Pretty
 
 ----------------------------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------------------
@@ -265,6 +265,10 @@ psubst psub topt = do
           RHPostulate x a      -> pure (S.Postulate x a)
           RHExfalso a p        -> S.Exfalso <$!> go a <*!> go p
           RHCoe a b p t        -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
+          RHRefl a t           -> S.Refl <$!> go a <*!> go t
+          RHSym a x y p        -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
+          RHTrans a x y z p q  -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
+          RHAp a b f x y p     -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
         goSp h sp
 
       goUnfold h sp = do
@@ -304,10 +308,6 @@ psubst psub topt = do
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
     Bot                -> pure S.Bot
-    Refl a t           -> S.Refl <$!> go a <*!> go t
-    Sym a x y p        -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
-    Trans a x y z p q  -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
-    Ap a b f x y p     -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
     Magic m            -> throwIO CantPartialSubst
 
 psubst' :: PartialSub -> Val -> IO (S.Tm, Val)
@@ -553,10 +553,14 @@ partialQuote t = do
       FHCoe x a b p t -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
 
     goRigidHead = \case
-      RHLocalVar x _ _ -> pure $! S.LocalVar (lvlToIx x)
-      RHPostulate x a  -> pure $ S.Postulate x a
-      RHCoe a b p t    -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
-      RHExfalso a t    -> S.Exfalso <$!> go a <*!> go t
+      RHLocalVar x _ _    -> pure $! S.LocalVar (lvlToIx x)
+      RHPostulate x a     -> pure $ S.Postulate x a
+      RHCoe a b p t       -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
+      RHExfalso a t       -> S.Exfalso <$!> go a <*!> go t
+      RHRefl a t          -> S.Refl <$!> go a <*!> go t
+      RHSym a x y p       -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
+      RHTrans a x y z p q -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
+      RHAp a b f x y p    -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
 
     goUnfoldHead ~v = \case
       UHSolvedMeta x -> pure $ S.Meta x
@@ -581,10 +585,6 @@ partialQuote t = do
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
     Bot                -> pure S.Bot
-    Refl a t           -> S.Refl <$!> go a <*!> go t
-    Sym a x y p        -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
-    Trans a x y z p q  -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
-    Ap a b f x y p     -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
     Magic m            -> throwIO CantPartialQuote
 
 partialQuote0 :: Val -> IO S.Tm
@@ -994,8 +994,12 @@ unify (G topt ftopt) (G topt' ftopt') = do
         _         -> force t
       {-# inline forceUS #-}
 
+  debug ["UNIFY", show $ quote topt, show $ quote topt']
+
   ftopt  <- forceUS ftopt
   ftopt' <- forceUS ftopt'
+
+  -- debug ["UNIFY", show $ quote ftopt, show $ quote ftopt']
   case (ftopt, ftopt') of
 
     -- matching sides
@@ -1104,10 +1108,14 @@ unify (G topt ftopt) (G topt' ftopt') = do
     ------------------------------------------------------------
 
     (FlexEq _ a t u, RigidEq a' t' u')   -> goJoin a a' >> goJoin t t' >> goJoin u u'
-    (FlexEq _ a t u, TraceEq a' t' u' _) -> goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
+    (FlexEq _ a t u, TraceEq a' t' u' _) -> do
+      debug ["FOOOOOOOOOOOOO"]
+      goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
     (RigidEq a t u  , FlexEq _ a' t' u') -> goJoin a a' >> goJoin t t' >> goJoin u u'
-    (TraceEq a t u _, FlexEq _ a' t' u') -> goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
+    (TraceEq a t u _, FlexEq _ a' t' u') -> do
+      debug ["FOOOOOOOOOOOOO"]
+      goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
     -- syntax-directed eta
     ------------------------------------------------------------

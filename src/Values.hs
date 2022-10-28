@@ -17,6 +17,12 @@ data RigidHead
   | RHExfalso Val Val
   | RHCoe Val Val Val Val  -- rigid neutral coe
 
+  -- axioms
+  | RHRefl Val Val
+  | RHSym Val Val Val Val
+  | RHTrans Val Val Val Val Val Val
+  | RHAp Val Val Val Val Val Val
+
 pattern Exfalso a t <- Rigid (RHExfalso a t) SId _ where
   Exfalso a t = Rigid (RHExfalso a t) SId a
 
@@ -143,11 +149,6 @@ data Val
   | Top
   | Tt
   | Bot
-
-  | Refl Val Val
-  | Sym Val Val Val Val
-  | Trans Val Val Val Val Val Val
-  | Ap Val Val Val Val Val Val
 
   | Magic Magic
 

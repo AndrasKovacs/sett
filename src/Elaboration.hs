@@ -195,6 +195,7 @@ checkEl topt (G topa ftopa) = do
       Infer t tty <- insertApps' $ pure tinf
       -- debug ["postinsert", showTm t, showTm (quote (g2 tty))]
       -- there's no subtyping coercion into El
+      debug ["CHECKEL-UNIFY", showTm (quote (g1 tty)), showTm (quote (V.El topa))]
       unify topt tty (gEl (G topa ftopa))
       pure t
 
