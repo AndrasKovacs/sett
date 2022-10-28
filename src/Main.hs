@@ -146,6 +146,15 @@ t11 = justElab $ unlines [
   "  := λ x. refl"
   ]
 
+t12 :: IO ()
+t12 = justElab $ unlines [
+  "mysym : (A : Set)(x y : A)(p : x = y) → y = x",
+  "  :=  λ A x y p. sym {A}{x}{y} p",
+
+  "id : (A : Set)(x y : A)(p : x = y) → x = y",
+  "  :=  λ A x y p. p"
+  ]
+
 
 ------------------------------------------------------------
 

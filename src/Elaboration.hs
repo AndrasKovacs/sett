@@ -68,7 +68,13 @@ insertApps' act = go =<< act where
       let mv = eval m
       let b' = gjoin (b $$ mv)
       go $ Infer (S.App t m Impl) b'
-    fa -> pure $ Infer t (G a fa)
+    V.El (V.Pi x Impl a b) -> do
+      m <- freshMeta (gjoin a)
+      let mv = eval m
+      let b' = gjoin (V.El (b $$ mv))
+      go $ Infer (S.App t m Impl) b'
+    fa ->
+      pure $ Infer t (G a fa)
 {-# inline insertApps' #-}
 
 -- | Insert fresh implicit applications to a term which is not
@@ -132,13 +138,13 @@ checkEl topt (G topa ftopa) = do
           unify topt (gjoin a) (gjoin va')
           pure (a', va')
 
-      bind x' (S.El a) (gjoin (V.El va)) \var ->
+      bind x' a (gjoin va) \var ->
         S.Lam P (bindToName x') i a <$!> (check t $! gjoin $! V.El (b $$ var))
 
     -- insert implicit lambda
     (t, V.Pi x Impl a b) -> do
       let qa = quote a
-      insertBinder qa (gjoin (V.El a)) \var ->
+      insertBinder qa (gjoin a) \var ->
         S.Lam P x Impl qa <$!> (check t $! gjoin $! V.El (b $$ var))
 
     (P.Pair t u, V.Sg x a b) -> do
@@ -324,7 +330,7 @@ infer topt = do
       pure $! Infer S.ExfalsoSym (gjoin ty)
 
     P.Refl _ -> do
-      let ty = V.PiPI na V.Set \a -> V.PiPI nx a \x -> V.El (eq a x x)
+      let ty = V.El (V.PiPI na V.Set \a -> V.PiPI nx a \x -> eq a x x)
       pure $! Infer S.ReflSym (gjoin ty)
 
     P.Coe _ -> do
@@ -333,20 +339,21 @@ infer topt = do
       pure $! Infer S.CoeSym (gjoin ty)
 
     P.Sym _ -> do
-      let ty = V.PiPI na V.Set \a -> V.PiPI ny a \x -> V.PiPI ny a \y -> V.PiPE np (V.El (eq a x y)) \p ->
-               eq a y x
+      let ty = V.El (V.PiPI na V.Set \a -> V.PiPI ny a \x -> V.PiPI ny a \y -> V.PiPE np (V.El (eq a x y)) \p -> eq a y x)
       pure $! Infer S.SymSym (gjoin ty)
 
     P.Trans _ -> do
-      let ty = V.PiPI na V.Set \a -> V.PiPI nx a \x -> V.PiPI ny a \y -> V.PiPI nz a \z ->
+      let ty = V.El
+               (V.PiPI na V.Set \a -> V.PiPI nx a \x -> V.PiPI ny a \y -> V.PiPI nz a \z ->
                V.PiPE np (eq a x y) \p -> V.PiPE nq (eq a y z) \q ->
-               eq a x z
+               eq a x z)
       pure $! Infer S.TransSym (gjoin ty)
 
     P.Ap _ -> do
-      let ty = V.PiPI na V.Set \a -> V.PiPI nb V.Set \b -> V.PiPE nf (funS a b) \f -> V.PiPI nx a \x ->
+      let ty = V.El
+               (V.PiPI na V.Set \a -> V.PiPI nb V.Set \b -> V.PiPE nf (funS a b) \f -> V.PiPI nx a \x ->
                V.PiPI ny a \y -> V.PiPE np (eq a x y) \p ->
-               eq b (f `appE` x) (f `appE` y)
+               eq b (f `appE` x) (f `appE` y))
       pure $! Infer S.ApSym (gjoin ty)
 
     P.Hole _ -> do

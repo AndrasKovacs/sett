@@ -679,9 +679,9 @@ invertVal solvable psub param t rhsSp = do
   t <- let ?lvl = param in forceAll t
   case t of
 
-    -- Pair _ t u -> do
-    --   psub <- invertVal solvable psub param t (SProj1 rhsSp)
-    --   invertVal solvable psub param t (SProj2 rhsSp)
+    Pair _ t u -> do
+      psub <- invertVal solvable psub param t (SProj1 rhsSp)
+      invertVal solvable psub param t (SProj2 rhsSp)
 
     -- Lam sp x i a t -> do
     --   let var  = Var' param a True
@@ -692,9 +692,10 @@ invertVal solvable psub param t rhsSp = do
       unless (solvable <= x && x < psub^.cod) (throw CantInvertSpine)
 
       -- let var = evalInDom psub (S.LocalVar 0)
-      -- xty <- psubst psub xty
+      (_, ~xty) <- psubst' psub xty
       debug ["updatePSub", show x, show (psub^.dom - 1)]
-      res <- updatePSub x (Var' (psub^.dom - 1) undefined True) psub
+      -- TODO: check scary xty psubst
+      res <- updatePSub x (Var' (psub^.dom - 1) xty True) psub
       debug ["updatedPSub"]
       pure res
 
