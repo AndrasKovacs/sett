@@ -944,8 +944,10 @@ unify (G topt ftopt) (G topt' ftopt') = do
       flex act = let ?unifyState = USFlex in act
       {-# inline flex #-}
 
-      irr :: (UnifyStateArg => IO ()) -> IO ()
-      irr act = catchUE (let ?unifyState = USIrrelevant in act) (pure ())
+      irr :: (UnifyStateArg => IO ()) -> (UnifyStateArg => IO ())
+      irr act = case ?unifyState of
+        USIrrelevant -> act
+        _            -> catchUE (let ?unifyState = USIrrelevant in act) (pure ())
       {-# inline irr #-}
 
       full :: (UnifyStateArg => IO ()) -> IO ()
@@ -976,7 +978,20 @@ unify (G topt ftopt) (G topt' ftopt') = do
         (RHExfalso a p    , RHExfalso a' p'   ) -> goJoin a a' >> irr (goJoin p p')
         (RHCoe a b p t    , RHCoe a' b' p' t' ) -> goJoin a a' >> goJoin b b' >>
                                                    irr (goJoin p p') >> goJoin t t'
-        _                                       -> throwIO CantUnify
+
+        (RHRefl a t    , RHRefl a' t'      ) -> goJoin a a' >> goJoin t t'
+        (RHSym a x y p , RHSym a' x' y' p' ) -> goJoin a a' >> goJoin x x' >>
+                                                goJoin y y' >> irr (goJoin p p')
+
+        (RHTrans a x y z p q, RHTrans a' x' y' z' p' q') ->
+          goJoin a a' >> goJoin x x' >> goJoin y y' >> goJoin z z' >>
+          irr (goJoin p p' >> goJoin q q')
+
+        (RHAp a b f x y p, RHAp a' b' f' x' y' p') ->
+          goJoin a a' >> goJoin b b' >> goJoin f f' >> goJoin x x' >>
+          goJoin y y' >> irr (goJoin p p')
+
+        _ -> throwIO CantUnify
 
       goFH :: UnifyStateArg => FlexHead -> Spine -> FlexHead -> Spine -> Ty -> IO ()
       goFH h sp h' sp' a = case (h, h') of
