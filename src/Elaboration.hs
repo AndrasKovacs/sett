@@ -364,10 +364,10 @@ infer topt = do
       pure $! Infer S.SymSym (gjoin ty)
 
     P.Trans _ -> do
-      let ty = V.El
-               (V.PiPI na V.Set \a -> V.PiPI nx a \x -> V.PiPI ny a \y -> V.PiPI nz a \z ->
+      let ty = V.El $
+               V.PiPI na V.Set \a -> V.PiPI nx a \x -> V.PiPI ny a \y -> V.PiPI nz a \z ->
                V.PiPE np (V.El (eq a x y)) \p -> V.PiPE nq (V.El (eq a y z)) \q ->
-               eq a x z)
+               eq a x z
       pure $! Infer S.TransSym (gjoin ty)
 
     P.Ap _ -> do
