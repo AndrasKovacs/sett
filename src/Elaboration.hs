@@ -62,22 +62,21 @@ freshMeta (G a fa) = do
 insertApps' :: LvlArg => EnvArg => LocalsArg => IO Infer -> IO Infer
 insertApps' act = go =<< act where
   go :: Infer -> IO Infer
-  go (Infer t (G a fa)) = forceAll fa >>= \case
+  go (Infer t (G topa topfa)) = forceAll topfa >>= \case
     V.Pi x Impl a b -> do
       m <- freshMeta (gjoin a)
       let mv = eval m
       let b' = gjoin (b $$ mv)
       go $ Infer (S.App t m Impl) b'
-    V.El a -> forceAll a >>= \case
+    V.El topa -> forceAll topa >>= \case
       V.Pi x Impl a b -> do
         m <- freshMeta (gjoin a)
         let mv = eval m
-        let b' = gjoin (V.El (b $$ mv))
-        go $ Infer (S.App t m Impl) b'
-      fa ->
-        pure $ Infer t (gEl (G a fa))
-    fa ->
-      pure $ Infer t (G a fa)
+        go $ Infer (S.App t m Impl) (gjoin (V.El (b $$ mv)))
+      topfa ->
+        pure $ Infer t (gEl (G topa topfa))
+    topfa ->
+      pure $ Infer t (G topa topfa)
 {-# inline insertApps' #-}
 
 -- | Insert fresh implicit applications to a term which is not
@@ -103,16 +102,16 @@ insertAppsUntilName pt name act = go =<< act where
         let mv = eval m
         go $! Infer (S.App t m Impl) (gjoin $! (b $$ mv))
 
-    -- topfa@(V.El a) -> forceAll a >>= \case
-    --   V.Pi x Impl a b -> do
-    --     if x == NSpan name then
-    --       pure (Infer t (G a _))
-    --     else do
-    --       m <- freshMeta (gjoin a)
-    --       let mv = eval m
-    --       go $! Infer (S.App t m Impl) (gjoin $! V.El (b $$ mv))
-    --   _ ->
-    --     elabError pt $ NoNamedImplicitArg name
+    topfa@(V.El topa) -> forceAll topa >>= \case
+      topfa@(V.Pi x Impl a b) -> do
+        if x == NSpan name then
+          pure (Infer t (gEl (G topa topfa)))
+        else do
+          m <- freshMeta (gjoin a)
+          let mv = eval m
+          go $! Infer (S.App t m Impl) (gjoin $! V.El (b $$ mv))
+      _ ->
+        elabError pt $ NoNamedImplicitArg name
 
     _ ->
       elabError pt $ NoNamedImplicitArg name
