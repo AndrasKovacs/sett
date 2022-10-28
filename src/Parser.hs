@@ -106,25 +106,25 @@ lambda  = token  $(switch [| case _ of "λ"  -> pure (); "\\" -> pure () |])
 
 --------------------------------------------------------------------------------
 
--- todo: optimize this for perf
+-- TODO: optimize for performance
 atom :: Parser Tm
 atom =
   branch ident              (pure . Var)          $
   branch parL               (\_  -> tm' <* parR') $
   branch $(sym "_")         (pure . Hole)         $
-  branch $(rawKw "refl")    (pure . Refl)         $
-  branch $(rawKw "Set")     (pure . Set)          $
-  branch $(rawKw "Prop")    (pure . Prop)         $
-  branch $(sym "⊤")         (pure . Top)          $
-  branch $(rawKw "Top")     (pure . Top)          $
-  branch $(sym "⊥")         (pure . Bot)          $
-  branch $(rawKw "Bot")     (pure . Bot)          $
-  branch $(rawKw "tt")      (pure . Tt)           $
-  branch $(rawKw "exfalso") (pure . Exfalso)      $
-  branch $(rawKw "ap")      (pure . Ap)           $
-  branch $(rawKw "coe")     (pure . Coe)          $
-  branch $(rawKw "trans")   (pure . Trans)        $
-  branch $(rawKw "sym")     (pure . Sym)          $
+  branch $(kw "refl")    (pure . Refl)         $
+  branch $(kw "Set")     (pure . Set)          $
+  branch $(kw "Prop")    (pure . Prop)         $
+  branch $(sym "⊤")         (pure . Top)       $
+  branch $(kw "Top")     (pure . Top)          $
+  branch $(sym "⊥")         (pure . Bot)       $
+  branch $(kw "Bot")     (pure . Bot)          $
+  branch $(kw "tt")      (pure . Tt)           $
+  branch $(kw "exfalso") (pure . Exfalso)      $
+  branch $(kw "ap")      (pure . Ap)           $
+  branch $(kw "coe")     (pure . Coe)          $
+  branch $(kw "trans")   (pure . Trans)        $
+  branch $(kw "sym")     (pure . Sym)          $
   empty
 
 atom' :: Parser Tm
@@ -170,7 +170,9 @@ goApp t = branch braceL
 
   (branch atom
      (\u -> do
+         debug ["bar", show t]
          u <- goProj u
+         debug ["foo", show u]
          goApp (App t u (NoName Expl)))
      (pure t))
 

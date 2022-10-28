@@ -118,12 +118,6 @@ t9 = justElab $ unlines [
   "Refl : (A : Set)(x : A) → Eq A x x",
   "  := λ A x P px. px",
 
-  -- "m : Set → Set",
-  -- " := _",
-
-  -- "p : (A : Set) → Eq Set (m A) A",
-  -- " := λ A. Refl Set A"
-
   "m : (A : Set)(B : A → Set)(x : (a : A) × B a) → Set",
   " := _",
 
@@ -131,19 +125,20 @@ t9 = justElab $ unlines [
   " := λ A B x. Refl Set A"
   ]
 
+t10 :: IO ()
+t10 = justElab $ unlines [
+  "Eq : (A : Set) → A → A → Set",
+  "  := λ A x y. (P : A → Set) → P x → P y",
+  "",
+  "Refl : (A : Set)(x : A) → Eq A x x",
+  "  := λ A x P px. px",
 
+  "m : Set × Set → Set",
+  " := _",
 
-
-  -- m : (A : Set) -> Set
-
-  -- m A =? A
-  --
-
-  -- A is 1
-  -- 0 ↦ 0
-
-  --    0 1 2
-  -- ?0 t u v =? rhs
+  "p : (A B : Set) → Eq Set (m (A,B)) A",
+  " := λ A B. Refl Set A"
+  ]
 
 
 ------------------------------------------------------------

@@ -16,6 +16,7 @@ import Data.Bits
 import Data.Flat
 import Data.Time.Clock
 import GHC.Stack
+import Debug.Trace
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
@@ -28,8 +29,9 @@ import qualified FlatParse.Stateful as FP
 #ifdef DEBUG
 type Dbg = HasCallStack
 
-debug :: [String] -> IO ()
-debug strs = putStrLn (intercalate " | " strs ++ " END")
+debug :: Monad m => [String] -> m ()
+debug strs =
+  traceM (intercalate " | " strs ++ " END")
 
 debugging :: IO () -> IO ()
 debugging act = act
