@@ -370,10 +370,10 @@ infer topt = do
       pure $! Infer S.TransSym (gjoin ty)
 
     P.Ap _ -> do
-      let ty = V.El
-               (V.PiPI na V.Set \a -> V.PiPI nb V.Set \b -> V.PiPE nf (funS a b) \f -> V.PiPI nx a \x ->
-               V.PiPI ny a \y -> V.PiPE np (eq a x y) \p ->
-               eq b (f `appE` x) (f `appE` y))
+      let ty = V.El $
+               V.PiPI na V.Set \a -> V.PiPI nb V.Set \b -> V.PiPE nf (funS a b) \f -> V.PiPI nx a \x ->
+               V.PiPI ny a \y -> V.PiPE np (V.El (eq a x y)) \p ->
+               eq b (f `appE` x) (f `appE` y)
       pure $! Infer S.ApSym (gjoin ty)
 
     P.Hole _ -> do
