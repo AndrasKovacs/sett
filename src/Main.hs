@@ -125,7 +125,7 @@ t9 = justElab $ unlines [
   " := λ A B x. Refl Set A"
   ]
 
-t10 :: IO ()
+t10 :: IO () -- TODO
 t10 = justElab $ unlines [
   "Eq : (A : Set) → A → A → Set",
   "  := λ A x y. (P : A → Set) → P x → P y",
@@ -138,6 +138,12 @@ t10 = justElab $ unlines [
 
   "p : (A B : Set) → Eq Set (m (A,B)) A",
   " := λ A B. Refl Set A"
+  ]
+
+t11 :: IO ()
+t11 = justElab $ unlines [
+  "testrefl : {A : Set}(x : A) → x = x",
+  "  := λ x. refl"
   ]
 
 

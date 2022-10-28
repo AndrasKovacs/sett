@@ -167,7 +167,7 @@ checkEl topt (G topa ftopa) = do
       freshMeta (gEl (G topa ftopa))
 
     (topt, ftopa) -> do
-      Infer t tty <- infer topt
+      Infer t tty <- insertApps' $ infer topt
       -- there's no subtyping coercion into El
       unify topt tty (gEl (G topa ftopa))
       pure t
@@ -243,7 +243,7 @@ check topt (G topa ftopa) = do
       freshMeta (G topa ftopa)
 
     (topt, ftopa) -> do
-      Infer t tty <- infer topt
+      Infer t tty <- insertApps' $ infer topt
       debug ["subtype", showTm (quote (g2 tty)), showTm (quote ftopa)]
       subtype topt t (g2 tty) ftopa
 

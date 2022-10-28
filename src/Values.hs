@@ -236,4 +236,4 @@ showVal :: Val -> String
 showVal = \case
   Rigid (RHLocalVar x _ _) _ _ -> "(LocalVar "++ show x ++ ")"
   Set -> "Set"
-  _ -> uf
+  _ -> error "showVal"
