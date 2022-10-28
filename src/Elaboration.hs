@@ -366,7 +366,7 @@ infer topt = do
     P.Trans _ -> do
       let ty = V.El
                (V.PiPI na V.Set \a -> V.PiPI nx a \x -> V.PiPI ny a \y -> V.PiPI nz a \z ->
-               V.PiPE np (eq a x y) \p -> V.PiPE nq (eq a y z) \q ->
+               V.PiPE np (V.El (eq a x y)) \p -> V.PiPE nq (V.El (eq a y z)) \q ->
                eq a x z)
       pure $! Infer S.TransSym (gjoin ty)
 
