@@ -35,7 +35,6 @@ data Tm
   | Top  Span
   | Tt   Span
   | Bot  Span
-  | El Pos Tm
 
   | Eq Tm Tm
   | Exfalso Span
@@ -76,7 +75,6 @@ span t = Span (left t) (right t) where
     Trans (Span l _)   -> l
     Ap (Span l _)      -> l
     Hole    (Span l _) -> l
-    El l _             -> l
 
   right :: Tm -> Pos
   right = \case
@@ -103,4 +101,3 @@ span t = Span (left t) (right t) where
     Trans (Span _ r)       -> r
     Ap (Span _ r)          -> r
     Hole (Span l r)        -> r
-    El _ t                 -> right t

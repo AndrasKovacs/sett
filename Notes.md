@@ -303,16 +303,37 @@ TODO: consider
   f a ={Set} f a  ≡  Eq Set (f a) (f a)
                   ≡  Eq Prop Top  Top
 
-  f : (A : Prop) -> B
+  f : Prop -> B
   A : Set
 
-  f (mkStrProp A)
+  f A
 
   -- subtyping: implicitly inserts El *and* mkStrProp
 
   -- Prop ≤ Set
-  -- Set -> Prop
-
-  -- Prop, Set
+  -- Set -> Prop  (isEmbeddedProp)
 
   --
+
+  check t Prop
+  infer t --> A : Set
+  isEmbeddedProp A   (typeRelevance A)
+
+  check t Set
+  infer t Prop
+
+  f : Set -> Set
+  f A = A
+
+  f Top : Set
+
+  i <= j
+
+  ElB : foo b -> Set
+  ElB {true}  A = A
+  ElB {false} A = A
+
+  foo : (b : Bool) -> if b then Set else Prop
+  ElB (x : foo b) : Set
+  foo : ∀ (l : HLevel) → U l
+  foo l : U l

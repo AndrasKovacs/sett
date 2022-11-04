@@ -63,9 +63,9 @@ goTm prec ns t = go prec ns t where
         _                   -> impossible
       pure $! (str++)
 
-    Lam _ (show -> x) i a t -> par p letp $ ("λ "++) . lamBind x i . goLam (x:ns) t where
-      goLam ns (Lam _ (show -> x) i a t) = ws . lamBind x i . goLam (x:ns) t
-      goLam ns t                         = (". "++) . go letp ns t
+    Lam (show -> x) i a t -> par p letp $ ("λ "++) . lamBind x i . goLam (x:ns) t where
+      goLam ns (Lam (show -> x) i a t) = ws . lamBind x i . goLam (x:ns) t
+      goLam ns t                       = (". "++) . go letp ns t
 
     EqSym `AppI` a `AppE` t `AppE` u ->
       par p eqp $ go appp ns t . (" = "++) . go appp ns u
@@ -73,7 +73,7 @@ goTm prec ns t = go prec ns t where
     App t u Expl -> par p appp $ go appp ns t . ws . go projp ns u
     App t u Impl -> par p appp $ go appp ns t . ws . braces (go pairp ns u)
 
-    Pair _ t u -> par p pairp $ go letp ns t . (", "++) . go pairp ns u
+    Pair t u -> par p pairp $ go letp ns t . (", "++) . go pairp ns u
 
     ProjField t x _ -> par p projp $ go projp ns t . ('.':) . (show x++)
 
@@ -110,7 +110,6 @@ goTm prec ns t = go prec ns t where
     Top        -> ("⊤"++)
     Tt         -> ("tt"++)
     Bot        -> ("⊥"++)
-    ElSym      -> ("El"++)
     CoeSym     -> ("coe"++)
     EqSym      -> ("(=)"++)
     ReflSym    -> ("refl"++)

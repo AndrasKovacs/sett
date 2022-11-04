@@ -177,10 +177,7 @@ goApp t = branch braceL
      (pure t))
 
 app' :: Parser Tm
-app' =
-  (branch $(kw "El") (\(Span p1 p2) -> El p1 <$> proj')
-  (goApp =<< proj'))
-  `cut` appErr
+app' = (goApp =<< proj') `cut` appErr
 
 eq' :: Parser Tm
 eq' = (do

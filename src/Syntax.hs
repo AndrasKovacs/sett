@@ -61,10 +61,10 @@ data Tm
   = LocalVar Ix
   | HideTopDef Lvl ~(Hide Val) ~(Hide V.Ty)
 
-  | Lam SP Name Icit Ty Tm
+  | Lam Name Icit Ty Tm
   | App Tm Tm Icit
 
-  | Pair SP Tm Tm
+  | Pair Tm Tm
   | ProjField Tm Name Int
   | Proj1 Tm
   | Proj2 Tm
@@ -83,7 +83,6 @@ data Tm
   | Tt
   | Bot
 
-  | ElSym
   | EqSym
   | CoeSym
   | ReflSym
@@ -105,14 +104,13 @@ pattern Postulate x a <- HidePostulate x (coerce -> a) where
 
 {-# complete
   LocalVar, TopDef, Lam, App, Pair, ProjField, Proj1, Proj2, Pi, Sg, Postulate,
-  InsertedMeta, Meta, Let, Set, Prop, Top, Tt, Bot, ElSym, EqSym,
+  InsertedMeta, Meta, Let, Set, Prop, Top, Tt, Bot, EqSym,
   CoeSym, ReflSym, SymSym, TransSym, ApSym, ExfalsoSym, Magic
   #-}
 
 pattern AppE t u = App t u Expl
 pattern AppI t u = App t u Impl
 
-pattern El a              = ElSym `AppE` a
 pattern Exfalso a t       = ExfalsoSym `AppI` a `AppE` t
 pattern Eq a t u          = EqSym  `AppI`  a `AppE`  t `AppE`  u
 pattern Refl a t          = ReflSym `AppI`  a `AppI`  t

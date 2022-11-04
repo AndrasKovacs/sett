@@ -284,18 +284,6 @@ pick x y = case x of
     y -> y
   x -> x
 
--- Set/Prop
---------------------------------------------------------------------------------
-
-newtype SP = SP# Int deriving Eq
-pattern S = SP# 0
-pattern P = SP# 1
-{-# complete S, P #-}
-
-instance Show SP where
-  show S = "S"
-  show P = "P"
-
 --------------------------------------------------------------------------------
 
 -- | Error-like values used during partial substitution.
@@ -306,6 +294,8 @@ data Magic
   deriving (Eq, Show)
 
 instance Exception Magic
+
+data SP = S | P deriving (Eq, Show)
 
 --------------------------------------------------------------------------------
 

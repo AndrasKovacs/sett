@@ -137,13 +137,12 @@ data Val
 
   -- Canonical values
   | Set
-  | El Val
 
   | Pi Name Icit Ty Closure
-  | Lam SP Name Icit Ty Closure
+  | Lam Name Icit Ty Closure
 
-  | Sg Name Ty Closure
-  | Pair SP Val Val
+  | SgPrim Name Ty Closure
+  | Pair Val Val
 
   | Prop
   | Top
@@ -161,44 +160,31 @@ pattern Var' x a b <- Rigid (RHLocalVar x _ b) SId a where
 
 pattern Var x a = Var' x a False
 
-pattern LamP x i a t = Lam P x i a (Cl t)
-pattern LamS x i a t = Lam S x i a (Cl t)
-pattern LamPE x a t = Lam P x Expl a (Cl t)
-pattern LamPI x a t = Lam P x Impl a (Cl t)
-pattern LamSE x a t = Lam S x Expl a (Cl t)
-pattern LamSI x a t = Lam S x Impl a (Cl t)
+pattern LamE x a t = Lam x Expl a (Cl t)
+pattern LamI x a t = Lam x Impl a (Cl t)
 
-pattern PiS x i a b = Pi x i a (Cl b)
-pattern PiSE x a b = Pi x Expl a (Cl b)
-pattern PiSI x a b = Pi x Impl a (Cl b)
-
-pattern PiP x i a b = Pi x i a (Cl b)
-pattern PiPE x a b = Pi x Expl a (Cl b)
-pattern PiPI x a b = Pi x Impl a (Cl b)
-
-pattern SgS x a b   = Sg x a (Cl b)
-pattern SgP x a b   = Sg x a (Cl b)
+pattern PiE  x a b = Pi x Expl a (Cl b)
+pattern PiI  x a b = Pi x Impl a (Cl b)
+pattern Sg   x a b = SgPrim x a (Cl b)
 
 pattern VUndefined  = Magic Undefined
 pattern VNonlinear  = Magic Nonlinear
 pattern VMetaOccurs = Magic MetaOccurs
 
 funP :: Val -> Val -> Val
-funP a b = PiPE NUnused a \_ -> b
+funP a b = PiE NUnused a \_ -> b
 
 funS :: Val -> Val -> Val
-funS a b = PiSE NUnused a \_ -> b
+funS a b = PiE NUnused a \_ -> b
 
 andP :: Val -> Val -> Val
-andP a b = SgP NUnused a \_ -> b
+andP a b = Sg NUnused a \_ -> b
 
-gU :: SP -> GTy
-gU S = gjoin Set
-gU P = gjoin Prop
+gSet  = gjoin Set
+gProp = gjoin Prop
 
-gSet         = gjoin Set
-gProp        = gjoin Prop
-gEl (G a fa) = G (El a) (El fa); {-# inline gEl #-}
+gU S = gSet
+gU P = gProp
 
 --------------------------------------------------------------------------------
 

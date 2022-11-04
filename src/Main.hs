@@ -150,6 +150,7 @@ t10 = justElab $ unlines [
   "m : Set × Set → Set",
   " := _",
 
+  -- TODO: solution of m is wrong (use general neutral inversion)
   "p : (A B : Set) → Eq Set (m (A,B)) A",
   " := λ A B. Refl Set A"
   ]
@@ -170,30 +171,12 @@ t12 = justElab $ unlines [
   ]
 
 t13 :: IO ()
-t13 = justElab $ unlines [
+t13 = justElab $ unlines [  -- TODO: TraceId unification
   "foo : Set = Set → Set = Set",
   "  := λ (p : Set = Set). sym {Set}{_}{_} p"
 
   ]
 
--- t10 :: IO () -- TODO
--- t10 = justElab $ unlines [
---   "Eq : (A : Set) → A → A → Set",
---   "  := λ A x y. (P : A → Set) → P x → P y",
---   "",
---   "Refl : (A : Set)(x : A) → Eq A x x",
---   "  := λ A x P px. px",
-
---   "m : Set × Set → Set",
---   " := _",
-
---   "p : (A B : Set) → Eq Set (m (A,B)) A",
---   " := λ A B. Refl Set A"
---   ]
-
--- t14 :: IO ()
--- t14 = justElab $ unlines [
--- ]
 
 tCoeCoe3 :: IO ()
 tCoeCoe3 = justElab $ unlines [

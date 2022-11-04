@@ -23,10 +23,11 @@ data Error
   | IcitMismatch Icit Icit
   | NoNamedLambdaInference
   | ExpectedSg V.Ty          -- inferred type
-  | ExpectedFunOrForall V.Ty -- inferred type
+  | ExpectedFun V.Ty         -- inferred type
   | GenericError String
   | AmbiguousUniverse
   | ExpectedSetProp
+  | TypeIsNotProp
 
 data ErrorInCxt = ErrorInCxt Src Locals Lvl P.Tm Error
 
@@ -54,7 +55,7 @@ instance Show ErrorInCxt where
             "Can't infer type for lambda expression with named argument"
           ExpectedSg a ->
             "Expected a sigma type, inferred\n\n  " ++ showVal a ++ "\n"
-          ExpectedFunOrForall a ->
+          ExpectedFun a ->
             "Expected a function type, inferred\n\n  " ++ showVal a ++ "\n"
           GenericError msg ->
             msg
@@ -62,6 +63,8 @@ instance Show ErrorInCxt where
             "Ambiguous Set/Prop universe"
           ExpectedSetProp ->
             "Expected a type in Set or Prop"
+          TypeIsNotProp ->
+            "Expected a type in Prop"
 
     in render (srcToBs src) (P.span t) msg
 
