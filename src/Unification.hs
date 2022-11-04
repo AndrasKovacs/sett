@@ -18,6 +18,16 @@ import qualified Syntax as S
 -- import Pretty
 
 ----------------------------------------------------------------------------------------------------
+
+-- | Bump the `Lvl` and get a fresh variable.
+newVar :: Ty -> Name -> (LvlArg => S.NamesArg => Val -> a) -> LvlArg => S.NamesArg => a
+newVar a x cont =
+  let v = Var ?lvl a in
+  let ?lvl = ?lvl + 1 in
+  let ?names = show x : ?names in
+  seq ?lvl (cont v)
+{-# inline newVar #-}
+
 ----------------------------------------------------------------------------------------------------
 
 data UnifyEx
@@ -83,7 +93,7 @@ evalInDom psub t = let ?env = psub^.domVars; ?lvl = psub^.dom in eval t
 --   Note: gets A[σ] as Ty input, not A!
 lift :: PartialSub -> Ty -> PartialSub
 lift (PSub idenv occ dom cod sub allowpr) ~asub =
-  let var = Var dom asub
+  let var = Var' dom asub True
   in PSub (EDef idenv var) occ (dom + 1) (cod + 1)
           (IM.insert (coerce cod) var sub) allowpr
 
@@ -529,7 +539,7 @@ prune psub m sp = do
     _                    -> impossible
 
 
-partialQuoteSp :: LvlArg => S.Tm -> Spine -> IO S.Tm
+partialQuoteSp :: LvlArg => S.NamesArg => S.Tm -> Spine -> IO S.Tm
 partialQuoteSp hd sp = let
   go   = partialQuote;      {-# inline go #-}
   goSp = partialQuoteSp hd; {-# inline goSp #-}
@@ -541,12 +551,13 @@ partialQuoteSp hd sp = let
     SProjField t tv x n -> S.ProjField <$!> goSp t <*!> (pure $! projFieldName tv x n) <*!> pure n
 
 -- | Quote a value but ensure that the output contains no `Magic`.
-partialQuote :: LvlArg => Val -> IO S.Tm
+partialQuote :: LvlArg => S.NamesArg => Val -> IO S.Tm
 partialQuote t = do
   let
     go         = partialQuote;   {-# inline go #-}
     goSp       = partialQuoteSp; {-# inline goSp #-}
-    goBind a t = newVar a \v -> partialQuote (t $$ v); {-# inline goBind #-}
+
+    goBind a x t = newVar a x \v -> partialQuote (t $$ v); {-# inline goBind #-}
 
     goFlexHead = \case
       FHMeta x        -> pure (S.Meta x)
@@ -576,9 +587,9 @@ partialQuote t = do
     UnfoldEq a t u v   -> S.Eq <$!> go a <*!> go t <*!> go u
     TraceEq a t u v    -> go v
     Pair hl t u        -> S.Pair hl <$!> go t <*!> go u
-    Lam hl x i a t     -> S.Lam hl x i <$!> go a <*!> goBind a t
-    Sg x a b           -> S.Sg x <$!> go a <*!> goBind a b
-    Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a b
+    Lam hl x i a t     -> S.Lam hl x i <$!> go a <*!> goBind a x t
+    Sg x a b           -> S.Sg x <$!> go a <*!> goBind a x b
+    Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a x b
     Set                -> pure S.Set
     Prop               -> pure S.Prop
     El a               -> S.El <$!> go a
@@ -588,7 +599,7 @@ partialQuote t = do
     Magic m            -> throwIO CantPartialQuote
 
 partialQuote0 :: Val -> IO S.Tm
-partialQuote0 t = let ?lvl = 0 in partialQuote t
+partialQuote0 t = let ?lvl = 0; ?names = [] in partialQuote t
 
 ----------------------------------------------------------------------------------------------------
 -- Spine solving
@@ -871,7 +882,7 @@ solve x sp rhs rhsty = do
     RIrr       -> goIrrelevant
     RMagic{}   -> impossible
 
-solveEtaShort :: LvlArg => UnifyStateArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+solveEtaShort :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solveEtaShort m sp rhs rhsty =
   catchUE (solve m sp rhs rhsty)
           (unifyEtaLong m sp rhs rhsty)
@@ -879,10 +890,10 @@ solveEtaShort m sp rhs rhsty =
 intersect :: LvlArg => UnifyStateArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
 intersect = uf -- TODO
 
-unifyEtaLong :: LvlArg => UnifyStateArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+unifyEtaLong :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 unifyEtaLong m sp rhs rhsty = forceAll rhs >>= \case
   Lam hl x i a t -> do
-    newVar a \v -> unifyEtaLong m (SApp sp v i) (t $$ v) (appTy rhsty v)
+    newVar a x \v -> unifyEtaLong m (SApp sp v i) (t $$ v) (appTy rhsty v)
   Pair hl t u -> do
     unifyEtaLong m (SProj1 sp) t (proj1Ty rhsty)
     unifyEtaLong m (SProj2 sp) u (proj2Ty rhsty t)
@@ -911,7 +922,7 @@ unifyEq x y = when (x /= y) $ throwIO CantUnify
 {-# inline unifyEq #-}
 
 -- TODO: handle FieldProj vs Proj1/2
-unifySp :: LvlArg => UnifyStateArg => Spine -> Spine -> IO ()
+unifySp :: LvlArg => UnifyStateArg => S.NamesArg => Spine -> Spine -> IO ()
 unifySp sp sp' = case (sp, sp') of
   (SId                , SId                 ) -> pure ()
   (SApp t u i         , SApp t' u' i'       ) -> unifySp t t' >> unify (gjoin u) (gjoin u')
@@ -921,18 +932,18 @@ unifySp sp sp' = case (sp, sp') of
   _                                           -> throwIO CantUnify
 
 
-unify :: LvlArg => UnifyStateArg => G -> G -> IO ()
+unify :: LvlArg => UnifyStateArg => S.NamesArg => G -> G -> IO ()
 unify (G topt ftopt) (G topt' ftopt') = do
 
-  let go :: LvlArg => UnifyStateArg => G -> G -> IO ()
+  let go :: LvlArg => UnifyStateArg => S.NamesArg => G -> G -> IO ()
       go = unify
       {-# inline go #-}
 
-      goJoin :: LvlArg => UnifyStateArg => Val -> Val -> IO ()
+      goJoin :: LvlArg => UnifyStateArg => S.NamesArg => Val -> Val -> IO ()
       goJoin t t' = go (gjoin t) (gjoin t')
       {-# inline goJoin #-}
 
-      goSp :: LvlArg => UnifyStateArg => Spine -> Spine -> IO ()
+      goSp :: LvlArg => UnifyStateArg => S.NamesArg => Spine -> Spine -> IO ()
       goSp = unifySp
       {-# inline goSp #-}
 
@@ -947,6 +958,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
       irr :: (UnifyStateArg => IO ()) -> IO ()
       irr act = catchUE (let ?unifyState = USIrrelevant in act) (pure ())
 
+      -- -- TODO
       -- irr :: (UnifyStateArg => IO ()) -> (UnifyStateArg => IO ())
       -- irr act = case ?unifyState of
       --   USIrrelevant -> act
@@ -957,9 +969,9 @@ unify (G topt ftopt) (G topt' ftopt') = do
       full act = let ?unifyState = USFull in act
       {-# inline full #-}
 
-      goBind :: UnifyStateArg => Ty -> Closure -> Closure -> IO ()
-      goBind a t t' =
-        newVar a \v -> unify (gjoin $! (t $$ v)) (gjoin $! (t' $$ v))
+      goBind :: UnifyStateArg => Ty -> Name -> Closure -> Closure -> IO ()
+      goBind a x t t' =
+        newVar a x \v -> unify (gjoin $! (t $$ v)) (gjoin $! (t' $$ v))
       {-# inline goBind #-}
 
       withSP :: SP -> (UnifyStateArg => IO ()) -> IO ()
@@ -1023,8 +1035,8 @@ unify (G topt ftopt) (G topt' ftopt') = do
     -- matching sides
     ------------------------------------------------------------
 
-    (Pi x i a b , Pi x' i' a' b' ) -> unifyEq i i' >> goJoin a a' >> goBind a b b'
-    (Sg x a b   , Sg x' a' b'    ) -> goJoin a a' >> goBind a b b'
+    (Pi x i a b , Pi x' i' a' b' ) -> unifyEq i i' >> goJoin a a' >> goBind a x b b'
+    (Sg x a b   , Sg x' a' b'    ) -> goJoin a a' >> goBind a x b b'
     (Set        , Set            ) -> pure ()
     (Prop       , Prop           ) -> pure ()
     (Top        , Top            ) -> pure ()
@@ -1033,7 +1045,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (Tt         , Tt             ) -> pure ()
 
     (Rigid h sp a   , Rigid h' sp' _   ) -> withRelevance a (goRH h h' >> goSp sp sp')
-    (Lam hl x i a t , Lam _ _ _ _ t'   ) -> withSP hl $ goBind a t t'
+    (Lam hl x i a t , Lam _ _ _ _ t'   ) -> withSP hl $ goBind a x t t'
     (Pair hl t u    , Pair _ t' u'     ) -> withSP hl $ goJoin t t' >> goJoin u u'
     (RigidEq a t u  , RigidEq a' t' u' ) -> goJoin a a' >> goJoin t t' >> goJoin u u'
 
@@ -1135,8 +1147,8 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
     -- syntax-directed eta
     ------------------------------------------------------------
-    (Lam _ _ i a t, t') -> goBind a t (Cl \u -> app t' u i)
-    (t, Lam _ _ i' a' t') -> goBind a' (Cl \u -> app t u i') t'
+    (Lam _ x i a t, t') -> goBind a x t (Cl \u -> app t' u i)
+    (t, Lam _ x' i' a' t') -> goBind a' x' (Cl \u -> app t u i') t'
 
     (Pair _ t u, t')  -> go (gjoin t) (gproj1 (G topt' t')) >> go (gjoin u) (gproj2 (G topt' t'))
     (t, Pair _ t' u') -> go (gproj1 (G topt t)) (gjoin t') >> go (gproj2 (G topt t)) (gjoin u')

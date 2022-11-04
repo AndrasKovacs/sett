@@ -33,6 +33,16 @@ TODO
  - use approximate unfoldings including TraceEq, use ConvState
 -}
 
+--------------------------------------------------------------------------------
+
+-- | Bump the `Lvl` and get a fresh variable.
+newVar :: Ty -> (LvlArg => Val -> a) -> LvlArg => a
+newVar a cont =
+  let v = Var ?lvl a in
+  let ?lvl = ?lvl + 1 in
+  seq ?lvl (cont v)
+{-# inline newVar #-}
+
 -- pattern synonyms
 --------------------------------------------------------------------------------
 

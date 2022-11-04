@@ -161,14 +161,6 @@ pattern Var' x a b <- Rigid (RHLocalVar x _ b) SId a where
 
 pattern Var x a = Var' x a False
 
--- | Bump the `Lvl` and get a fresh variable.
-newVar :: Ty -> (LvlArg => Val -> a) -> LvlArg => a
-newVar a cont =
-  let v = Var ?lvl a in
-  let ?lvl = ?lvl + 1 in
-  seq ?lvl (cont v)
-{-# inline newVar #-}
-
 pattern LamP x i a t = Lam P x i a (Cl t)
 pattern LamS x i a t = Lam S x i a (Cl t)
 pattern LamPE x a t = Lam P x Expl a (Cl t)
