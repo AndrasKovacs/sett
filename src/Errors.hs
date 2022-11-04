@@ -35,10 +35,13 @@ instance Show ErrorInCxt where
     let ?locals = ls
         ?lvl = l in
     let showVal v = showTm (quoteWithOpt UnfoldMetas v)
+        showValNf v = showTm (quoteWithOpt UnfoldEverything v)
         msg = case err of
           UnifyError t u ->
             "Can't unify\n\n  " ++ showVal t ++ "\n\nwith\n\n  "
-            ++ showVal u ++ "\n"
+                                ++ showVal u ++ "\n\n\n" ++
+            "Normalized \n\n  " ++ showValNf t ++ "\n\nwith\n\n  "
+                                ++ showValNf u ++ "\n\n\n"
           NameNotInScope x ->
             "Name not in scope: " ++ "\"" ++ show x ++ "\""
           NoSuchField x ->

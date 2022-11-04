@@ -450,10 +450,13 @@ infer topt = do
               pure (ix, a)
             V.Sg x' a b -> do
               go (b $$ projField vt ix) (ix + 1)
-            V.El (V.Sg x' a b) | fieldName == x' -> do
-              pure (ix, V.El a)
-            V.El (V.Sg x' a b) -> do
-              go (b $$ projField vt ix) (ix + 1)
+
+            V.El a -> forceAll a >>= \case
+              V.Sg x' a b
+                | fieldName == x' -> pure (ix, V.El a)
+                | True            -> go (b $$ projField vt ix) (ix + 1)
+              _ -> elabError topt $ NoSuchField x
+
             -- todo: postpone
             _ ->
               elabError topt $ NoSuchField x

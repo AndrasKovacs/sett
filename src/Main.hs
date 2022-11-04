@@ -110,6 +110,9 @@ t8 = justElab $ unlines [
 
 -- m A B x =? A
 
+-- t91 :: IO ()
+-- t91
+
 t9 :: IO ()
 t9 = justElab $ unlines [
   "Eq : (A : Set) → A → A → Set",
@@ -118,11 +121,23 @@ t9 = justElab $ unlines [
   "Refl : (A : Set)(x : A) → Eq A x x",
   "  := λ A x P px. px",
 
-  "m : (A : Set)(B : A → Set)(x : (a : A) × B a) → Set",
+  -- "m : Set → Set",
+  -- "  := _",
+  -- "p : (A : Set) → (P : Set → Set) → P (m A) → P A",
+  -- "   := λ A P px. px"
+
+  "m : (A : Set)(B : A → Set)(a : A)(b : B a) → Set",
   " := _",
 
-  "p : (A : Set)(B : A → Set)(x : (a : A) × B a) → Eq Set (m A B x) A",
-  " := λ A B x. Refl Set A"
+  "p : (A : Set)(B : A → Set)(a : A)(b : B a) → Eq Set (m A B a b) A",
+  " := λ A B a b. Refl Set A"
+
+  -- TODO: Sigma is corrupted
+  -- "m : (A : Set)(B : A → Set)(x : (a : A) × B a) → Set",
+  -- " := _",
+
+  -- "p : (A : Set)(B : A → Set)(x : (a : A) × B a) → Eq Set (m A B x) A",
+  -- " := λ A B x. Refl Set A"
   ]
 
 t10 :: IO () -- TODO
@@ -162,21 +177,24 @@ t13 = justElab $ unlines [
 
   ]
 
-t10 :: IO () -- TODO
-t10 = justElab $ unlines [
-  "Eq : (A : Set) → A → A → Set",
-  "  := λ A x y. (P : A → Set) → P x → P y",
-  "",
-  "Refl : (A : Set)(x : A) → Eq A x x",
-  "  := λ A x P px. px",
+-- t10 :: IO () -- TODO
+-- t10 = justElab $ unlines [
+--   "Eq : (A : Set) → A → A → Set",
+--   "  := λ A x y. (P : A → Set) → P x → P y",
+--   "",
+--   "Refl : (A : Set)(x : A) → Eq A x x",
+--   "  := λ A x P px. px",
 
-  "m : Set × Set → Set",
-  " := _",
+--   "m : Set × Set → Set",
+--   " := _",
 
-  "p : (A B : Set) → Eq Set (m (A,B)) A",
-  " := λ A B. Refl Set A"
-  ]
+--   "p : (A B : Set) → Eq Set (m (A,B)) A",
+--   " := λ A B. Refl Set A"
+--   ]
 
+-- t14 :: IO ()
+-- t14 = justElab $ unlines [
+-- ]
 
 ------------------------------------------------------------
 

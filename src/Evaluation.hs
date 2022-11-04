@@ -4,7 +4,7 @@ module Evaluation (
   , eval, quote, eval0, quote0, nf, nf0, spine, spine0, spineIn, coe, eq
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeRelevance, Relevance(..), appTy, proj1Ty, proj2Ty
-  , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt
+  , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt, quoteNf
   ) where
 
 import Control.Exception
@@ -840,6 +840,10 @@ quoteWithOpt opt t = let
 -- | Quote with `UnfoldNone` as default option.
 quote :: LvlArg => Val -> S.Tm
 quote = quoteWithOpt UnfoldNothing
+
+-- | Quote with `UnfoldNone` as default option.
+quoteNf :: LvlArg => Val -> S.Tm
+quoteNf = quoteWithOpt UnfoldEverything
 
 quoteIn :: Lvl -> Val -> S.Tm
 quoteIn l t = let ?lvl = l in quote t

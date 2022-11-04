@@ -944,11 +944,14 @@ unify (G topt ftopt) (G topt' ftopt') = do
       flex act = let ?unifyState = USFlex in act
       {-# inline flex #-}
 
-      irr :: (UnifyStateArg => IO ()) -> (UnifyStateArg => IO ())
-      irr act = case ?unifyState of
-        USIrrelevant -> act
-        _            -> catchUE (let ?unifyState = USIrrelevant in act) (pure ())
-      {-# inline irr #-}
+      irr :: (UnifyStateArg => IO ()) -> IO ()
+      irr act = catchUE (let ?unifyState = USIrrelevant in act) (pure ())
+
+      -- irr :: (UnifyStateArg => IO ()) -> (UnifyStateArg => IO ())
+      -- irr act = case ?unifyState of
+      --   USIrrelevant -> act
+      --   _            -> catchUE (let ?unifyState = USIrrelevant in act) (pure ())
+      -- {-# inline irr #-}
 
       full :: (UnifyStateArg => IO ()) -> IO ()
       full act = let ?unifyState = USFull in act
@@ -1009,7 +1012,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
         _         -> force t
       {-# inline forceUS #-}
 
-  debug ["UNIFY", show $ quote topt, show $ quote topt']
+  debug ["UNIFY", show $ quoteNf topt, show $ quoteNf topt']
 
   ftopt  <- forceUS ftopt
   ftopt' <- forceUS ftopt'
