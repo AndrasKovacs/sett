@@ -1044,7 +1044,9 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (El a       , El a'          ) -> goJoin a a'
     (Tt         , Tt             ) -> pure ()
 
-    (Rigid h sp a   , Rigid h' sp' _   ) -> withRelevance a (goRH h h' >> goSp sp sp')
+    (Rigid h sp a   , Rigid h' sp' _   ) -> do
+      debug ["FOOOOOOOOOOOOOOOOO", showTm' (quote a) ]
+      withRelevance a (goRH h h' >> goSp sp sp')
     (Lam hl x i a t , Lam _ _ _ _ t'   ) -> withSP hl $ goBind a x t t'
     (Pair hl t u    , Pair _ t' u'     ) -> withSP hl $ goJoin t t' >> goJoin u u'
     (RigidEq a t u  , RigidEq a' t' u' ) -> goJoin a a' >> goJoin t t' >> goJoin u u'

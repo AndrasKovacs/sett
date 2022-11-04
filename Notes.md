@@ -281,3 +281,38 @@ Ultra long term:
 
   -- Can we merge conv and unify implementation? (Should we?)
     -- on first approx, should be separate
+
+
+-- 2022 nov 4
+--------------------------------------------------------------------------------
+
+TODO: consider
+  - El computes on type formers (coercive Prop <= Set subtyping!)
+    - Look at Rafael's mkStrProp construction in implementation
+	  (every Set which is def irrelevant is a Prop)
+  - Have totally implicit Prop <= Set subtyping
+    - Skip El completely
+	- Because we have no Set/Prop ambiguity (no H-level metavars)
+	  this might not be that awful
+
+  f : A -> Set
+  f = \_ -> Top
+
+  f a : Set
+
+  f a ={Set} f a  ≡  Eq Set (f a) (f a)
+                  ≡  Eq Prop Top  Top
+
+  f : (A : Prop) -> B
+  A : Set
+
+  f (mkStrProp A)
+
+  -- subtyping: implicitly inserts El *and* mkStrProp
+
+  -- Prop ≤ Set
+  -- Set -> Prop
+
+  -- Prop, Set
+
+  --

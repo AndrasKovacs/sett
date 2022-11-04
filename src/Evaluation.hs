@@ -633,7 +633,8 @@ typeRelevance a = do
     Rigid h sp _ -> pure RRel
     Flex h sp _  -> pure $! RBlockOn (flexHeadMeta h)
     Magic m      -> pure $ RMagic m
-    _            -> impossible
+    a            -> debug ["XXXXXXXXXXXX", show $ quote a] >> undefined
+    -- _            -> impossible
 
 
 -- Conversion

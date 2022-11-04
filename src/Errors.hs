@@ -40,7 +40,7 @@ instance Show ErrorInCxt where
           UnifyError t u ->
             "Can't unify\n\n  " ++ showVal t ++ "\n\nwith\n\n  "
                                 ++ showVal u ++ "\n\n\n" ++
-            "Normalized \n\n  " ++ showValNf t ++ "\n\nwith\n\n  "
+            "Normal forms of sides: \n\n  " ++ showValNf t ++ "\n\nand\n\n  "
                                 ++ showValNf u ++ "\n\n\n"
           NameNotInScope x ->
             "Name not in scope: " ++ "\"" ++ show x ++ "\""

@@ -126,18 +126,17 @@ t9 = justElab $ unlines [
   -- "p : (A : Set) → (P : Set → Set) → P (m A) → P A",
   -- "   := λ A P px. px"
 
-  "m : (A : Set)(B : A → Set)(a : A)(b : B a) → Set",
-  " := _",
-
-  "p : (A : Set)(B : A → Set)(a : A)(b : B a) → Eq Set (m A B a b) A",
-  " := λ A B a b. Refl Set A"
-
-  -- TODO: Sigma is corrupted
-  -- "m : (A : Set)(B : A → Set)(x : (a : A) × B a) → Set",
+  -- "m : (A : Set)(B : A → Set)(a : A)(b : B a) → Set",
   -- " := _",
 
-  -- "p : (A : Set)(B : A → Set)(x : (a : A) × B a) → Eq Set (m A B x) A",
-  -- " := λ A B x. Refl Set A"
+  -- "p : (A : Set)(B : A → Set)(a : A)(b : B a) → Eq Set (m A B a b) A",
+  -- " := λ A B a b. Refl Set A"
+
+  "m : (A : Set)(B : A → Set)(x : (a : A) × B a) → Set",
+  " := _",
+
+  "p : (A : Set)(B : A → Set)(x : (a : A) × B a) → Eq Set (m A B x) A",
+  " := λ A B x. Refl Set A"
   ]
 
 t10 :: IO () -- TODO
@@ -195,6 +194,16 @@ t13 = justElab $ unlines [
 -- t14 :: IO ()
 -- t14 = justElab $ unlines [
 -- ]
+
+tCoeCoe3 :: IO ()
+tCoeCoe3 = justElab $ unlines [
+  "Eq : (A : Set) → A → A → Set",
+  "  := λ A x y. x = y",
+  "",
+  "testcoecoe3 : {A1 A2 C1 C2 : Set} {f : A1 × A2} {r : (A1 × A2) = (C1 × C2)}",
+  "  -> Eq (C1 × C2) (coe {A1 × A2} {C1 × C2} r f) (coe {A1} {C1} r.1 f.1, coe {A2} {C2} _ f.2)",
+  "  := \\{A1} {A2} {C1} {C2} {f} {r}. refl {_} {coe {A1 × A2} {C1 × C2} r f}"
+  ]
 
 ------------------------------------------------------------
 
