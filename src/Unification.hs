@@ -1024,7 +1024,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
     ------------------------------------------------------------
 
     (Pi x i a b , Pi x' i' a' b' ) -> unifyEq i i' >> goJoin a a' >> goBind a b b'
-    (Sg x a b   , Sg x' a' b'    ) -> goJoin a a' >> goBind a b b
+    (Sg x a b   , Sg x' a' b'    ) -> goJoin a a' >> goBind a b b'
     (Set        , Set            ) -> pure ()
     (Prop       , Prop           ) -> pure ()
     (Top        , Top            ) -> pure ()
