@@ -1,7 +1,7 @@
 
 {-# options_ghc -Wno-unused-top-binds #-}
 
-module Pretty (showTm, showTm0) where
+module Pretty (showTm, showTm', showTm0) where
 
 import IO
 
@@ -135,3 +135,6 @@ showTm0 t = let ?locals = LEmpty in showTm t
 
 -- showTm0 :: Tm -> String
 -- showTm0 t = show t
+
+showTm' :: NamesArg => Tm -> String
+showTm' t = goTm pairp ?names t []

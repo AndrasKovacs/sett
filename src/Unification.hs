@@ -15,7 +15,7 @@ import Evaluation
 import qualified ElabState as ES
 -- import Errors
 import qualified Syntax as S
--- import Pretty
+import Pretty
 
 ----------------------------------------------------------------------------------------------------
 
@@ -1024,7 +1024,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
         _         -> force t
       {-# inline forceUS #-}
 
-  debug ["UNIFY", show $ quoteNf topt, show $ quoteNf topt']
+  debug ["UNIFY", showTm' (quote topt), showTm' (quote topt')]
 
   ftopt  <- forceUS ftopt
   ftopt' <- forceUS ftopt'
@@ -1115,8 +1115,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (Flex h sp a, Flex h' sp' _) -> goFH h sp h' sp' a
     (Flex (FHMeta m) sp a, rhs)  -> solveEtaShort m sp rhs a
 
-    (rhs, lhs@(Flex (FHMeta m) sp a))  -> do
-      debug ["XXXXXXXXXXXXXXXX", show (quote a)]
+    (rhs, lhs@(Flex (FHMeta m) sp a)) -> do
       solveEtaShort m sp rhs a
 
     -- lopsided unfold
