@@ -123,9 +123,9 @@ t10 = justElab $ unlines [
   -- "  let p : Eq Set m.1 Set := Refl Set Set; ",
   -- "  tt",
 
-  -- "test : _ = Set := refl {Set}{Set}"
+  "test : (x y : ⊤) → _ = y → x = y := λ x y p. p"
 
-  "test : (A B : Set) → A = B → _ = B := λ A B p. p"
+  -- "test : (A B : Set) → A = B → _ = B := λ A B p. p"
   ]
 
 tFreeze :: IO ()
@@ -171,4 +171,48 @@ tCoeCoe3 = justElab $ unlines [
   "testcoecoe3 : {A1 A2 C1 C2 : Set} {f : A1 × A2} {r : (A1 × A2) = (C1 × C2)}",
   "  -> Eq (C1 × C2) (coe {A1 × A2} {C1 × C2} r f) (coe {A1} {C1} r.1 f.1, coe {A2} {C2} _ f.2)",
   "  := \\{A1} {A2} {C1} {C2} {f} {r}. refl {_} {coe {A1 × A2} {C1 × C2} r f}"
+  ]
+
+t14 :: IO ()
+t14 = justElab $ unlines [
+  -- "Eq : (A : Set) → A → A → Set",
+  -- "  := λ A x y. (P : A → Set) → P x → P y",
+  -- "",
+  -- "Refl : (A : Set)(x : A) → Eq A x x",
+  -- "  := λ A x P px. px",
+
+  -- "testrefl : {A : Set} (x : A) -> x = x",
+  -- "         := \\x. refl",
+  -- "testid : {A : Set} {x y : A} -> x = y -> x = y",
+  -- "        := \\p. p",
+  -- "testsym : {A : Set} {x y : A} -> x = y -> y = x",
+  -- "        := \\p. sym p",
+  -- "testtrans : {A : Set} {x y z : A} -> x = y -> y = z -> x = z",
+  -- "        := \\p q. trans p q",
+  -- "testap : {A B : Set} (f : A -> B) {x y : A} (p : x = y) -> f x = f y",
+  -- "        := \\f p. ap f p",
+  "testsymeq : {A : Set} {x y : A} -> x = y -> (x = x) = (y = x)",
+  "          := \\{A} {x} {y} p. ap {A}{Prop} (\\y. y = x) p",
+
+  -- TODO
+  "testsym : {A : Set} {x y : A} -> x = y -> y = x",
+  "        := \\{A} {x} {y} p. coe {x = x} {y = x} (testsymeq {A} {x} {y} p) (refl {A} {x})"
+
+
+  -- "testcoerefl : {A : Set} {x : A} {p : A = A} -> coe {A} {A} p x = x",
+  -- "            := refl  ",
+
+  -- "testcoecoe : {A B C : Set} {x : A} {p : A = B} {q : B = C}",
+  -- "              -> coe {B} {C} q (coe {A} {B} p x) = coe {A} {C} (trans p q) x",
+  -- "           := refl  ",
+
+  -- "testfunext : {A B : Set} {f g : A -> B} -> f = g -> ((a : A) -> f a = g a)",
+  -- "        := \\p. p",
+
+  -- "testcoecoe2 : {A1 A2 B C1 C2 : Set} {f : A1 -> A2} {p : (A1 -> A2) = B} {q : B =",
+  -- "              (C1 -> C2)} {r : (A1 -> A2) = (C1 -> C2)}",
+  -- "            -> coe q (coe p f) = coe r f",
+  -- "            := refl"
+
+
   ]

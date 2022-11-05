@@ -5,7 +5,7 @@ module Evaluation (
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeIsProp, IsProp(..), appTy, proj1Ty, proj2Ty
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt, quoteNf
-  , quoteSpWithOpt, localVar
+  , quoteSpWithOpt, localVar, forceAllWithTraceEq
   ) where
 
 import Control.Exception
@@ -102,7 +102,7 @@ appI t u = app t u Impl
 proj1Ty :: LvlArg => Ty -> Ty
 proj1Ty a = runIO $ forceSet a >>= \case
   Sg _ a _      -> pure a
-  a             -> debug ["YYYYYYYYYYYYYY", show (quoteWithOpt UnfoldEverything a)] >> uf
+  a             -> impossible
 
 proj1 :: LvlArg => Val -> Val
 proj1 t = case t of
@@ -313,8 +313,10 @@ eqSet a b = case (a, b) of
   (Magic m, _) -> Magic m
   (_, Magic m) -> Magic m
 
-  (a@(Unfold h sp fa _), _) -> UnfoldEq Set a b (eqSet fa b)
-  (a, b@(Unfold h sp fb _)) -> UnfoldEq Set a b (eqSet a fb)
+  (a@(Unfold _ _ fa _), _)   -> UnfoldEq Set a b (eqSet fa b)
+  (a, b@(Unfold _ _ fb _))   -> UnfoldEq Set a b (eqSet a fb)
+  (a@(UnfoldEq _ _ _ fa), _) -> UnfoldEq Set a b (eqSet fa b)
+  (a, b@(UnfoldEq _ _ _ fb)) -> UnfoldEq Set a b (eqSet a fb)
 
   (a@(Flex h _ _), b)     -> FlexEq (flexHeadMeta h) Set a b
   (a, b@(Flex h _ _))     -> FlexEq (flexHeadMeta h) Set a b
@@ -511,6 +513,52 @@ forceAll' v = case v of
   TraceEq _ _ _ v       -> forceAll' v
   UnfoldEq _ _ _ v      -> forceAll' v
   t                     -> pure t
+
+------------------------------------------------------------
+
+-- | Eliminate all unfoldings from the head but remember a TraceEq version of the result (if there's one).
+forceAllWithTraceEq :: LvlArg => Val -> IO (Val,Val)
+forceAllWithTraceEq v = case v of
+  topv@(Flex h sp _)    -> forceAllWithTraceEqFlex topv h sp
+  topv@(FlexEq x a t u) -> forceAllWithTraceEqFlexEq topv x a t u
+  Unfold _ _ v _        -> forceAllWithTraceEq' v
+  TraceEq a t u v       -> forceAllWithTraceEqTrace a t u v
+  UnfoldEq _ _ _ v      -> forceAllWithTraceEq' v
+  t                     -> pure (t,t)
+{-# inline forceAllWithTraceEq #-}
+
+forceAllWithTraceEqTrace :: LvlArg => Val -> Val -> Val -> Val -> IO (Val, Val)
+forceAllWithTraceEqTrace a t u v = do
+  v <- forceAll v
+  pure (TraceEq a t u v, v)
+{-# noinline forceAllWithTraceEqTrace #-}
+
+forceAllWithTraceEqFlex :: LvlArg => Val -> FlexHead -> Spine -> IO (Val,Val)
+forceAllWithTraceEqFlex topv h sp = case h of
+  FHMeta x        -> unblock x (topv,topv) \v _ -> forceAllWithTraceEq' $! spine v sp
+  FHCoe x a b p t -> unblock x (topv,topv) \_ _ -> do
+    a <- forceSet a
+    b <- forceSet b
+    t <- force t
+    forceAllWithTraceEq' $! coe a b p t
+{-# noinline forceAllWithTraceEqFlex #-}
+
+forceAllWithTraceEqFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO (Val,Val)
+forceAllWithTraceEqFlexEq topv x a t u = unblock x (topv,topv) \_ _ -> do
+  a <- forceSet a
+  t <- force t
+  u <- force u
+  forceAllWithTraceEq' $! eq a t u
+{-# noinline forceAllWithTraceEqFlexEq #-}
+
+forceAllWithTraceEq' :: LvlArg => Val -> IO (Val,Val)
+forceAllWithTraceEq' v = case v of
+  topv@(Flex h sp _)    -> forceAllWithTraceEqFlex topv h sp
+  topv@(FlexEq x a t u) -> forceAllWithTraceEqFlexEq topv x a t u
+  Unfold _ _ v _        -> forceAllWithTraceEq' v
+  TraceEq a t u v       -> forceAllWithTraceEqTrace a t u v
+  UnfoldEq _ _ _ v      -> forceAllWithTraceEq' v
+  t                     -> pure (t,t)
 
 ------------------------------------------------------------
 

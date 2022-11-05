@@ -118,7 +118,7 @@ subtype pt t (G a fa) (G b fb) = do
 check :: InCxt (P.Tm -> GTy -> IO S.Tm)
 check topt (G topa ftopa) = do
 
-  ftopa <- forceAll ftopa
+  (ftopaTrace, ftopa) <- forceAllWithTraceEq ftopa
 
   debug ["check", P.showTm topt, showTm (quote topa)]
 
@@ -182,8 +182,8 @@ check topt (G topa ftopa) = do
 
     (topt, ftopa) -> do
       Infer t tty <- insertApps' $ infer topt
-      debug ["subtype", showTm (quote (g1 tty)), showTm (quote (g2 tty)), showTm (quote topa), showTm (quote ftopa)]
-      subtype topt t tty (G topa ftopa)
+      debug ["subtype", showTm (quote (g1 tty)), showTm (quote (g2 tty)), showTm (quote topa), showTm (quote ftopaTrace)]
+      subtype topt t tty (G topa ftopaTrace)
       pure t
 
 

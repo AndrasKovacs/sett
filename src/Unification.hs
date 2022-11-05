@@ -975,7 +975,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
   ftopt  <- forceUS ftopt
   ftopt' <- forceUS ftopt'
 
-  debug ["unify  ", showTm' (quote ftopt), showTm' (quote ftopt')]
+  debug ["unify", showTm' (quote ftopt), showTm' (quote ftopt')]
   -- debug ["unifyV ", show ftopt, show ftopt']
   -- debug ["unifyF", showTm' (quote ftopt), showTm' (quote ftopt'), show ?unifyState]
 
