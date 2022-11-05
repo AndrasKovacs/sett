@@ -30,18 +30,6 @@ newVar a x cont =
 
 ----------------------------------------------------------------------------------------------------
 
-data UnifyEx
-  = CantUnify
-  | CantSolveFrozenMeta
-  | CantSolveMetaInNonRigidState
-  | CantPartialSubst
-  | CantPartialQuote
-  | CantInvertSpine
-  | CantPruneSpine
-  | PruningNotAllowed
-  deriving (Eq, Show)
-instance Exception UnifyEx
-
 -- TODO: optimize
 freshMeta :: LvlArg => S.LocalsArg => GTy -> IO S.Tm
 freshMeta (G a fa) = do
@@ -675,12 +663,20 @@ invertVal solvable psub param t rhsSp = do
     Rigid (RHLocalVar x xty _) sp rhsTy -> do
       unless (solvable <= x && x < psub^.cod) (throw CantInvertSpine)
 
-      (_, ~xty) <- psubst' psub xty
-
       case (sp, rhsSp) of
-        (SId, SId) -> do -- optimized shortcut for vanilla variable inversion
-          updatePSub x (Var' (psub^.dom - 1) xty True) psub
+
+        -- optimized shortcut for vanilla variable inversion
+        (SId, SId) -> do
+
+          let var = case psub^.domVars of
+                EDef _ var -> var
+                _          -> impossible
+
+          updatePSub x var psub
+
+        -- general case
         _ -> do
+          (_, ~xty) <- psubst' psub xty
           let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
           sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom - 1, rhsSp) rhsTy
           res <- updatePSub x (evalInDom psub sol) psub
@@ -689,7 +685,8 @@ invertVal solvable psub param t rhsSp = do
     _ ->
       throwIO CantInvertSpine
 
-
+-- TODO OPTIMIZE: get domain var types in term form, instead of extracting from meta types
+-- by quoting Pi domains.
 solveTopSp :: PartialSub -> S.Locals -> Ty -> RevSpine -> Val -> Ty -> IO S.Tm
 solveTopSp psub ls a sp rhs rhsty = do
 
@@ -705,7 +702,7 @@ solveTopSp psub ls a sp rhs rhsty = do
   case (a, sp) of
 
     (a, RSId) -> do
-      _ <- psubst psub rhsty
+      _ <- psubst psub rhsty -- TODO optimize: somehow check for nonlinearity
       psubst psub rhs
 
     (Pi x i a b, RSApp u _ t) -> do
@@ -729,6 +726,7 @@ solveTopSp psub ls a sp rhs rhsty = do
       snd <- go psub ls (b vfst) t
       pure $ S.Pair fst snd
 
+    -- TODO: do it properly
     (a, RSProjField _ _ n t) ->
       case n of
         0 -> go psub ls a (RSProj1 t)
@@ -749,7 +747,7 @@ solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
   case (a, sp) of
 
     (a, RSId) -> do
-      _ <- psubst psub rhsty
+      _ <- psubst psub rhsty -- TODO optiimze: check nonlinearity
       psubstSp psub (S.LocalVar (lvlToIx rhsVar)) rhsSp
 
     (Pi x i a b, RSApp u _ t) -> do
@@ -776,6 +774,10 @@ solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
 -- | Solve (?x sp ?= rhs : A).
 solve :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solve x sp rhs rhsty = do
+
+  ES.isFrozen x >>= \case
+    True  -> throwIO $ CantSolveFrozenMeta x
+    False -> pure ()
 
   let goRelevant = do
 
@@ -937,18 +939,45 @@ unify (G topt ftopt) (G topt' ftopt') = do
         (FHMeta m, h') -> solve m sp (Flex h' sp' a) a
         (h, FHMeta m') -> solve m' sp' (Flex h sp a) a
 
-  let forceUS t = case ?unifyState of
+      goUnfoldEqs :: Ty -> Val -> Val -> Val -> Ty -> Val -> Val -> Val -> IO ()
+      goUnfoldEqs a t u ~v a' t' u' ~v' = do
+        let unfold :: UnifyStateArg => IO ()
+            unfold = go (G topt v) (G topt' v')
+
+            dontunfold :: UnifyStateArg => IO ()
+            dontunfold = goJoin a a' >> goJoin t t' >> goJoin u u'
+
+            retry :: Int -> IO ()
+            retry n = case n of 0 -> full unfold
+                                n -> rigid (n - 1) unfold
+
+        case ?unifyState of
+          USRigid n    -> catchUE (flex dontunfold) (retry n)
+          USFlex       -> dontunfold
+          USIrrelevant -> dontunfold
+          USFull       -> impossible
+
+      lopsidedUnfold :: G -> G -> IO ()
+      lopsidedUnfold g g' = case ?unifyState of
+        USRigid _    -> go g g'
+        USFlex       -> throwIO CantUnify
+        USIrrelevant -> throwIO CantUnify
+        USFull       -> impossible
+      {-# inline lopsidedUnfold #-}
+
+      forceUS :: Val -> IO Val
+      forceUS t = case ?unifyState of
         USRigid{} -> forceAllButEq t
         USFull    -> forceAll t
         _         -> force t
       {-# inline forceUS #-}
 
-
-
   ftopt  <- forceUS ftopt
   ftopt' <- forceUS ftopt'
 
-  debug ["unify", showTm' (quote topt), showTm' (quote topt'), show ?lvl]
+  debug ["unify  ", showTm' (quote ftopt), showTm' (quote ftopt')]
+  -- debug ["unifyV ", show ftopt, show ftopt']
+  -- debug ["unifyF", showTm' (quote ftopt), showTm' (quote ftopt'), show ?unifyState]
 
   case (ftopt, ftopt') of
 
@@ -971,23 +1000,8 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (FlexEq _ a t u, FlexEq _ a' t' u') -> do
       goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
-    (TraceEq a t u v, TraceEq a' t' u' v') -> do
-
-      let unfold :: UnifyStateArg => IO ()
-          unfold = go (G topt v) (G topt' v')
-
-          dontunfold :: UnifyStateArg => IO ()
-          dontunfold = goJoin a a' >> goJoin t t' >> goJoin u u'
-
-          retry :: Int -> IO ()
-          retry n = case n of 0 -> full unfold
-                              n -> rigid (n - 1) unfold
-
-      case ?unifyState of
-        USRigid n    -> catchUE (flex dontunfold) (retry n)
-        USFlex       -> dontunfold
-        USIrrelevant -> dontunfold
-        USFull       -> impossible
+    (TraceEq  a t u v, TraceEq  a' t' u' v') -> goUnfoldEqs a t u v a' t' u' v'
+    (UnfoldEq a t u v, UnfoldEq a' t' u' v') -> goUnfoldEqs a t u v a' t' u' v'
 
     (Unfold h sp t a, Unfold h' sp' t' _) -> do
 
@@ -1028,30 +1042,14 @@ unify (G topt ftopt) (G topt' ftopt') = do
         USFull       -> impossible
 
 
-    -- eta-short solutions
+    -- eta-short meta solutions
     ------------------------------------------------------------
 
     (Flex h sp a, Flex h' sp' _) -> goFH h sp h' sp' a
     (Flex (FHMeta m) sp a, rhs)  -> solveEtaShort m sp rhs a
     (lhs, Flex (FHMeta m) sp a)  -> solveEtaShort m sp lhs a
 
-
-    -- lopsided unfold
-    ------------------------------------------------------------
-
-    (Unfold _ _ t _, t') -> case ?unifyState of
-      USRigid _    -> go (G topt t) (G topt' t')
-      USFlex       -> throwIO CantUnify
-      USIrrelevant -> throwIO CantUnify
-      USFull       -> impossible
-
-    (t, Unfold _ _ t' _) -> case ?unifyState of
-      USRigid _    -> go (G topt t) (G topt' t')
-      USFlex       -> throwIO CantUnify
-      USIrrelevant -> throwIO CantUnify
-      USFull       -> impossible
-
-    -- lopsided equality
+    -- approximate Eq
     ------------------------------------------------------------
 
     (FlexEq _ a t u, RigidEq a' t' u')   -> goJoin a a' >> goJoin t t' >> goJoin u u'
@@ -1062,7 +1060,15 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (TraceEq a t u _, FlexEq _ a' t' u') -> do
       goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
-    -- TODO: RigidEq and TraceEq on sides
+    -- lopsided unfold
+    ------------------------------------------------------------
+
+    (Unfold _ _ t _, t'  ) -> lopsidedUnfold (G topt t) (G topt' t')
+    (t, Unfold _ _ t' _  ) -> lopsidedUnfold (G topt t) (G topt' t')
+    (UnfoldEq _ _ _ t, t') -> lopsidedUnfold (G topt t) (G topt' t')
+    (t, UnfoldEq _ _ _ t') -> lopsidedUnfold (G topt t) (G topt' t')
+    (TraceEq _ _ _ t, t' ) -> lopsidedUnfold (G topt t) (G topt' t')
+    (t, TraceEq _ _ _ t' ) -> lopsidedUnfold (G topt t) (G topt' t')
 
     -- syntax-directed eta
     ------------------------------------------------------------

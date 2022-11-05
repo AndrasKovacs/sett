@@ -16,7 +16,7 @@ import qualified Data.ByteString.Char8 as B
 import Evaluation
 
 data Error
-  = UnifyError Val Val
+  = UnifyError Val Val UnifyEx
   | NameNotInScope P.Name
   | NoSuchField P.Name
   | NoNamedImplicitArg P.Name
@@ -38,11 +38,14 @@ instance Show ErrorInCxt where
     let showVal v = showTm (quoteWithOpt UnfoldMetas v)
         showValNf v = showTm (quoteWithOpt UnfoldEverything v)
         msg = case err of
-          UnifyError t u ->
+          UnifyError t u ex ->
             "Can't unify inferred type\n\n  " ++ showVal t ++ "\n\nwith expected type\n\n  "
-                                ++ showVal u ++ "\n\n" ++
-            "Normal forms of sides: \n\n  " ++ showValNf t ++ "\n\nand\n\n  "
-                                ++ showValNf u ++ "\n"
+                                ++ showVal u ++ "\n" ++
+            "\nNormal forms of sides: \n\n  " ++ showValNf t ++ "\n\nand\n\n  "
+                                ++ showValNf u ++ "\n" ++
+            case ex of
+              CantSolveFrozenMeta m -> "\nCan't solve frozen metavariable " ++ show m ++ "\n"
+              _ -> ""
           NameNotInScope x ->
             "Name not in scope: " ++ "\"" ++ show x ++ "\""
           NoSuchField x ->

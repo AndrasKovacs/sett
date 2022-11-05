@@ -22,6 +22,7 @@ data RigidHead
   | RHSym Val Val Val Val
   | RHTrans Val Val Val Val Val Val
   | RHAp Val Val Val Val Val Val
+  deriving Show
 
 pattern Exfalso a t <- Rigid (RHExfalso a t) SId _ where
   Exfalso a t = Rigid (RHExfalso a t) SId a
@@ -32,6 +33,7 @@ pattern Coe a b p t <- Rigid (RHCoe a b p t) SId _ where
 data FlexHead
   = FHMeta MetaVar                 -- blocking on meta
   | FHCoe MetaVar Val Val Val Val  -- coe rigidly blocked on a meta
+  deriving Show
 
 flexHeadMeta :: FlexHead -> MetaVar
 flexHeadMeta = \case
@@ -42,6 +44,7 @@ data UnfoldHead
   = UHSolvedMeta MetaVar
   | UHTopDef Lvl ~Val ~Ty
   | UHCoe Val Val Val Val  -- at least 1 Unfold
+  deriving Show
 
 data Spine
   = SId
@@ -49,6 +52,7 @@ data Spine
   | SProj1 Spine
   | SProj2 Spine
   | SProjField Spine Val ~Ty Int -- projected value, its type, field index
+  deriving Show
 
 -- | Reversed spine.
 data RevSpine
@@ -150,6 +154,7 @@ data Val
   | Bot
 
   | Magic Magic
+  deriving Show
 
 markEq :: Val -> Val -> Val -> Val -> Val
 markEq ~a ~t ~u ~v = TraceEq a t u v
@@ -208,11 +213,3 @@ envLength e = Lvl (go 0 e) where
   go n (EDef e _) = go (n + 1) e
 
 type Vars = Env
-
---------------------------------------------------------------------------------
-
-showVal :: Val -> String
-showVal = \case
-  Rigid (RHLocalVar x _ _) _ _ -> "(LocalVar "++ show x ++ ")"
-  Set -> "Set"
-  _ -> error "showVal"

@@ -45,7 +45,7 @@ unify t l r = do
   let ?unifyState = USRigid conversionSpeculation
       ?names      = localNames
   Unif.unify l r `catch` \case
-    (e :: Unif.UnifyEx) -> elabError t (UnifyError (g1 l) (g1 r))
+    (e :: UnifyEx) -> elabError t (UnifyError (g1 l) (g1 r) e)
 
 data Infer = Infer Tm {-# unpack #-} GTy
 
@@ -63,7 +63,7 @@ freshMeta (G a fa) = do
 insertApps' :: LvlArg => EnvArg => LocalsArg => IO Infer -> IO Infer
 insertApps' act = go =<< act where
   go :: Infer -> IO Infer
-  go (Infer t (G topa topfa)) = forceAll topfa >>= \case
+  go (Infer t (G topa topfa)) = forceAllButEq topfa >>= \case -- NOTE: Eq can't compute to implicit Pi!
     V.Pi x Impl a b -> do
       m <- freshMeta (gjoin a)
       let mv = eval m
@@ -86,7 +86,7 @@ insertApps act = act >>= \case
 insertAppsUntilName :: LvlArg => EnvArg => LocalsArg => P.Tm -> P.Name -> IO Infer -> IO Infer
 insertAppsUntilName pt name act = go =<< act where
   go :: Infer -> IO Infer
-  go (Infer t (G topa topfa)) = forceAll topfa >>= \case
+  go (Infer t (G topa topfa)) = forceAllButEq topfa >>= \case
 
     topfa@(V.Pi x Impl a b) -> do
       if x == NSpan name then
@@ -104,8 +104,8 @@ insertAppsUntilName pt name act = go =<< act where
 
 subtype :: InCxt (P.Tm -> S.Tm -> V.GTy -> V.GTy -> IO ())
 subtype pt t (G a fa) (G b fb) = do
-  fa <- forceAll fa
-  fb <- forceAll fb
+  fa <- forceAllButEq fa -- NOTE: Eq can't compute to Set or Prop!
+  fb <- forceAllButEq fb
   case (fa, fb) of
     (V.Prop, V.Set ) -> pure ()
     (V.Set , V.Prop) -> typeIsProp (eval t) >>= \case
@@ -182,7 +182,7 @@ check topt (G topa ftopa) = do
 
     (topt, ftopa) -> do
       Infer t tty <- insertApps' $ infer topt
-      debug ["subtype", showTm (quote (g2 tty)), showTm (quote ftopa)]
+      debug ["subtype", showTm (quote (g1 tty)), showTm (quote (g2 tty)), showTm (quote topa), showTm (quote ftopa)]
       subtype topt t tty (G topa ftopa)
       pure t
 
@@ -364,7 +364,7 @@ infer topt = do
         Infer u uty <- infer u
         pure $ Infer (S.Let (NSpan x) a t u) uty
 
-  debug ["inferred", showTm t, showTm (quote (g1 ty))]
+  debug ["inferred", showTm t, showTm (quote (g1 ty)), showTm (quote (g2 ty))]
   pure (Infer t ty)
 
 

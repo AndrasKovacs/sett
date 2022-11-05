@@ -5,7 +5,7 @@ module Evaluation (
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeIsProp, IsProp(..), appTy, proj1Ty, proj2Ty
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt, quoteNf
-  , quoteSpWithOpt
+  , quoteSpWithOpt, localVar
   ) where
 
 import Control.Exception

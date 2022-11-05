@@ -87,6 +87,8 @@ goTm prec ns t = go prec ns t where
           | x /= "_"  = piBind ns x i a . goPi (x:ns) b
         goPi ns b = (" → "++) . go pip ns b
 
+    Sg NUnused a b ->
+      par p sigmap $ go eqp ns a . (" × "++) . go sigmap ns b
     Sg (show -> x) a b ->
       par p sigmap $ sgBind ns x a . (" × "++) . go sigmap (x:ns) b
 

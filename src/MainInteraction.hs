@@ -75,6 +75,7 @@ justElab src = do
 renderElab :: IO ()
 renderElab = do
  size <- topSize
+ putStr "\n"
 
  let goMetaBlock frz m | m == frz = pure ()
      goMetaBlock frz m = do
