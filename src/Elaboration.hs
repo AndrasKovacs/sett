@@ -102,10 +102,10 @@ insertAppsUntilName pt name act = go =<< act where
 
 --------------------------------------------------------------------------------
 
-subtype :: InCxt (P.Tm -> S.Tm -> V.Ty -> V.Ty -> IO ())
-subtype pt t a b = do
-  fa <- forceAll a
-  fb <- forceAll b
+subtype :: InCxt (P.Tm -> S.Tm -> V.GTy -> V.GTy -> IO ())
+subtype pt t (G a fa) (G b fb) = do
+  fa <- forceAll fa
+  fb <- forceAll fb
   case (fa, fb) of
     (V.Prop, V.Set ) -> pure ()
     (V.Set , V.Prop) -> typeIsProp (eval t) >>= \case
@@ -120,7 +120,7 @@ check topt (G topa ftopa) = do
 
   ftopa <- forceAll ftopa
 
-  debug ["check", show topt, showTm (quote ftopa)]
+  debug ["check", P.showTm topt, showTm (quote topa)]
 
   case (topt, ftopa) of
 
@@ -183,7 +183,7 @@ check topt (G topa ftopa) = do
     (topt, ftopa) -> do
       Infer t tty <- insertApps' $ infer topt
       debug ["subtype", showTm (quote (g2 tty)), showTm (quote ftopa)]
-      subtype topt t (g2 tty) ftopa
+      subtype topt t tty (G topa ftopa)
       pure t
 
 
@@ -201,7 +201,7 @@ ensureSP topt a = forceAll a >>= \case
 infer :: InCxt (P.Tm -> IO Infer)
 infer topt = do
 
-  debug ["infer", show topt]
+  debug ["infer", P.showTm topt]
 
   Infer t ty <- case topt of
 
@@ -364,7 +364,7 @@ infer topt = do
         Infer u uty <- infer u
         pure $ Infer (S.Let (NSpan x) a t u) uty
 
-  debug ["inferred", showTm t, showTm (quote (g2 ty))]
+  debug ["inferred", showTm t, showTm (quote (g1 ty))]
   pure (Infer t ty)
 
 

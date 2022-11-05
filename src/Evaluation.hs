@@ -5,6 +5,7 @@ module Evaluation (
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeIsProp, IsProp(..), appTy, proj1Ty, proj2Ty
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt, quoteNf
+  , quoteSpWithOpt
   ) where
 
 import Control.Exception
@@ -536,10 +537,11 @@ forceSetFlex topv h sp = case h of
 
 forceSet' :: LvlArg => Val -> IO Val
 forceSet' v = case v of
-  topv@(Flex h sp _)    -> forceSetFlex topv h sp
-  Unfold _ _ v _        -> forceSet' v
-  -- El a                  -> El <$!> forceAll' a
-  t                     -> pure t
+  topv@(Flex h sp _) -> forceSetFlex topv h sp
+  Unfold _ _ v _     -> forceSet' v
+  UnfoldEq _ _ _ t   -> forceSet' t
+  TraceEq _ _ _ t    -> forceSet' t
+  t                  -> pure t
 
 ------------------------------------------------------------
 
@@ -620,17 +622,24 @@ forceMetas' v = case v of
 
 data IsProp = ItsProp | ItsNotProp | IPBlockOn MetaVar | IPMagic Magic
 
-mergeMagic = undefined
+mergeMagic :: Magic -> Magic -> Magic
+mergeMagic m1 m2 = case (m1, m2) of
+  (Undefined , m         ) -> m
+  (m         , Undefined ) -> m
+  (Nonlinear , _         ) -> Nonlinear
+  (_         , Nonlinear ) -> Nonlinear
+  (m         , _         ) -> m
 
 sgIsProp :: IsProp -> IsProp -> IsProp
-sgIsProp ItsNotProp _              = ItsNotProp
-sgIsProp _          ItsNotProp     = ItsNotProp
-sgIsProp (IPBlockOn x) _           = IPBlockOn x
-sgIsProp _ (IPBlockOn x)           = IPBlockOn x
-sgIsProp ItsProp ItsProp           = ItsProp
-sgIsProp (IPMagic m1) (IPMagic m2) = IPMagic (mergeMagic m1 m2)
-sgIsProp (IPMagic m1) _            = IPMagic m1
-sgIsProp _ (IPMagic m2)            = IPMagic m2
+sgIsProp p q = case (p, q) of
+  (ItsNotProp  , _           ) -> ItsNotProp
+  (_           , ItsNotProp  ) -> ItsNotProp
+  (IPBlockOn x , _           ) -> IPBlockOn x
+  (_           , IPBlockOn x ) -> IPBlockOn x
+  (ItsProp     , ItsProp     ) -> ItsProp
+  (IPMagic m1  , IPMagic m2  ) -> IPMagic (mergeMagic m1 m2)
+  (IPMagic m1  , _           ) -> IPMagic m1
+  (_           , IPMagic m2  ) -> IPMagic m2
 
 typeIsProp :: LvlArg => Ty -> IO IsProp
 typeIsProp a = do

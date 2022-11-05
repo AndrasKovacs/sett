@@ -101,3 +101,6 @@ span t = Span (left t) (right t) where
     Trans (Span _ r)       -> r
     Ap (Span _ r)          -> r
     Hole (Span l r)        -> r
+
+showTm :: Tm -> String
+showTm t = spanToString (Presyntax.span t)

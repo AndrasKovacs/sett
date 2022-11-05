@@ -39,10 +39,10 @@ instance Show ErrorInCxt where
         showValNf v = showTm (quoteWithOpt UnfoldEverything v)
         msg = case err of
           UnifyError t u ->
-            "Can't unify\n\n  " ++ showVal t ++ "\n\nwith\n\n  "
-                                ++ showVal u ++ "\n\n\n" ++
+            "Can't unify inferred type\n\n  " ++ showVal t ++ "\n\nwith expected type\n\n  "
+                                ++ showVal u ++ "\n\n" ++
             "Normal forms of sides: \n\n  " ++ showValNf t ++ "\n\nand\n\n  "
-                                ++ showValNf u ++ "\n\n\n"
+                                ++ showValNf u ++ "\n"
           NameNotInScope x ->
             "Name not in scope: " ++ "\"" ++ show x ++ "\""
           NoSuchField x ->

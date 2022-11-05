@@ -80,7 +80,7 @@ goTm prec ns t = go prec ns t where
     Proj1 t -> par p projp $ go projp ns t . (".1"++)
     Proj2 t -> par p projp $ go projp ns t . (".2"++)
 
-    Pi NUnused Expl a b  -> par p pip $ go appp ns a . (" → "++) . go pip ("_":ns) b
+    Pi NUnused Expl a b  -> par p pip $ go sigmap ns a . (" → "++) . go pip ("_":ns) b
     Pi (show -> x) i a b ->
       par p pip $ piBind ns x i a . goPi (x:ns) b where
         goPi ns (Pi (show -> x) i a b)
