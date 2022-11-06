@@ -217,6 +217,14 @@ data Span = Span# Src FP.Pos FP.Pos
 instance Show Span where
   show = spanToString
 
+leftPos :: Span -> Pos
+leftPos (Span l _) = l
+{-# inline leftPos #-}
+
+rightPos :: Span -> Pos
+rightPos (Span _ r) = r
+{-# inline rightPos #-}
+
 pattern Span :: Pos -> Pos -> Span
 pattern Span x y <- ((\(Span# src x y) -> (Pos src x, Pos src y)) -> (x, y)) where
   Span (Pos src x) (Pos src' y)

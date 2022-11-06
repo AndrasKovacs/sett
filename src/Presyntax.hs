@@ -13,8 +13,9 @@ data TopLevel
   deriving Show
 
 data ArgInfo
-  = NoName Icit
-  | Named Name   -- ^ Named implicit application.
+  = AIImpl Pos
+  | AIExpl
+  | AINamedImpl Name Pos   -- ^ Named implicit application.
   deriving Show
 
 data Tm
@@ -78,29 +79,31 @@ span t = Span (left t) (right t) where
 
   right :: Tm -> Pos
   right = \case
-    Var (Span _ r)         -> r
-    Let _ _ _ _ u          -> right u
-    Pi _ _ _ _ b           -> right b
-    Sg _ _ _ b             -> right b
-    Pair _ u               -> right u
-    Proj1 _ r              -> r
-    Proj2 _ r              -> r
-    ProjField _ (Span _ r) -> r
-    App _ u _              -> right u
-    Lam _ _ _ _ t          -> right t
-    Set (Span _ r)         -> r
-    Prop (Span _ r)        -> r
-    Top     (Span _ r)     -> r
-    Tt      (Span _ r)     -> r
-    Bot     (Span _ r)     -> r
-    Exfalso (Span _ r)     -> r
-    Eq _ t                 -> right t
-    Refl (Span _ r)        -> r
-    Coe (Span _ r)         -> r
-    Sym (Span _ r)         -> r
-    Trans (Span _ r)       -> r
-    Ap (Span _ r)          -> r
-    Hole (Span l r)        -> r
+    Var (Span _ r)            -> r
+    Let _ _ _ _ u             -> right u
+    Pi _ _ _ _ b              -> right b
+    Sg _ _ _ b                -> right b
+    Pair _ u                  -> right u
+    Proj1 _ r                 -> r
+    Proj2 _ r                 -> r
+    ProjField _ (Span _ r)    -> r
+    App _ _ (AIImpl r)        -> r
+    App _ _ (AINamedImpl _ r) -> r
+    App _ u _                 -> right u
+    Lam _ _ _ _ t             -> right t
+    Set (Span _ r)            -> r
+    Prop (Span _ r)           -> r
+    Top     (Span _ r)        -> r
+    Tt      (Span _ r)        -> r
+    Bot     (Span _ r)        -> r
+    Exfalso (Span _ r)        -> r
+    Eq _ t                    -> right t
+    Refl (Span _ r)           -> r
+    Coe (Span _ r)            -> r
+    Sym (Span _ r)            -> r
+    Trans (Span _ r)          -> r
+    Ap (Span _ r)             -> r
+    Hole (Span l r)           -> r
 
 showTm :: Tm -> String
 showTm t = spanToString (Presyntax.span t)

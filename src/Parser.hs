@@ -94,8 +94,6 @@ colon   = token  ($(FP.string ":") `notFollowedBy` $(FP.string "="))
 colon'  = token' ($(FP.string ":") `notFollowedBy` $(FP.string "="))
 semi    = $(sym  ";")
 braceL  = $(sym  "{")
-braceR  = $(sym  "}")
-braceR' = $(sym' "}")
 parL    = $(sym  "(")
 parR'   = $(sym' ")")
 parR    = $(sym  ")")
@@ -103,6 +101,9 @@ dot     = $(sym  ".")
 arrow   = token  $(switch [| case _ of "->" -> pure (); "→" -> pure () |])
 times   = token  $(switch [| case _ of "*"  -> pure (); "×" -> pure () |])
 lambda  = token  $(switch [| case _ of "λ"  -> pure (); "\\" -> pure () |])
+
+braceR  = $(sym  "}")
+braceR' = $(sym' "}")
 
 --------------------------------------------------------------------------------
 
@@ -161,19 +162,20 @@ goApp t = branch braceL
   (\_ -> branch (ident <* assign)
     (\x -> do
       u <- tm'
-      braceR `pcut` Lit "\"}\" in implicit application"
-      goApp (App t u (Named x)))
+      p <- rightPos <$> (braceR `pcut` Lit "\"}\" in implicit application")
+      goApp (App t u (AINamedImpl x p)))
     (do
       u <- tm'
-      braceR `pcut` Lit "\"}\" in implicit application"
-      goApp (App t u (NoName Impl))))
+      p <- getPos
+      p <- rightPos <$> (braceR `pcut` Lit "\"}\" in implicit application")
+      goApp (App t u (AIImpl p))))
 
   (branch atom
      (\u -> do
          debug ["bar", show t]
          u <- goProj u
          debug ["foo", show u]
-         goApp (App t u (NoName Expl)))
+         goApp (App t u AIExpl))
      (pure t))
 
 app' :: Parser Tm
@@ -269,21 +271,23 @@ implLamBinder = do
   case x of
     DontBind -> do
       ma <- optional (colon *> tyAnnot)
-      pure (DontBind, NoName Impl, ma)
+      p <- rightPos <$> braceR'
+      pure (DontBind, AIImpl p, ma)
     Bind x   -> do
       ma <- optional (colon *> tyAnnot)
       branch assign
         (\_ -> do
-            y <- bind' <* braceR'
-            pure (y, Named x, ma))
-        (do braceR'
-            pure (Bind x, NoName Impl, ma))
+            y <- bind'
+            p <- rightPos <$> braceR'
+            pure (y, AINamedImpl x p, ma))
+        (do p <- rightPos <$> braceR'
+            pure (Bind x, AIImpl p, ma))
 
 lamBinder :: Parser (Bind, ArgInfo, Maybe Tm)
 lamBinder =
-  branch parL (\_ -> (,NoName Expl,) <$> bind' <*> (Just <$> (colon' *> tyAnnot <* parR'))) $
+  branch parL (\_ -> (,AIExpl,) <$> bind' <*> (Just <$> (colon' *> tyAnnot <* parR'))) $
   branch braceL (\_ -> implLamBinder) $
-  ((,NoName Expl,Nothing) <$> bind)
+  ((,AIExpl,Nothing) <$> bind)
 
 lamLet' :: Parser Tm
 lamLet' = (do

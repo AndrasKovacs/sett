@@ -136,8 +136,9 @@ check topt (G topa ftopa) = do
 
     -- go under lambda
     (P.Lam _ x' inf ma t, V.Pi x i a b)
-      | (case inf of P.NoName i' -> i == i'
-                     P.Named x'  -> NSpan x' == x && i == Impl) -> do
+      | (case inf of P.AIExpl           -> i == Expl
+                     P.AIImpl _         -> i == Impl
+                     P.AINamedImpl x' _ -> NSpan x' == x && i == Impl) -> do
 
       (a, va) <- case ma of
         Just a' -> do
@@ -292,13 +293,13 @@ infer topt = do
     P.App topt topu i -> do
 
       (i, t, a, fa) <- case i of
-        P.NoName Impl -> do
+        P.AIImpl _ -> do
           Infer t (G a fa) <- infer topt
           pure (Impl, t, a, fa)
-        P.NoName Expl -> do
+        P.AIExpl -> do
           Infer t (G a fa) <- insertApps' $ infer topt
           pure (Expl, t, a, fa)
-        P.Named x -> do
+        P.AINamedImpl x _ -> do
           Infer t (G a fa) <- insertAppsUntilName topt x $ infer topt
           pure (Impl, t, a, fa)
 

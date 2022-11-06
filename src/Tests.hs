@@ -5,6 +5,12 @@ import MainInteraction
 
 -- TODO: organize tests! succeed, fail, regression, etc. Add CI testing.
 
+tParse :: IO ()
+tParse = justElab $ unlines [
+  "idSet : {A : Set} → A → A := λ {A := B} x. x",
+  "foo   : {A : Set} → A → A := λ {B} x. idSet {A := B} x"
+  ]
+
 t1 :: IO ()
 t1 = justElab $ unlines [
   "idSet : Set -> Set := λ x. x"
@@ -191,12 +197,17 @@ t14 = justElab $ unlines [
   -- "        := \\p q. trans p q",
   -- "testap : {A B : Set} (f : A -> B) {x y : A} (p : x = y) -> f x = f y",
   -- "        := \\f p. ap f p",
+
+  "Eq : (A : Set) → A → A → Prop := λ A x y. x = y",
+
+  "propext : {P Q : Prop} → (P → Q) × (Q → P) → Eq Set P Q := λ {P}{Q} e. e",
+
   "testsymeq : {A : Set} {x y : A} -> x = y -> (x = x) = (y = x)",
-  "          := \\{A} {x} {y} p. ap {A}{Prop} (\\y. y = x) p",
+  "          := \\{A} {x} {y} p. ap {A}{Prop} (\\y. y = x) p"
 
   -- TODO
-  "testsym : {A : Set} {x y : A} -> x = y -> y = x",
-  "        := \\{A} {x} {y} p. coe {x = x} {y = x} (testsymeq {A} {x} {y} p) (refl {A} {x})"
+  -- "testsym : {A : Set} {x y : A} -> x = y -> y = x",
+  -- "        := \\{A} {x} {y} p. coe {x = x} {y = x} (testsymeq {A} {x} {y} p) (refl {A} {x})"
 
 
   -- "testcoerefl : {A : Set} {x : A} {p : A = A} -> coe {A} {A} p x = x",
