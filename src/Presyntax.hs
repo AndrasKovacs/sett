@@ -44,6 +44,7 @@ data Tm
   | Sym Span
   | Trans Span
   | Ap Span
+  | Propext Span
 
   | Hole Span
   deriving Show
@@ -75,6 +76,7 @@ span t = Span (left t) (right t) where
     Sym (Span l _)     -> l
     Trans (Span l _)   -> l
     Ap (Span l _)      -> l
+    Propext (Span l _) -> l
     Hole    (Span l _) -> l
 
   right :: Tm -> Pos
@@ -103,6 +105,7 @@ span t = Span (left t) (right t) where
     Sym (Span _ r)            -> r
     Trans (Span _ r)          -> r
     Ap (Span _ r)             -> r
+    Propext (Span _ r)        -> r
     Hole (Span l r)           -> r
 
 showTm :: Tm -> String

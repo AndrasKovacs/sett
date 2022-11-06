@@ -5,7 +5,7 @@ module Evaluation (
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeIsProp, IsProp(..), appTy, proj1Ty, proj2Ty
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt, quoteNf
-  , quoteSpWithOpt, localVar, forceAllWithTraceEq
+  , quoteSpWithOpt, localVar, forceAllWithTraceEq, eqProp, quoteInWithOpt
   ) where
 
 import Control.Exception
@@ -47,6 +47,12 @@ newVar a cont =
 -- pattern synonyms
 --------------------------------------------------------------------------------
 
+pattern Exfalso a t <- Rigid (RHExfalso a t) SId _ where
+  Exfalso a t = Rigid (RHExfalso a t) SId a
+
+pattern Coe a b p t <- Rigid (RHCoe a b p t) SId _ where
+  Coe a b p t = Rigid (RHCoe a b p t) SId b
+
 pattern Refl :: LvlArg => Val -> Val -> Val
 pattern Refl a t <- Rigid (RHRefl a t) SId _ where
   Refl a t = Rigid (RHRefl a t) SId (eq a t t)
@@ -62,6 +68,10 @@ pattern Ap a b f x y p <- Rigid (RHAp a b f x y p) SId _ where
 pattern Trans :: LvlArg => Val -> Val -> Val -> Val -> Val -> Val -> Val
 pattern Trans a x y z p q <- Rigid (RHTrans a x y z p q) SId _ where
   Trans a x y z p q = Rigid (RHTrans a x y z p q) SId (eq a x z)
+
+pattern Propext :: LvlArg => Val -> Val -> Val -> Val -> Val
+pattern Propext p q f g <- Rigid (RHPropext p q f g) SId _ where
+  Propext p q f g = Rigid (RHPropext p q f g) SId (eqSet p q)
 
 --------------------------------------------------------------------------------
 
@@ -218,7 +228,6 @@ coe a b p t = case (a, b) of
   (a@Rigid{}, b) -> coeTrans a b p t
   (a, b@Rigid{}) -> coeTrans a b p t
 
-
   -- Canonical mismatch
   -- NOTE: Canonical mismatch can't compute to Exfalso!
   --       That + coe-trans causes conversion to be undecidable.
@@ -252,7 +261,7 @@ coeRefl a b p t = case runConv (conv a b) of
 
 eq :: LvlArg => Val -> Val -> Val -> Val
 eq a t u = case a of
-  Set       -> eqSet t u
+  Set       -> eqSet  t u
   Prop      -> eqProp t u
   Top       -> markEq Top t u Top
   Bot       -> markEq Bot t u Top
@@ -283,6 +292,10 @@ eq a t u = case a of
   a@(Unfold h sp fa _) -> UnfoldEq a t u (eq fa t u)
   Magic m              -> Magic m
   _                    -> impossible
+
+eqProp :: LvlArg => Val -> Val -> Val
+eqProp = eqSet
+{-# inline eqProp #-}
 
 eqSet :: LvlArg => Val -> Val -> Val
 eqSet a b = case (a, b) of
@@ -332,9 +345,6 @@ eqSet a b = case (a, b) of
   ------------------------------------------------------------
   (a, b) -> markEq Set a b Bot
 
-eqProp :: Val -> Val -> Val
-eqProp a b = markEq Prop a b (andP (funP a b) (funP b a))
-
 --------------------------------------------------------------------------------
 
 spine :: LvlArg => Val -> Spine -> Val
@@ -382,7 +392,7 @@ coeSym     = LamI na Set \a -> LamI nb Set \b -> LamE np (eqSet a b) \p -> LamE 
 symSym     = LamI na Set \a -> LamI ny a \x -> LamI ny a \y -> LamE np (eq a x y) \p ->
              Sym a x y p
 
-apSym      = LamI na Set \a -> LamI nb Set \b -> LamE nf (funS a b) \f -> LamI nx a \x ->
+apSym      = LamI na Set \a -> LamI nb Set \b -> LamE nf (a ==> b) \f -> LamI nx a \x ->
              LamI ny a \y -> LamE np (eq a x y) \p ->
              Ap a b f x y p
 
@@ -392,6 +402,9 @@ transSym   = LamI na Set \a -> LamI nx a \x -> LamI ny a \y -> LamI nz a \z ->
 
 reflSym    = LamI na Set \a -> LamI nx a \x -> Refl a x
 exfalsoSym = LamI na Set \a -> LamE np Bot \p -> Exfalso a p
+
+propextSym = LamI np Prop \p -> LamI nq Prop \q ->
+             LamE nf (p ==> q) \f -> LamE ng (q ==> p) \g -> Propext p q f g
 
 eval :: LvlArg => EnvArg => S.Tm -> Val
 eval t =
@@ -425,6 +438,7 @@ eval t =
     S.TransSym          -> transSym
     S.ApSym             -> apSym
     S.ExfalsoSym        -> exfalsoSym
+    S.PropextSym        -> propextSym
     S.Magic m           -> Magic m
 
 evalIn :: Lvl -> Env -> S.Tm -> Val
@@ -791,29 +805,29 @@ conv t u = do
       go a a'
       goBind a (Cl b) (Cl b)
 
-    (Set  , Set  ) -> pure ()
-    (Prop , Prop ) -> pure ()
-    (Top  , Top  ) -> pure ()
-    (Bot  , Bot  ) -> pure ()
-    (Tt   , Tt   ) -> pure ()
+    (Set , Set ) -> pure ()
+    (Prop, Prop) -> pure ()
+    (Top , Top ) -> pure ()
+    (Bot , Bot ) -> pure ()
+    (Tt  , Tt  ) -> pure ()
 
     (Rigid h sp a, Rigid h' sp' _) -> typeIsProp a >>= \case
-      ItsProp       -> pure ()
+      ItsProp     -> pure ()
       IPBlockOn x -> throwIO $ BlockOn x
-      ItsNotProp       -> convRigidRel h sp h' sp'
+      ItsNotProp  -> convRigidRel h sp h' sp'
       IPMagic m   -> throwIO $ CRMagic m
 
-    (RigidEq a t u  , RigidEq a' t' u') -> go a a' >> go t t' >> go u u'
-    (Lam _ _ _ t , Lam _ _ a t'  )      -> goBind a t t'
-    (Pair t u    , Pair t' u'    ) -> go t t' >> go u u'
+    (RigidEq a t u , RigidEq a' t' u') -> go a a' >> go t t' >> go u u'
+    (Lam _ _ _ t   , Lam _ _ a t'    ) -> goBind a t t'
+    (Pair t u      , Pair t' u'      ) -> go t t' >> go u u'
 
     -- eta
     --------------------------------------------------------------------------------
 
-    (Lam _ i a t , t'              ) ->  goBind a t (Cl \u -> app t' u i)
-    (t              , Lam _ i a t' ) ->  goBind a (Cl \u -> app t u i) t'
-    (Pair t u    , t'              ) ->  go t (proj1 t') >> go u (proj2 t')
-    (t              , Pair t' u'   ) ->  go (proj1 t) t' >> go (proj2 t) u'
+    (Lam _ i a t , t'              ) -> goBind a t (Cl \u -> app t' u i)
+    (t              , Lam _ i a t' ) -> goBind a (Cl \u -> app t u i) t'
+    (Pair t u    , t'              ) -> go t (proj1 t') >> go u (proj2 t')
+    (t              , Pair t' u'   ) -> go (proj1 t) t' >> go (proj2 t) u'
 
     ------------------------------------------------------------
 
@@ -821,29 +835,29 @@ conv t u = do
     (_, Magic m) -> throwIO $ CRMagic m
 
     (Flex h sp a, _) -> typeIsProp a >>= \case
-      ItsProp       -> pure ()
+      ItsProp     -> pure ()
       IPMagic m   -> throwIO $ CRMagic m
-      ItsNotProp       -> throwIO $! BlockOn (flexHeadMeta h)
+      ItsNotProp  -> throwIO $! BlockOn (flexHeadMeta h)
       IPBlockOn{} -> throwIO $! BlockOn (flexHeadMeta h)
 
     (_, Flex h sp a) -> typeIsProp a >>= \case
-      ItsProp       -> pure ()
+      ItsProp     -> pure ()
       IPMagic m   -> throwIO $ CRMagic m
-      ItsNotProp       -> throwIO $! BlockOn (flexHeadMeta h)
+      ItsNotProp  -> throwIO $! BlockOn (flexHeadMeta h)
       IPBlockOn{} -> throwIO $! BlockOn (flexHeadMeta h)
 
     (FlexEq x _ _ _, _) -> throwIO $ BlockOn x
     (_, FlexEq x _ _ _) -> throwIO $ BlockOn x
 
     (Rigid h sp a, _) -> typeIsProp a >>= \case
-      ItsProp       -> pure ()
-      ItsNotProp       -> throwIO Diff
+      ItsProp     -> pure ()
+      ItsNotProp  -> throwIO Diff
       IPBlockOn x -> throwIO $ BlockOn x
       IPMagic m   -> throwIO $ CRMagic m
 
     (_, Rigid h' sp' a) -> typeIsProp a >>= \case
-      ItsProp       -> pure ()
-      ItsNotProp       -> throwIO Diff
+      ItsProp     -> pure ()
+      ItsNotProp  -> throwIO Diff
       IPBlockOn x -> throwIO $ BlockOn x
       IPMagic m   -> throwIO $ CRMagic m
 
@@ -887,6 +901,7 @@ quoteWithOpt opt t = let
     RHSym a x y p       -> S.Sym (go a) (go x) (go y) (go p)
     RHTrans a x y z p q -> S.Trans (go a) (go x) (go y) (go z) (go p) (go q)
     RHAp a b f x y p    -> S.Ap (go a) (go b) (go f) (go x) (go y) (go p)
+    RHPropext p q f g   -> S.Propext (go p) (go q) (go f) (go g)
 
   goUnfoldHead ~v = \case
     UHSolvedMeta x -> S.Meta x
@@ -929,6 +944,9 @@ quoteNf = quoteWithOpt UnfoldEverything
 quoteIn :: Lvl -> Val -> S.Tm
 quoteIn l t = let ?lvl = l in quote t
 
+quoteInWithOpt :: Lvl -> UnfoldOpt -> Val -> S.Tm
+quoteInWithOpt l opt t = let ?lvl = l in quoteWithOpt opt t
+
 eval0 :: S.Tm -> Val
 eval0 t = let ?env = ENil; ?lvl = 0 in eval t
 
@@ -942,7 +960,8 @@ nf0 :: UnfoldOpt -> S.Tm -> S.Tm
 nf0 opt t = quote0WithOpt opt (eval0 t)
 
 -- | Create a closure from a value.
-closeVal :: Lvl -> Env -> Val -> Closure
-closeVal l env v = let
-  v' = quoteIn (l + 1) v
-  in Cl \x -> evalIn ?lvl (EDef env x) v'
+closeVal :: LvlArg => EnvArg => Val -> Closure
+closeVal v = let
+  v' = quoteIn (?lvl + 1) v
+  in Cl \x -> evalIn ?lvl (EDef ?env x) v'
+{-# inline closeVal #-}

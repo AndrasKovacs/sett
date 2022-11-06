@@ -26,6 +26,8 @@ import Common
 
 --------------------------------------------------------------------------------
 
+-- TODO: precisely handle parens in spans, right now parens on the right are dropped off
+--       everywhere. Perhaps handle braces the same way
 
 {-
 
@@ -110,18 +112,19 @@ braceR' = $(sym' "}")
 -- TODO: optimize for performance
 atom :: Parser Tm
 atom =
-  branch ident              (pure . Var)          $
-  branch parL               (\_  -> tm' <* parR') $
-  branch $(sym "_")         (pure . Hole)         $
+  branch ident           (pure . Var)          $
+  branch parL            (\_  -> tm' <* parR') $
+  branch $(sym "_")      (pure . Hole)         $
   branch $(kw "refl")    (pure . Refl)         $
   branch $(kw "Set")     (pure . Set)          $
   branch $(kw "Prop")    (pure . Prop)         $
-  branch $(sym "⊤")         (pure . Top)       $
+  branch $(sym "⊤")      (pure . Top)          $
   branch $(kw "Top")     (pure . Top)          $
-  branch $(sym "⊥")         (pure . Bot)       $
+  branch $(sym "⊥")      (pure . Bot)          $
   branch $(kw "Bot")     (pure . Bot)          $
   branch $(kw "tt")      (pure . Tt)           $
   branch $(kw "exfalso") (pure . Exfalso)      $
+  branch $(kw "propext") (pure . Propext)      $
   branch $(kw "ap")      (pure . Ap)           $
   branch $(kw "coe")     (pure . Coe)          $
   branch $(kw "trans")   (pure . Trans)        $
@@ -343,20 +346,17 @@ tyAnnot :: Parser Tm
 tyAnnot = tm `cut` ["a type annotation"]
 
 topLevel :: Parser TopLevel
-topLevel = branch (exactLvl 0 >> ident)
-
-  (\x -> do
-      localIndentation 1 do
-        ma <- optional (colon *> tyAnnot)
-        assign `pcut` Lit "\":=\" in top-level definition"
-        rhs <- tm `cut` ["a top-level definition"]
-        top <- localIndentation 0 topLevel
-        pure $ Define x ma rhs top
-  )
-
-  (do eof `cut` ["end of file", "new non-indented top-level definition"]
-      pure Nil
-  )
+topLevel = branch eof (\_ -> pure Nil) do
+  exactLvl' 0
+  x <- ident `cut` ["top-level definition"]
+  FP.modify (+1) -- TODO: remove this hack
+  localIndentation 1 do
+    ma <- optional (colon *> tyAnnot)
+    rest <- FP.traceRest
+    assign `pcut` Lit "\":=\" in top-level definition"
+    rhs <- tm `cut` ["a top-level definition"]
+    top <- localIndentation 0 topLevel
+    pure $ Define x ma rhs top
 
 parse :: Parser TopLevel
 parse = ws *> topLevel

@@ -43,9 +43,10 @@ instance Show ErrorInCxt where
                                 ++ showVal u ++ "\n" ++
             "\nNormal forms of sides: \n\n  " ++ showValNf t ++ "\n\nand\n\n  "
                                 ++ showValNf u ++ "\n" ++
-            case ex of
-              CantSolveFrozenMeta m -> "\nCan't solve frozen metavariable " ++ show m ++ "\n"
-              _ -> ""
+            show ex
+            -- case ex of
+            --   CantSolveFrozenMeta m -> "\nCan't solve frozen metavariable " ++ show m ++ "\n"
+            --   _ -> ""
           NameNotInScope x ->
             "Name not in scope: " ++ "\"" ++ show x ++ "\""
           NoSuchField x ->

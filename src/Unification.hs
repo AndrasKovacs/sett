@@ -215,6 +215,7 @@ approxOccurs occ t = do
     S.TransSym{}       -> pure ()
     S.ApSym{}          -> pure ()
     S.ExfalsoSym{}     -> pure ()
+    S.PropextSym{}     -> pure ()
     S.Magic{}          -> pure ()
 
 psubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
@@ -260,6 +261,7 @@ psubst psub topt = do
           RHSym a x y p        -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
           RHTrans a x y z p q  -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
           RHAp a b f x y p     -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
+          RHPropext p q f g    -> S.Propext <$!> go p <*!> go q <*!> go f <*!> go g
         goSp h sp
 
       goUnfold h sp = do
@@ -275,13 +277,26 @@ psubst psub topt = do
       goFlex' h sp = case h of
         FHMeta m -> do
           goSpFlex (S.Meta m) sp `catch` \(_ :: UnifyEx) -> do
+
+            debug ["PRUNE", showTm0 $ quoteIn (psub^.cod) (Flex (FHMeta m) sp Set)]
+            a <- ES.metaType m
+            debug ["ORIG TY", showTm0 $ quote0WithOpt UnfoldEverything a]
+
             (m, sp) <- prune psub m sp
+
+            debug ["PRUNED", showTm0 $ quoteIn (psub^.cod) (Flex (FHMeta m) sp Set)]
+            a <- ES.metaType m
+            debug ["PRUNED TY", showTm0 $ quote0WithOpt UnfoldEverything a]
+
             goSp (S.Meta m) sp
         FHCoe x a b p t -> do
           h <- S.Coe <$!> goFlex a <*!> goFlex b <*!> goFlex p <*!> goFlex t
           goSpFlex h sp
 
-  forceWithPSub psub topt >>= \case
+
+  ftopt <- forceWithPSub psub topt
+  debug ["PSUBST", showTm0 $ quoteIn (psub^.cod) topt, showTm0 $ quoteIn (psub^.cod) ftopt ]
+  case ftopt of
     Rigid h sp _       -> goRigid h sp
     RigidEq a t u      -> S.Eq <$!> go a <*!> go t <*!> go u
     Flex h sp _        -> goFlex' h sp
@@ -526,6 +541,7 @@ partialQuote t = do
       RHPostulate x a     -> pure $ S.Postulate x a
       RHCoe a b p t       -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
       RHExfalso a t       -> S.Exfalso <$!> go a <*!> go t
+      RHPropext p q f g   -> S.Propext <$!> go p <*!> go q <*!> go f <*!> go g
       RHRefl a t          -> S.Refl <$!> go a <*!> go t
       RHSym a x y p       -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
       RHTrans a x y z p q -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
@@ -651,6 +667,9 @@ invertVal solvable psub param t rhsSp = do
   t <- let ?lvl = param in forceAll t
   case t of
 
+    Tt ->
+      pure psub
+
     Pair t u -> do
       psub <- invertVal solvable psub param t (SProj1 rhsSp)
       invertVal solvable psub param u (SProj2 rhsSp)
@@ -659,6 +678,13 @@ invertVal solvable psub param t rhsSp = do
       let var  = Var param a
       let ?lvl = param + 1
       invertVal solvable psub ?lvl (t $$ var) (SApp rhsSp var i)
+
+    -- Rigid h (SProj1 sp) rhsty -> do
+    --   uf
+    --   psub <- invertVal solvable psub param (Rigid h sp _) _
+    --   _
+
+    -- TODO: consider passing an *un-psubsted* variable type to solveNestedSp!!!
 
     Rigid (RHLocalVar x xty _) sp rhsTy -> do
       unless (solvable <= x && x < psub^.cod) (throw CantInvertSpine)
@@ -676,7 +702,10 @@ invertVal solvable psub param t rhsSp = do
 
         -- general case
         _ -> do
+          debug ["PRE", showTm0 $ quoteInWithOpt (psub^.dom) UnfoldNothing xty]
+          debug ["PRE", showTm0 $ quoteInWithOpt (psub^.dom) UnfoldEverything xty]
           (_, ~xty) <- psubst' psub xty
+          debug ["POST"]
           let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
           sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom - 1, rhsSp) rhsTy
           res <- updatePSub x (evalInDom psub sol) psub
@@ -706,12 +735,14 @@ solveTopSp psub ls a sp rhs rhsty = do
       psubst psub rhs
 
     (Pi x i a b, RSApp u _ t) -> do
+      debug ["FOO"]
       let var   = Var' ?lvl a True
       let qa    = quote a
       let ?lvl  = ?lvl + 1
       psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
       ls    <- pure (S.LBind ls x qa)
       psub  <- invertVal 0 psub (psub^.cod) u SId
+      debug ["BAR"]
       S.Lam x i qa <$!> go psub ls (b $$ var) t
 
     (Sg x a b, RSProj1 t) -> do
@@ -774,6 +805,8 @@ solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
 -- | Solve (?x sp ?= rhs : A).
 solve :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solve x sp rhs rhsty = do
+
+  debug ["SOLVE", showTm' (quote (Flex (FHMeta x) sp rhsty)), showTm' (quote rhs)]
 
   ES.isFrozen x >>= \case
     True  -> throwIO $ CantSolveFrozenMeta x
@@ -926,6 +959,9 @@ unify (G topt ftopt) (G topt' ftopt') = do
         (RHAp a b f x y p, RHAp a' b' f' x' y' p') ->
           goJoin a a' >> goJoin b b' >> goJoin f f' >> goJoin x x' >>
           goJoin y y' >> irr (goJoin p p')
+
+        (RHPropext p q f g, RHPropext p' q' f' g') ->
+          goJoin p p' >> goJoin q q' >> irr (goJoin f f' >> goJoin g g')
 
         _ -> throwIO CantUnify
 

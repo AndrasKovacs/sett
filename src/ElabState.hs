@@ -41,6 +41,7 @@ readMeta (MkMetaVar i) = ADL.read metaCxt i
 newMeta :: GTy -> IO MetaVar
 newMeta a = do
   s <- ADL.size metaCxt
+  debug ["NEW META", show s]
   ADL.push metaCxt (MEUnsolved a)
   pure (MkMetaVar s)
 {-# inline newMeta #-}
@@ -64,6 +65,11 @@ unsolvedMetaType :: MetaVar -> IO V.Ty
 unsolvedMetaType x = readMeta x >>= \case
   MEUnsolved (G _ a) -> pure a
   _                  -> impossible
+
+metaType :: MetaVar -> IO V.Ty
+metaType x = readMeta x >>= \case
+  MEUnsolved (G _ a)     -> pure a
+  MESolved _ _ _ (G _ a) -> pure a
 
 -- Top-level elaboration context
 --------------------------------------------------------------------------------

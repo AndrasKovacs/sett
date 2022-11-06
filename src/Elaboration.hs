@@ -56,6 +56,15 @@ freshMeta (G a fa) = do
   m <- newMeta (G closed fclosed)
   pure $ InsertedMeta m ?locals
 
+-- fresh meta in an extended env
+freshMeta1 :: LvlArg => LocalsArg => EnvArg => S.Ty -> GTy -> IO Closure
+freshMeta1 bind (G a fa) = do
+  let ?lvl = ?lvl + 1; ?locals = S.LBind ?locals nx bind
+  let closed   = eval0 $ closeTy $ quote a
+  let ~fclosed = eval0 $ closeTy $ quote fa
+  m <- newMeta (G closed fclosed)
+  pure $ Cl \x -> evalIn ?lvl (EDef ?env x) (InsertedMeta m ?locals)
+
 -- Insertion
 --------------------------------------------------------------------------------
 
@@ -256,16 +265,19 @@ infer topt = do
       pure $! Infer (S.Eq a t u) gProp
 
     P.Exfalso _ -> do
-      let ty = V.PiI na V.Set \a -> funS V.Bot a
+      let ty = V.PiI na V.Set \a -> V.Bot ==> a
       pure $! Infer S.ExfalsoSym (gjoin ty)
+
+    P.Propext _ -> do
+      let ty = V.PiI np V.Prop \p -> V.PiI nq V.Prop \q -> (p ==> q) ==> (q ==> p) ==> eqProp p q
+      pure $! Infer S.PropextSym (gjoin ty)
 
     P.Refl _ -> do
       let ty = V.PiI na V.Set \a -> V.PiI nx a \x -> eq a x x
       pure $! Infer S.ReflSym (gjoin ty)
 
     P.Coe _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b ->
-               funS (eqSet a b) $ funS a b
+      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b -> eqSet a b ==> a ==> b
       pure $! Infer S.CoeSym (gjoin ty)
 
     P.Sym _ -> do
@@ -279,7 +291,7 @@ infer topt = do
       pure $! Infer S.TransSym (gjoin ty)
 
     P.Ap _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b -> V.PiE nf (funS a b) \f -> V.PiI nx a \x ->
+      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b -> V.PiE nf (a ==> b) \f -> V.PiI nx a \x ->
                V.PiI ny a \y -> V.PiE np (eq a x y) \p ->
                eq b (f `appE` x) (f `appE` y)
       pure $! Infer S.ApSym (gjoin ty)
@@ -313,8 +325,21 @@ infer topt = do
           elabError topt $ ExpectedFun a
 
     -- TODO: infer, postpone if ambiguous S/P
-    P.Lam{} ->
-      elabError topt $ GenericError "can't infer type for lambda"
+    P.Lam _ x inf ma t -> do
+      i <- case inf of
+        P.AIImpl _        -> pure Impl
+        P.AIExpl          -> pure Expl
+        P.AINamedImpl _ _ ->
+          elabError topt $ GenericError "Can't infer type for lambda with named argument"
+      a <- case ma of
+        Nothing -> freshMeta gSet
+        Just a  -> check a gSet
+      let ~va = eval a
+      Infer t b <- bind x a (gjoin va) \_ -> infer t
+      let bcl = closeVal (g1 b)
+      let name = bindToName x
+      pure $ Infer (S.Lam name i a t) (gjoin (V.Pi name i va bcl))
+
 
     -- TODO: infer simple product type, postpone if ambiguous S/P
     P.Pair{} ->
@@ -323,14 +348,32 @@ infer topt = do
     P.Proj1 topt _ -> do
       Infer t (G ty fty) <- infer topt
       forceAll fty >>= \case
-        V.Sg x a b -> pure $! Infer (Proj1 t) (gjoin a)
-        _          -> elabError topt $! ExpectedSg ty -- TODO: postpone
+        V.Sg x a b ->
+          pure $! Infer (Proj1 t) (gjoin a)
+        fty@Flex{} -> do
+          a <- freshMeta gSet
+          let va = eval a
+          b <- freshMeta1 a gSet
+          let sg = V.SgPrim nx va b
+          unify topt (G ty fty) (gjoin sg)
+          pure $! Infer (Proj1 t) (gjoin va)
+        _ -> do
+          elabError topt $! ExpectedSg ty
 
     P.Proj2 topt _ -> do
       Infer t (G ty fty) <- infer topt
       forceAll fty >>= \case
-        V.Sg x a b -> pure $! Infer (Proj2 t) (gjoin (b (proj1 (eval t))))
-        _          -> elabError topt $! ExpectedSg ty -- TODO: postpone
+        V.Sg x a b ->
+          pure $! Infer (Proj2 t) (gjoin (b (proj1 (eval t))))
+        fty@Flex{} -> do
+          a <- freshMeta gSet
+          let va = eval a
+          b <- freshMeta1 a gSet
+          let sg = V.SgPrim nx va b
+          unify topt (G ty fty) (gjoin sg)
+          pure $! Infer (Proj2 t) (gjoin (b $$ proj1 (eval t)))
+        _ -> do
+          elabError topt $! ExpectedSg ty
 
     P.ProjField topt x -> do
       let fieldName = NSpan x

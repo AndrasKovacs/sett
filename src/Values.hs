@@ -22,13 +22,8 @@ data RigidHead
   | RHSym Val Val Val Val
   | RHTrans Val Val Val Val Val Val
   | RHAp Val Val Val Val Val Val
+  | RHPropext Val Val Val Val
   deriving Show
-
-pattern Exfalso a t <- Rigid (RHExfalso a t) SId _ where
-  Exfalso a t = Rigid (RHExfalso a t) SId a
-
-pattern Coe a b p t <- Rigid (RHCoe a b p t) SId _ where
-  Coe a b p t = Rigid (RHCoe a b p t) SId b
 
 data FlexHead
   = FHMeta MetaVar                 -- blocking on meta
@@ -176,14 +171,12 @@ pattern VUndefined  = Magic Undefined
 pattern VNonlinear  = Magic Nonlinear
 pattern VMetaOccurs = Magic MetaOccurs
 
-funP :: Val -> Val -> Val
-funP a b = PiE NUnused a \_ -> b
+infixr 1 ==>
+(==>) :: Val -> Val -> Val
+(==>) a b = PiE NUnused a \_ -> b
 
-funS :: Val -> Val -> Val
-funS a b = PiE NUnused a \_ -> b
-
-andP :: Val -> Val -> Val
-andP a b = Sg NUnused a \_ -> b
+prod :: Val -> Val -> Val
+prod a b = Sg NUnused a \_ -> b
 
 gSet  = gjoin Set
 gProp = gjoin Prop
