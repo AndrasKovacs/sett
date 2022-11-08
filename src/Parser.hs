@@ -113,7 +113,7 @@ braceR' = $(sym' "}")
 atom :: Parser Tm
 atom =
   branch ident           (pure . Var)          $
-  branch parL            (\_  -> tm' <* parR') $
+  branch parL            parens                $
   branch $(sym "_")      (pure . Hole)         $
   branch $(kw "refl")    (pure . Refl)         $
   branch $(kw "Set")     (pure . Set)          $
@@ -124,12 +124,14 @@ atom =
   branch $(kw "Bot")     (pure . Bot)          $
   branch $(kw "tt")      (pure . Tt)           $
   branch $(kw "exfalso") (pure . Exfalso)      $
-  branch $(kw "propext") (pure . Propext)      $
   branch $(kw "ap")      (pure . Ap)           $
   branch $(kw "coe")     (pure . Coe)          $
   branch $(kw "trans")   (pure . Trans)        $
   branch $(kw "sym")     (pure . Sym)          $
   empty
+
+parens :: Span -> Parser Tm
+parens l = Parens (leftPos l) <$> tm' <*> (rightPos <$> parR')
 
 atom' :: Parser Tm
 atom' = atom `cut` atomErr

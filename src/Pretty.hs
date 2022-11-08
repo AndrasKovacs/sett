@@ -119,7 +119,7 @@ goTm prec ns t = go prec ns t where
     TransSym   -> ("trans"++)
     ApSym      -> ("ap"++)
     ExfalsoSym -> ("exfalso"++)
-    PropextSym -> ("propext"++)
+    -- PropextSym -> ("propext"++)
 
     Magic m -> case m of
       Undefined  -> ("undefined"++)

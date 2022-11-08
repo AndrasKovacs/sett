@@ -42,7 +42,7 @@ instance Show ErrorInCxt where
             "Can't unify inferred type\n\n  " ++ showVal t ++ "\n\nwith expected type\n\n  "
                                 ++ showVal u ++ "\n" ++
             "\nNormal forms of sides: \n\n  " ++ showValNf t ++ "\n\nand\n\n  "
-                                ++ showValNf u ++ "\n" ++
+                                ++ showValNf u ++ "\n\n" ++
             show ex
             -- case ex of
             --   CantSolveFrozenMeta m -> "\nCan't solve frozen metavariable " ++ show m ++ "\n"

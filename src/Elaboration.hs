@@ -132,6 +132,8 @@ check topt (G topa ftopa) = do
   debug ["check", P.showTm topt, showTm (quote topa)]
 
   case (topt, ftopa) of
+    (P.Parens _ t _, ftopa) ->
+      check t (G topa ftopa)
 
     (P.Pi _ x i a b, V.Prop) -> do
       a <- check a gSet
@@ -215,6 +217,9 @@ infer topt = do
 
   Infer t ty <- case topt of
 
+    P.Parens _ t _ ->
+      infer t
+
     P.Var x -> case NT.lookup x ?nameTable of
       Nothing ->
         elabError topt $ NameNotInScope x
@@ -263,38 +268,6 @@ infer topt = do
       unify topt tty uty
       let a = quote (g1 tty)
       pure $! Infer (S.Eq a t u) gProp
-
-    P.Exfalso _ -> do
-      let ty = V.PiI na V.Set \a -> V.Bot ==> a
-      pure $! Infer S.ExfalsoSym (gjoin ty)
-
-    P.Propext _ -> do
-      let ty = V.PiI np V.Prop \p -> V.PiI nq V.Prop \q -> (p ==> q) ==> (q ==> p) ==> eqProp p q
-      pure $! Infer S.PropextSym (gjoin ty)
-
-    P.Refl _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI nx a \x -> eq a x x
-      pure $! Infer S.ReflSym (gjoin ty)
-
-    P.Coe _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b -> eqSet a b ==> a ==> b
-      pure $! Infer S.CoeSym (gjoin ty)
-
-    P.Sym _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI ny a \x -> V.PiI ny a \y -> V.PiE np (eq a x y) \p -> eq a y x
-      pure $! Infer S.SymSym (gjoin ty)
-
-    P.Trans _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI nx a \x -> V.PiI ny a \y -> V.PiI nz a \z ->
-               V.PiE np (eq a x y) \p -> V.PiE nq (eq a y z) \q ->
-               eq a x z
-      pure $! Infer S.TransSym (gjoin ty)
-
-    P.Ap _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b -> V.PiE nf (a ==> b) \f -> V.PiI nx a \x ->
-               V.PiI ny a \y -> V.PiE np (eq a x y) \p ->
-               eq b (f `appE` x) (f `appE` y)
-      pure $! Infer S.ApSym (gjoin ty)
 
     P.Hole _ -> do
       ty <- freshMeta gSet
@@ -407,6 +380,38 @@ infer topt = do
       define x a (gjoin va) t (eval t) do
         Infer u uty <- infer u
         pure $ Infer (S.Let (NSpan x) a t u) uty
+
+    P.Exfalso _ -> do
+      let ty = V.PiI na V.Set \a -> V.Bot ==> a
+      pure $! Infer S.ExfalsoSym (gjoin ty)
+
+    -- P.Propext _ -> do
+    --   let ty = V.PiI np V.Prop \p -> V.PiI nq V.Prop \q -> (p ==> q) ==> (q ==> p) ==> eqProp p q
+    --   pure $! Infer S.PropextSym (gjoin ty)
+
+    P.Coe _ -> do
+      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b -> eqType a b ==> a ==> b
+      pure $! Infer S.CoeSym (gjoin ty)
+
+    P.Refl _ -> do
+      let ty = V.PiI na V.Set \a -> V.PiI nx a \x -> eq a x x
+      pure $! Infer S.ReflSym (gjoin ty)
+
+    P.Sym _ -> do
+      let ty = V.PiI na V.Set \a -> V.PiI ny a \x -> V.PiI ny a \y -> V.PiE np (eq a x y) \p -> eq a y x
+      pure $! Infer S.SymSym (gjoin ty)
+
+    P.Trans _ -> do
+      let ty = V.PiI na V.Set \a -> V.PiI nx a \x -> V.PiI ny a \y -> V.PiI nz a \z ->
+               V.PiE np (eq a x y) \p -> V.PiE nq (eq a y z) \q ->
+               eq a x z
+      pure $! Infer S.TransSym (gjoin ty)
+
+    P.Ap _ -> do
+      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b -> V.PiE nf (a ==> b) \f -> V.PiI nx a \x ->
+               V.PiI ny a \y -> V.PiE np (eq a x y) \p ->
+               eq b (f `appE` x) (f `appE` y)
+      pure $! Infer S.ApSym (gjoin ty)
 
   debug ["inferred", showTm t, showTm (quote (g1 ty)), showTm (quote (g2 ty))]
   pure (Infer t ty)

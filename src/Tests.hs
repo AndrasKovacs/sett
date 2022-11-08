@@ -7,7 +7,7 @@ import MainInteraction
 
 tParse :: IO ()
 tParse = justElab $ unlines [
-  "foo"
+  "foo : Set := (((Set)))"
   ]
 
 t1 :: IO ()
@@ -194,34 +194,37 @@ t14 = justElab $ unlines [
 
   "Eq : (A : Set) → A → A → Prop := λ A x y. x = y",
 
+  "coep : {A B : Prop} → A = B → A → B := λ {A}{B} p x. coe {A}{B} p x",
+
+  "trp : {A : Set}(B : A → Prop){x y} → x = y → B x → B y := λ B p bx. coep (ap B p) bx",
+
   "testsymeq : {A : Set} {x y : A} -> x = y -> (x = x) = (y = x)",
   "          := λ {x:=x} p. ap (λ y. y = x) p",
 
   "testsym : {A : Set} {x y : A} -> x = y -> y = x",
-  "        := λ p. coe (testsymeq p) refl",
+  "     := λ p. coep (testsymeq p) refl"
 
-  "testcoerefl : {A : Set} {x : A} {p : A = A} -> coe {A} {A} p x = x",
-  "            := refl",
+  -- "testcoerefl : {A : Set} {x : A} {p : A = A} -> coe {A} {A} p x = x",
+  -- "            := refl",
 
-  "testcoecoe : {A B C : Set} {x : A} {p : A = B} {q : B = C}",
-  "              -> coe {B} {C} q (coe {A} {B} p x) = coe {A} {C} (trans p q) x",
-  "           := refl",
+  -- "testcoecoe : {A B C : Set} {x : A} {p : A = B} {q : B = C}",
+  -- "              -> coe {B} {C} q (coe {A} {B} p x) = coe {A} {C} (trans p q) x",
+  -- "           := refl",
 
-  "testfunext : {A B : Set} {f g : A -> B} -> f = g -> ((a : A) -> f a = g a)",
-  "        := \\p. p",
+  -- "testfunext : {A B : Set} {f g : A -> B} -> f = g -> ((a : A) -> f a = g a)",
+  -- "        := \\p. p",
 
-  "testcoecoe2 : {A1 A2 B C1 C2 : Set} {f : A1 -> A2} {p : (A1 -> A2) = B} {q : B =",
-  "              (C1 -> C2)} {r : (A1 -> A2) = (C1 -> C2)}",
-  "            -> coe q (coe p f) = coe r f",
-  "            := refl"
+  -- "testcoecoe2 : {A1 A2 B C1 C2 : Set} {f : A1 -> A2} {p : (A1 -> A2) = B} {q : B =",
+  -- "              (C1 -> C2)} {r : (A1 -> A2) = (C1 -> C2)}",
+  -- "            -> coe q (coe p f) = coe r f",
+  -- "            := refl"
 
   ]
 
 -- propext
 t15 :: IO ()
 t15 = justElab $ unlines [
-  -- "id : (A : Set) → A → A := λ A x. x",
-  -- -- "foo := λ f x. f x"
-  -- "foo : Set := (λ x. x.2) (id ((A : Set) × A) (Set, Set))"
-  "idl : (A : Prop) → ⊤ × A = A := λ A. propext (λ y. y.2) (λ x. (tt, x)) "
+  "propext : {P Q : Prop} → (P → Q) → (Q → P) → P = Q := λ f g. (f,g)",
+  "idl : {A : Prop} → (⊤ × A) = A := (λ y. y.2, λ x. (tt, x))",
+  "idr : {A : Prop} → (A × ⊤) = A := (λ y. y.1, λ x. (x, tt))"
   ]

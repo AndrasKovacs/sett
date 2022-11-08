@@ -5,7 +5,8 @@ module Evaluation (
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, typeIsProp, IsProp(..), appTy, proj1Ty, proj2Ty
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt, quoteNf
-  , quoteSpWithOpt, localVar, forceAllWithTraceEq, eqProp, quoteInWithOpt
+  , quoteSpWithOpt, localVar, forceAllWithTraceEq, eqProp, quoteInWithOpt, eqType
+  , eqInSet, coeInSet
   ) where
 
 import Control.Exception
@@ -69,9 +70,9 @@ pattern Trans :: LvlArg => Val -> Val -> Val -> Val -> Val -> Val -> Val
 pattern Trans a x y z p q <- Rigid (RHTrans a x y z p q) SId _ where
   Trans a x y z p q = Rigid (RHTrans a x y z p q) SId (eq a x z)
 
-pattern Propext :: LvlArg => Val -> Val -> Val -> Val -> Val
-pattern Propext p q f g <- Rigid (RHPropext p q f g) SId _ where
-  Propext p q f g = Rigid (RHPropext p q f g) SId (eqSet p q)
+-- pattern Propext :: LvlArg => Val -> Val -> Val -> Val -> Val
+-- pattern Propext p q f g <- Rigid (RHPropext p q f g) SId _ where
+--   Propext p q f g = Rigid (RHPropext p q f g) SId (eqSet p q)
 
 --------------------------------------------------------------------------------
 
@@ -181,37 +182,44 @@ projField topt n = case topt of
   Magic m         -> Magic m
   _               -> impossible
 
+-- Coercion
+--------------------------------------------------------------------------------
+
 coe :: LvlArg => Val -> Val -> Val -> Val -> Val
-coe a b p t = case (a, b) of
+coe a b p t = case (runIO (typeIsProp a), runIO (typeIsProp b)) of
+  (ItsProp     , ItsProp     ) -> appE (proj1 p) t
+  (ItsNotProp  , ItsNotProp  ) -> coeInSet a b p t
+  (IPMagic m   , _           ) -> Magic m
+  (_           , IPMagic m   ) -> Magic m
+  (IPBlockOn x , _           ) -> Flex (FHCoe x a b p t) SId b
+  (_           , IPBlockOn x ) -> Flex (FHCoe x a b p t) SId b
+  _                            -> Coe a b p t
+
+coeInSet :: LvlArg => Val -> Val -> Val -> Val -> Val
+coeInSet a b p t = case (a, b) of
 
   -- canonical
   ------------------------------------------------------------
 
   (topA@(Pi x i a b), topB@(Pi x' i' a' b'))
-    | i /= i' -> Rigid (RHCoe topA topB p t) SId topB
-
-    | True ->
+    | i /= i' -> Coe topA topB p t
+    | True    ->
         let p1   = proj1 p
             p2   = proj2 p
             name = pick x x'
         in Lam name i a' $ Cl \x' ->
             let x = coe a' a (Sym Set a a' p1) x'
-            in coe (b $$ x) (b' $$ x') (p2 `appE` x) (app t x i)
+            in coeInSet (b $$ x) (b' $$ x') (p2 `appE` x) (app t x i)
 
   (Sg x a b, Sg x' a' b') ->
     let t1  = proj1 t
         t2  = proj2 t
-        t1' = coe a a' (proj1 p) t1
-        t2' = coe (b t1) (b' t1') (proj2 p) t2
+        t1' = coeInSet a a' (proj1 p) t1
+        t2' = coeInSet (b t1) (b' t1') (proj2 p) t2
     in Pair t1' t2'
 
-  (Set,  Set ) -> t
-  (Prop, Prop) -> t
-
-  (_, Top)        -> Tt
-  (_, Bot)        -> Coe a b p t
-  (_, RigidEq{})  -> Coe a b p t
-  (_, FlexEq{})   -> Coe a b p t
+  (Set,  Set )   -> t
+  (Prop, Prop)   -> t
 
   -- non-canonical
   ------------------------------------------------------------
@@ -219,8 +227,8 @@ coe a b p t = case (a, b) of
   (Magic m, _) -> Magic m
   (_, Magic m) -> Magic m
 
-  (ua@(Unfold h sp a _), b) -> Unfold (UHCoe ua b p t) SId (coe a b p t) b
-  (a, ub@(Unfold h sp b _)) -> Unfold (UHCoe a ub p t) SId (coe a b p t) b
+  (ua@(Unfold h sp a _), b) -> Unfold (UHCoe ua b p t) SId (coeInSet a b p t) b
+  (a, ub@(Unfold h sp b _)) -> Unfold (UHCoe a ub p t) SId (coeInSet a b p t) b
 
   (a@(Flex h sp _), b) -> Flex (FHCoe (flexHeadMeta h) a b p t) SId b
   (a, b@(Flex h sp _)) -> Flex (FHCoe (flexHeadMeta h) a b p t) SId b
@@ -231,15 +239,8 @@ coe a b p t = case (a, b) of
   -- Canonical mismatch
   -- NOTE: Canonical mismatch can't compute to Exfalso!
   --       That + coe-trans causes conversion to be undecidable.
-  --       If Bot is provable, then every canonical type is irrelevant.
-  --       E.g.    True
-  --             = coe Bool Bool _ True
-  --             = coe Nat Bool _ (coe Bool Nat _ True)
-  --             = Exfalso Bool _
-  --             = ...
-  --             = False
 
-  (a, b) -> Rigid (RHCoe a b p t) SId b
+  (a, b) -> Coe a b p t
 
 coeTrans :: LvlArg => Val -> Val -> Val -> Val -> Val
 coeTrans a b p t = case t of
@@ -256,19 +257,35 @@ coeRefl a b p t = case runConv (conv a b) of
   BlockOn x -> Flex (FHCoe x a b p t) SId b
   CRMagic m -> Magic m
 
-  -- Equality type
+
+-- Equality type
 --------------------------------------------------------------------------------
 
 eq :: LvlArg => Val -> Val -> Val -> Val
-eq a t u = case a of
-  Set       -> eqSet  t u
-  Prop      -> eqProp t u
-  Top       -> markEq Top t u Top
-  Bot       -> markEq Bot t u Top
+eq a t u = case runIO (typeIsProp a) of
+  ItsProp     -> markEq a t u Top
+  ItsNotProp  -> eqInSet a t u
+  IPBlockOn x -> FlexEq x a t u
+  IPMagic m   -> Magic m
+
+eqType :: LvlArg => Val -> Val -> Val
+eqType t u = case (runIO (typeIsProp t), runIO (typeIsProp u)) of
+  (ItsProp     , ItsProp     ) -> markEq Prop t u (eqProp t u)
+  (ItsNotProp  , ItsNotProp  ) -> eqSet t u
+  (IPMagic m   , _           ) -> Magic m
+  (_           , IPMagic m   ) -> Magic m
+  (IPBlockOn x , _           ) -> FlexEq x Set t u
+  (_           , IPBlockOn x ) -> FlexEq x Set t u
+  _                            -> markEq Set t u Bot
+
+eqInSet :: LvlArg => Val -> Val -> Val -> Val
+eqInSet a t u = case a of
+  Set       -> eqType t u
+  Prop      -> markEq Prop t u (eqProp t u)
   RigidEq{} -> RigidEq a t u
 
   topA@(Pi x i a b) -> markEq topA t u $!
-    PiE x a \x -> eq (b $$ x) (app t x i) (app u x i)
+    PiE x a \x -> eqInSet (b $$ x) (app t x i) (app u x i)
 
   topA@(Sg x a b) ->
     let t1  = proj1 t
@@ -279,9 +296,9 @@ eq a t u = case a of
         bt1 = b t1
 
     in markEq topA t u $!
-       Sg np (eq a t1 u2) \p ->
-          eq bu1
-            (coe bt1 bu1
+       Sg np (eqInSet a t1 u2) \p ->
+          eqInSet bu1
+            (coeInSet bt1 bu1
                  (Ap a Set (LamE x a b) t1 u1 p)
                  t2)
               u2
@@ -289,14 +306,15 @@ eq a t u = case a of
   a@Rigid{}            -> RigidEq a t u
   a@(Flex h sp _)      -> FlexEq (flexHeadMeta h) a t u
   a@(FlexEq x _ _ _)   -> FlexEq x a t u
-  a@(Unfold h sp fa _) -> UnfoldEq a t u (eq fa t u)
+  a@(Unfold h sp fa _) -> UnfoldEq a t u (eqInSet fa t u)
   Magic m              -> Magic m
   _                    -> impossible
 
 eqProp :: LvlArg => Val -> Val -> Val
-eqProp = eqSet
+eqProp a b = prod (a ==> b) (b ==> a)
 {-# inline eqProp #-}
 
+-- Sides are *not* in Prop!
 eqSet :: LvlArg => Val -> Val -> Val
 eqSet a b = case (a, b) of
 
@@ -304,15 +322,13 @@ eqSet a b = case (a, b) of
   ------------------------------------------------------------
   (Set , Set)  -> markEq Set  Set  Set  Top
   (Prop, Prop) -> markEq Set  Prop Prop Top
-  (Top , Top)  -> markEq Prop Top  Top  Top
-  (Bot , Bot)  -> markEq Prop Bot  Bot  Top
 
   (topA@(Pi x i a b), topB@(Pi x' i' a' b'))
     | i /= i' -> markEq Set topA topB Bot
     | True    ->
       let name = pick x x'
       in markEq Set topA topB $!
-        Sg np (eqSet a a') \p ->
+        Sg np (eqType a a') \p ->
         PiE name a \x -> eqSet (b $$ x) (b' $$ coe a a' p x)
 
   (topA@(Sg x a b), topB@(Sg x' a' b')) ->
@@ -326,24 +342,20 @@ eqSet a b = case (a, b) of
   (Magic m, _) -> Magic m
   (_, Magic m) -> Magic m
 
-  (a@(Unfold _ _ fa _), _)   -> UnfoldEq Set a b (eqSet fa b)
-  (a, b@(Unfold _ _ fb _))   -> UnfoldEq Set a b (eqSet a fb)
-  (a@(UnfoldEq _ _ _ fa), _) -> UnfoldEq Set a b (eqSet fa b)
-  (a, b@(UnfoldEq _ _ _ fb)) -> UnfoldEq Set a b (eqSet a fb)
+  (a@(Unfold _ _ fa _), _) -> UnfoldEq Set a b (eqSet fa b)
+  (a, b@(Unfold _ _ fb _)) -> UnfoldEq Set a b (eqSet a fb)
 
-  (a@(Flex h _ _), b)     -> FlexEq (flexHeadMeta h) Set a b
-  (a, b@(Flex h _ _))     -> FlexEq (flexHeadMeta h) Set a b
-  (a@(FlexEq x _ _ _), b) -> FlexEq x Set a b
-  (a, b@(FlexEq x _ _ _)) -> FlexEq x Set a b
+  (a@(Flex h _ _), b) -> FlexEq (flexHeadMeta h) Set a b
+  (a, b@(Flex h _ _)) -> FlexEq (flexHeadMeta h) Set a b
 
-  (a@RigidEq{}, b)    -> RigidEq Set a b
-  (a, b@RigidEq{})    -> RigidEq Set a b
-  (a@Rigid{}, b)      -> RigidEq Set a b
-  (a, b@Rigid{})      -> RigidEq Set a b
+  (a@Rigid{}, b)   -> RigidEq Set a b
+  (a, b@Rigid{})   -> RigidEq Set a b
 
   -- canonical mismatch
   ------------------------------------------------------------
   (a, b) -> markEq Set a b Bot
+
+
 
 --------------------------------------------------------------------------------
 
@@ -403,8 +415,8 @@ transSym   = LamI na Set \a -> LamI nx a \x -> LamI ny a \y -> LamI nz a \z ->
 reflSym    = LamI na Set \a -> LamI nx a \x -> Refl a x
 exfalsoSym = LamI na Set \a -> LamE np Bot \p -> Exfalso a p
 
-propextSym = LamI np Prop \p -> LamI nq Prop \q ->
-             LamE nf (p ==> q) \f -> LamE ng (q ==> p) \g -> Propext p q f g
+-- propextSym = LamI np Prop \p -> LamI nq Prop \q ->
+--              LamE nf (p ==> q) \f -> LamE ng (q ==> p) \g -> Propext p q f g
 
 eval :: LvlArg => EnvArg => S.Tm -> Val
 eval t =
@@ -438,7 +450,7 @@ eval t =
     S.TransSym          -> transSym
     S.ApSym             -> apSym
     S.ExfalsoSym        -> exfalsoSym
-    S.PropextSym        -> propextSym
+    -- S.PropextSym        -> propextSym
     S.Magic m           -> Magic m
 
 evalIn :: Lvl -> Env -> S.Tm -> Val
@@ -901,7 +913,7 @@ quoteWithOpt opt t = let
     RHSym a x y p       -> S.Sym (go a) (go x) (go y) (go p)
     RHTrans a x y z p q -> S.Trans (go a) (go x) (go y) (go z) (go p) (go q)
     RHAp a b f x y p    -> S.Ap (go a) (go b) (go f) (go x) (go y) (go p)
-    RHPropext p q f g   -> S.Propext (go p) (go q) (go f) (go g)
+    -- RHPropext p q f g   -> S.Propext (go p) (go q) (go f) (go g)
 
   goUnfoldHead ~v = \case
     UHSolvedMeta x -> S.Meta x

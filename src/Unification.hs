@@ -215,7 +215,7 @@ approxOccurs occ t = do
     S.TransSym{}       -> pure ()
     S.ApSym{}          -> pure ()
     S.ExfalsoSym{}     -> pure ()
-    S.PropextSym{}     -> pure ()
+    -- S.PropextSym{}     -> pure ()
     S.Magic{}          -> pure ()
 
 psubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
@@ -261,7 +261,7 @@ psubst psub topt = do
           RHSym a x y p        -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
           RHTrans a x y z p q  -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
           RHAp a b f x y p     -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
-          RHPropext p q f g    -> S.Propext <$!> go p <*!> go q <*!> go f <*!> go g
+          -- RHPropext p q f g    -> S.Propext <$!> go p <*!> go q <*!> go f <*!> go g
         goSp h sp
 
       goUnfold h sp = do
@@ -424,6 +424,7 @@ mkPLam p     = PLam p
 
 mkPruneVal :: PartialSub -> Val -> IO PruneVal
 mkPruneVal psub t = forceAllWithPSub psub t >>= \case
+  Tt              -> pure PKeep
   Pair t u        -> mkPPair <$!> mkPruneVal psub t <*!> mkPruneVal psub u
   Lam _ _ a t     -> do (_, ~a') <- psubst' psub a
                         let ?lvl = psub^.cod
@@ -541,7 +542,7 @@ partialQuote t = do
       RHPostulate x a     -> pure $ S.Postulate x a
       RHCoe a b p t       -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
       RHExfalso a t       -> S.Exfalso <$!> go a <*!> go t
-      RHPropext p q f g   -> S.Propext <$!> go p <*!> go q <*!> go f <*!> go g
+      -- RHPropext p q f g   -> S.Propext <$!> go p <*!> go q <*!> go f <*!> go g
       RHRefl a t          -> S.Refl <$!> go a <*!> go t
       RHSym a x y p       -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
       RHTrans a x y z p q -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
@@ -679,11 +680,6 @@ invertVal solvable psub param t rhsSp = do
       let ?lvl = param + 1
       invertVal solvable psub ?lvl (t $$ var) (SApp rhsSp var i)
 
-    -- Rigid h (SProj1 sp) rhsty -> do
-    --   uf
-    --   psub <- invertVal solvable psub param (Rigid h sp _) _
-    --   _
-
     -- TODO: consider passing an *un-psubsted* variable type to solveNestedSp!!!
 
     Rigid (RHLocalVar x xty _) sp rhsTy -> do
@@ -693,19 +689,17 @@ invertVal solvable psub param t rhsSp = do
 
         -- optimized shortcut for vanilla variable inversion
         (SId, SId) -> do
-
           let var = case psub^.domVars of
                 EDef _ var -> var
                 _          -> impossible
-
           updatePSub x var psub
 
         -- general case
         _ -> do
-          debug ["PRE", showTm0 $ quoteInWithOpt (psub^.dom) UnfoldNothing xty]
-          debug ["PRE", showTm0 $ quoteInWithOpt (psub^.dom) UnfoldEverything xty]
-          (_, ~xty) <- psubst' psub xty
-          debug ["POST"]
+          -- debug ["PRE", showTm0 $ quoteInWithOpt (psub^.dom) UnfoldNothing xty]
+          -- debug ["PRE", showTm0 $ quoteInWithOpt (psub^.dom) UnfoldEverything xty]
+          -- (_, ~xty) <- psubst' psub xty
+          -- debug ["POST"]
           let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
           sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom - 1, rhsSp) rhsTy
           res <- updatePSub x (evalInDom psub sol) psub
@@ -735,14 +729,12 @@ solveTopSp psub ls a sp rhs rhsty = do
       psubst psub rhs
 
     (Pi x i a b, RSApp u _ t) -> do
-      debug ["FOO"]
       let var   = Var' ?lvl a True
       let qa    = quote a
       let ?lvl  = ?lvl + 1
       psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
       ls    <- pure (S.LBind ls x qa)
       psub  <- invertVal 0 psub (psub^.cod) u SId
-      debug ["BAR"]
       S.Lam x i qa <$!> go psub ls (b $$ var) t
 
     (Sg x a b, RSProj1 t) -> do
@@ -777,17 +769,17 @@ solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
   a <- forceSet a
   case (a, sp) of
 
-    (a, RSId) -> do
+    (_, RSId) -> do
       _ <- psubst psub rhsty -- TODO optiimze: check nonlinearity
       psubstSp psub (S.LocalVar (lvlToIx rhsVar)) rhsSp
 
     (Pi x i a b, RSApp u _ t) -> do
-      let var   = Var' ?lvl a True
-      let qa    = quote a
-      let ?lvl  = ?lvl + 1
-      psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
-      psub  <- invertVal solvable psub (psub^.cod) u SId
-      S.Lam x i qa <$!> go psub (b $$ var) t
+      (qa, a) <- psubst' psub a
+      let domvar = Var' ?lvl a True
+      let ?lvl = ?lvl + 1
+      psub <- pure (psub & domVars %~ (`EDef` domvar) & dom .~ ?lvl)
+      psub <- invertVal solvable psub (psub^.cod) u SId
+      S.Lam x i qa <$!> go psub (b $$ u) t
 
     (Sg x a b, RSProj1 t) ->
       S.Pair <$!> go psub a t <*!> pure (S.Magic Undefined)
@@ -945,6 +937,8 @@ unify (G topt ftopt) (G topt' ftopt') = do
         (RHLocalVar x _ _ , RHLocalVar x' _ _ ) -> unifyEq x x'
         (RHPostulate x _  , RHPostulate x' _  ) -> unifyEq x x'
         (RHExfalso a p    , RHExfalso a' p'   ) -> goJoin a a' >> irr (goJoin p p')
+
+        -- TODO: handle coe-trans here
         (RHCoe a b p t    , RHCoe a' b' p' t' ) -> goJoin a a' >> goJoin b b' >>
                                                    irr (goJoin p p') >> goJoin t t'
 
@@ -960,8 +954,8 @@ unify (G topt ftopt) (G topt' ftopt') = do
           goJoin a a' >> goJoin b b' >> goJoin f f' >> goJoin x x' >>
           goJoin y y' >> irr (goJoin p p')
 
-        (RHPropext p q f g, RHPropext p' q' f' g') ->
-          goJoin p p' >> goJoin q q' >> irr (goJoin f f' >> goJoin g g')
+        -- (RHPropext p q f g, RHPropext p' q' f' g') ->
+        --   goJoin p p' >> goJoin q q' >> irr (goJoin f f' >> goJoin g g')
 
         _ -> throwIO CantUnify
 

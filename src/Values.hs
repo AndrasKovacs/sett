@@ -22,7 +22,7 @@ data RigidHead
   | RHSym Val Val Val Val
   | RHTrans Val Val Val Val Val Val
   | RHAp Val Val Val Val Val Val
-  | RHPropext Val Val Val Val
+  -- | RHPropext Val Val Val Val
   deriving Show
 
 data FlexHead

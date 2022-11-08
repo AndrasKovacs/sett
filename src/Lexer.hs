@@ -285,7 +285,6 @@ anyKw = $(switch [| case _ of
   "sym"     -> eof
   "trans"   -> eof
   "El"      -> eof
-  "propext" -> eof
   "exfalso" -> eof |])
 
 scanIdent :: Parser ()
