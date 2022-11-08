@@ -72,12 +72,21 @@ freshMeta1 bind (G a fa) = do
 insertApps' :: LvlArg => EnvArg => LocalsArg => IO Infer -> IO Infer
 insertApps' act = go =<< act where
   go :: Infer -> IO Infer
-  go (Infer t (G topa topfa)) = forceAllButEq topfa >>= \case -- NOTE: Eq can't compute to implicit Pi!
+  go (Infer t (G topa topfa)) = forceAll topfa >>= \case
+
     V.Pi x Impl a b -> do
       m <- freshMeta (gjoin a)
       let mv = eval m
       let b' = gjoin (b $$ mv)
       go $ Infer (S.App t m Impl) b'
+
+    V.El a -> forceAllWithTraceEq a >>= \case
+      (aTrace, V.Pi x Impl a b) -> do
+        m <- freshMeta (gjoin a)
+        let mv = eval m
+        go $ Infer (S.App t m Impl) (gjoin (V.El (b $$ mv)))
+      (aTrace, _) ->
+        pure $ Infer t (gjoin (V.El aTrace))
     topfa ->
       pure $ Infer t (G topa topfa)
 {-# inline insertApps' #-}
@@ -95,7 +104,7 @@ insertApps act = act >>= \case
 insertAppsUntilName :: LvlArg => EnvArg => LocalsArg => P.Tm -> P.Name -> IO Infer -> IO Infer
 insertAppsUntilName pt name act = go =<< act where
   go :: Infer -> IO Infer
-  go (Infer t (G topa topfa)) = forceAllButEq topfa >>= \case
+  go (Infer t (G topa topfa)) = forceAll topfa >>= \case
 
     topfa@(V.Pi x Impl a b) -> do
       if x == NSpan name then
@@ -105,29 +114,106 @@ insertAppsUntilName pt name act = go =<< act where
         let mv = eval m
         go $! Infer (S.App t m Impl) (gjoin $! (b $$ mv))
 
+    V.El a -> forceAll a >>= \case
+      V.Pi x Impl a b -> do
+        if x == NSpan name then
+          pure (Infer t (gEl (G topa topfa)))
+        else do
+          m <- freshMeta (gjoin a)
+          let mv = eval m
+          go $! Infer (S.App t m Impl) (gjoin $! V.El (b $$ mv))
+      _ -> elabError pt $ NoNamedImplicitArg name
     _ ->
       elabError pt $ NoNamedImplicitArg name
 {-# inline insertAppsUntilName #-}
 
 --------------------------------------------------------------------------------
 
-subtype :: InCxt (P.Tm -> S.Tm -> V.GTy -> V.GTy -> IO ())
-subtype pt t (G a fa) (G b fb) = do
-  fa <- forceAllButEq fa -- NOTE: Eq can't compute to Set or Prop!
-  fb <- forceAllButEq fb
+subtype :: InCxt (P.Tm -> S.Tm -> Val -> V.GTy -> V.GTy -> IO S.Tm)
+subtype pt t ~tv (G a fa) (G b fb) = do
+  fa <- forceAll fa
+  fb <- forceAll fb
   case (fa, fb) of
-    (V.Prop, V.Set ) -> pure ()
-    (V.Set , V.Prop) -> typeIsProp (eval t) >>= \case
-                          ItsProp     -> pure ()
-                          ItsNotProp  -> elabError pt TypeIsNotProp
-                          IPBlockOn{} -> elabError pt TypeIsNotProp
-                          IPMagic{}   -> impossible
-    (fa    , fb    ) -> unify pt (G a fa) (G b fb)
+    (V.Prop, V.Set ) -> pure $ S.El t
+    (V.Set , V.Prop) -> case t of
+      S.El a -> pure a
+      _      -> do m <- eval <$!> freshMeta gProp
+                   unify pt (gjoin tv) (gjoin (V.El m))
+                   pure $! quote m
+    (fa, fb) -> do
+      unify pt (G a fa) (G b fb)
+      pure t
+{-# inline subtype #-}
+
+checkEl :: InCxt (P.Tm -> GTy -> IO S.Tm)
+checkEl topt (G topa ftopa) = do
+  (ftopaTrace, ftopa) <- forceAllWithTraceEq ftopa
+  debug ["checkEl", P.showTm topt, show topt, showTm (quote topa), show ftopa]
+  case (topt, ftopa) of
+
+    (P.Parens _ t _, ftopa) ->
+      checkEl t (G topa ftopaTrace)
+
+    -- go under lambda
+    (P.Lam _ x' inf ma t, V.Pi x i a b)
+      | (case inf of P.AIExpl           -> i == Expl
+                     P.AIImpl _         -> i == Impl
+                     P.AINamedImpl x' _ -> NSpan x' == x && i == Impl) -> do
+
+      (a, va) <- case ma of
+        Just a' -> do
+          a' <- check a' gSet
+          let va' = eval a'
+          unify topt (gjoin va') (gjoin a)
+          pure (a', va')
+        Nothing -> do
+          let qa = quote a
+          pure (qa, a)
+
+      bind x' a (gjoin va) \var ->
+        S.Lam (bindToName x') i a <$!> (checkEl t $! gjoin $! (b $$ var))
+
+    -- insert implicit lambda
+    (t, V.Pi x Impl a b) -> do
+      let qa = quote a
+      insertBinder qa (gjoin a) \var ->
+        S.Lam x Impl qa <$!> (checkEl t $! gjoin $! (b $$ var))
+
+    (P.Pair t u, V.Sg _ x a b) -> do
+      t <- checkEl t (gjoin a)
+      u <- checkEl u (gjoin (b $$~ eval t))
+      pure $ S.Pair t u
+
+    (P.Let _ x ma t u, ftopa) -> do
+
+      (a, va) <- case ma of
+        Just a  -> do
+          a <- check a gSet
+          pure (a, eval a)
+        Nothing -> do
+          a' <- freshMeta gSet
+          let va' = eval a'
+          pure (a', va')
+
+      t <- check t (gjoin va)
+
+      define x a (gjoin va) t (eval t) do
+        u <- checkEl u (G topa ftopa)
+        pure $ S.Let (NSpan x) a t u
+
+    (P.Hole _, ftopa) ->
+      freshMeta (gEl (G topa ftopa))
+
+    (topt, ftopa) -> do
+      Infer t tty <- insertApps' $ infer topt
+      unify topt tty (gEl (G topa ftopaTrace))
+      pure t
+
 
 check :: InCxt (P.Tm -> GTy -> IO S.Tm)
 check topt (G topa ftopa) = do
 
-  (ftopaTrace, ftopa) <- forceAllWithTraceEq ftopa
+  ftopa <- forceAll ftopa
 
   debug ["check", P.showTm topt, showTm (quote topa)]
 
@@ -143,7 +229,9 @@ check topt (G topa ftopa) = do
     (P.Sg _ x a b, V.Prop) -> do
       a <- check a gProp
       bindWithTy x a \_ ->
-        S.Sg (bindToName x) a <$!> check b gProp
+        S.Sg P (bindToName x) a <$!> check b gProp
+
+    (t, V.El a) -> checkEl topt (gjoin a)
 
     -- go under lambda
     (P.Lam _ x' inf ma t, V.Pi x i a b)
@@ -170,9 +258,9 @@ check topt (G topa ftopa) = do
       insertBinder qa (gjoin a) \var ->
         S.Lam x Impl qa <$!> check t (gjoin $! (b $$ var))
 
-    (P.Pair t u, V.Sg x a b) -> do
+    (P.Pair t u, V.Sg sp x a b) -> do
       t <- check t (gjoin a)
-      u <- check u (gjoin (b (eval t)))
+      u <- check u (gjoin (b $$~ eval t))
       pure $ S.Pair t u
 
     (P.Let _ x ma t u, ftopa) -> do
@@ -194,9 +282,8 @@ check topt (G topa ftopa) = do
 
     (topt, ftopa) -> do
       Infer t tty <- insertApps' $ infer topt
-      debug ["subtype", showTm (quote (g1 tty)), showTm (quote (g2 tty)), showTm (quote topa), showTm (quote ftopaTrace)]
-      subtype topt t tty (G topa ftopaTrace)
-      pure t
+      debug ["subtype", showTm (quote (g1 tty)), showTm (quote (g2 tty)), showTm (quote topa), showTm (quote ftopa)]
+      subtype topt t (eval t) tty (G topa ftopa)
 
 
 -- infer
@@ -237,15 +324,20 @@ infer topt = do
 
     P.Sg _ x topa topb -> do
       Infer a (G aty faty) <- infer topa
+      let xn = bindToName x
       bindWithTy x a \_ -> do
         ensureSP topa faty >>= \case
           S -> do
             b <- check topb gSet
-            pure $! Infer (S.Sg (bindToName x) a b) gSet
+            pure $! Infer (S.Sg S xn a b) gSet
           P -> do
             Infer b (G bty fbty) <- infer topb
-            sp <- ensureSP topb fbty
-            pure $! Infer (S.Sg (bindToName x) a b) (gU sp)
+            ensureSP topb fbty >>= \case
+              S -> pure $! Infer (S.Sg S xn (S.El a) b) gSet
+              P -> pure $! Infer (S.Sg P xn a        b) gProp
+
+    P.El _ -> do
+      pure $! Infer S.ElSym (gjoin (V.Prop ==> V.Set))
 
     P.Set _ ->
       pure $ Infer S.Set gSet
@@ -260,7 +352,7 @@ infer topt = do
       pure $ Infer S.Bot gProp
 
     P.Tt _ ->
-      pure $! Infer S.Tt (gjoin V.Top)
+      pure $! Infer S.Tt (gjoin (V.El V.Top))
 
     topt@(P.Eq t u) -> do
       Infer t tty <- infer t
@@ -288,14 +380,18 @@ infer topt = do
           Infer t (G a fa) <- insertAppsUntilName topt x $ infer topt
           pure (Impl, t, a, fa)
 
-      forceAll fa >>= \case
+      forceSet fa >>= \case
 
         V.Pi x _ a b -> do
           u <- check topu (gjoin a)
           pure $! Infer (S.App t u i) (gjoin (b $$~ eval u))
 
+        V.El (V.Pi x _ a b) -> do
+          u <- check topu (gjoin a)
+          pure $! Infer (S.App t u i) (gjoin (V.El (b $$~ eval u)))
+
         fa ->
-          elabError topt $ ExpectedFun a
+          elabError topt $ ExpectedFun a     -- TODO: postpone
 
     -- TODO: infer, postpone if ambiguous S/P
     P.Lam _ x inf ma t -> do
@@ -320,31 +416,35 @@ infer topt = do
 
     P.Proj1 topt _ -> do
       Infer t (G ty fty) <- infer topt
-      forceAll fty >>= \case
-        V.Sg x a b ->
-          pure $! Infer (Proj1 t) (gjoin a)
-        fty@Flex{} -> do
-          a <- freshMeta gSet
-          let va = eval a
-          b <- freshMeta1 a gSet
-          let sg = V.SgPrim nx va b
-          unify topt (G ty fty) (gjoin sg)
-          pure $! Infer (Proj1 t) (gjoin va)
+      forceSet fty >>= \case
+        V.Sg _ x a b        -> pure $! Infer (Proj1 t) (gjoin a)
+        V.El (V.Sg _ x a b) -> pure $! Infer (Proj1 t) (gjoin (V.El a))
+
+        -- fty@Flex{} -> do                       -- universe ambiguity! TODO: postpone
+        --   a <- freshMeta gSet
+        --   let va = eval a
+        --   b <- freshMeta1 a gSet
+        --   let sg = uf -- V.SgPrim nx va b
+        --   unify topt (G ty fty) (gjoin sg)
+        --   pure $! Infer (Proj1 t) (gjoin va)
+
         _ -> do
           elabError topt $! ExpectedSg ty
 
     P.Proj2 topt _ -> do
       Infer t (G ty fty) <- infer topt
-      forceAll fty >>= \case
-        V.Sg x a b ->
-          pure $! Infer (Proj2 t) (gjoin (b (proj1 (eval t))))
-        fty@Flex{} -> do
-          a <- freshMeta gSet
-          let va = eval a
-          b <- freshMeta1 a gSet
-          let sg = V.SgPrim nx va b
-          unify topt (G ty fty) (gjoin sg)
-          pure $! Infer (Proj2 t) (gjoin (b $$ proj1 (eval t)))
+      forceSet fty >>= \case
+        V.Sg _ x a b        -> pure $! Infer (Proj2 t) (gjoin (b $$~ proj1 (eval t)))
+        V.El (V.Sg _ x a b) -> pure $! Infer (Proj2 t) (gjoin (V.El (b $$~ proj1 (eval t))))
+
+        -- fty@Flex{} -> do                      -- universe ambiguity! TODO: popstpone
+        --   a <- freshMeta gSet
+        --   let va = eval a
+        --   b <- freshMeta1 a gSet
+        --   let sg = uf -- V.SgPrim nx va b
+        --   unify topt (G ty fty) (gjoin sg)
+        --   pure $! Infer (Proj2 t) (gjoin (b $$ proj1 (eval t)))
+
         _ -> do
           elabError topt $! ExpectedSg ty
 
@@ -353,11 +453,15 @@ infer topt = do
       Infer t ga <- infer topt
       let ~vt = eval t
 
-      let go a ix = forceAll a >>= \case
-            V.Sg x' a b | fieldName == x' -> do
+      let go a ix = forceSet a >>= \case
+            V.Sg _ x' a b | fieldName == x' -> do
               pure (ix, a)
-            V.Sg x' a b -> do
-              go (b (projField vt ix)) (ix + 1)
+            V.Sg _ x' a b -> do
+              go (b $$~ projField vt ix) (ix + 1)
+            V.El (V.Sg _ x' a b) | fieldName == x' -> do
+              pure (ix, V.El a)
+            V.El (V.Sg _ x' a b) -> do
+              go (V.El (b $$~ projField vt ix)) (ix + 1)
             _ ->
               elabError topt $ NoSuchField x  -- TODO: postpone
 
@@ -382,34 +486,32 @@ infer topt = do
         pure $ Infer (S.Let (NSpan x) a t u) uty
 
     P.Exfalso _ -> do
-      let ty = V.PiI na V.Set \a -> V.Bot ==> a
+      let ty = V.PiI na V.Set \a -> V.El V.Bot ==> a
       pure $! Infer S.ExfalsoSym (gjoin ty)
 
-    -- P.Propext _ -> do
-    --   let ty = V.PiI np V.Prop \p -> V.PiI nq V.Prop \q -> (p ==> q) ==> (q ==> p) ==> eqProp p q
-    --   pure $! Infer S.PropextSym (gjoin ty)
-
     P.Coe _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b -> eqType a b ==> a ==> b
+      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b -> V.El (eqSet a b) ==> a ==> b
       pure $! Infer S.CoeSym (gjoin ty)
 
     P.Refl _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI nx a \x -> eq a x x
+      let ty = V.El $ V.PiI na V.Set \a -> V.PiI nx a \x -> eq a x x
       pure $! Infer S.ReflSym (gjoin ty)
 
     P.Sym _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI ny a \x -> V.PiI ny a \y -> V.PiE np (eq a x y) \p -> eq a y x
+      let ty = V.El $ V.PiI na V.Set \a -> V.PiI ny a \x -> V.PiI ny a \y -> V.PiE np (V.El (eq a x y)) \p -> eq a y x
       pure $! Infer S.SymSym (gjoin ty)
 
     P.Trans _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI nx a \x -> V.PiI ny a \y -> V.PiI nz a \z ->
-               V.PiE np (eq a x y) \p -> V.PiE nq (eq a y z) \q ->
+      let ty = V.El $
+               V.PiI na V.Set \a -> V.PiI nx a \x -> V.PiI ny a \y -> V.PiI nz a \z ->
+               V.PiE np (V.El (eq a x y)) \p -> V.PiE nq (V.El (eq a y z)) \q ->
                eq a x z
       pure $! Infer S.TransSym (gjoin ty)
 
     P.Ap _ -> do
-      let ty = V.PiI na V.Set \a -> V.PiI nb V.Set \b -> V.PiE nf (a ==> b) \f -> V.PiI nx a \x ->
-               V.PiI ny a \y -> V.PiE np (eq a x y) \p ->
+      let ty = V.El $
+               V.PiI na V.Set \a -> V.PiI nb V.Set \b -> V.PiE nf (a ==> b) \f -> V.PiI nx a \x ->
+               V.PiI ny a \y -> V.PiE np (V.El (eq a x y)) \p ->
                eq b (f `appE` x) (f `appE` y)
       pure $! Infer S.ApSym (gjoin ty)
 
@@ -427,6 +529,7 @@ inferTop = \case
 
   P.Define x ma t top -> initializeCxt do
     (a, va) <- case ma of
+
       Nothing -> do
         a' <- freshMeta gSet
         let va' = eval a'
@@ -434,6 +537,7 @@ inferTop = \case
       Just a -> do
         a <- check a gSet
         pure (a, eval a)
+
     t <- check t (gjoin va)
 
     frz <- freezeMetas

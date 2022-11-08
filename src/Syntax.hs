@@ -70,7 +70,7 @@ data Tm
   | Proj2 Tm
 
   | Pi Name Icit Ty Ty
-  | Sg Name Ty Ty
+  | Sg SP Name Ty Ty
 
   | HidePostulate Lvl ~(Hide V.Ty)
   | InsertedMeta MetaVar Locals
@@ -90,7 +90,7 @@ data Tm
   | TransSym
   | ApSym
   | ExfalsoSym
-  -- | PropextSym
+  | ElSym
 
   | Magic Magic
   deriving Show
@@ -106,7 +106,7 @@ pattern Postulate x a <- HidePostulate x (coerce -> a) where
 {-# complete
   LocalVar, TopDef, Lam, App, Pair, ProjField, Proj1, Proj2, Pi, Sg, Postulate,
   InsertedMeta, Meta, Let, Set, Prop, Top, Tt, Bot, EqSym, CoeSym, ReflSym,
-  SymSym, TransSym, ApSym, ExfalsoSym, Magic
+  SymSym, TransSym, ApSym, ExfalsoSym, Magic, ElSym
   #-}
 
 pattern AppE t u = App t u Expl
@@ -118,5 +118,5 @@ pattern Refl a t          = ReflSym `AppI`  a `AppI`  t
 pattern Coe a b p t       = CoeSym `AppI`  a `AppI`  b `AppE`  p `AppE` t
 pattern Sym a x y p       = SymSym `AppI`  a `AppI`  x `AppI`  y `AppE`  p
 pattern Trans a x y z p q = TransSym `AppI`  a `AppI`  x `AppI`  y `AppI` z  `AppE` p `AppE` q
-pattern Ap a b f x y p    = ApSym  `AppI`  a `AppI`  b `AppE`  f `AppI`  x `AppI`  y `AppE`  p
--- pattern Propext p q f g   = PropextSym `AppI` p `AppI` q `AppE` f `AppE` g
+pattern Ap a b f x y p    = ApSym  `AppI` a `AppI`  b `AppE`  f `AppI`  x `AppI`  y `AppE`  p
+pattern El a              = ElSym `AppE` a

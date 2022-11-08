@@ -87,9 +87,9 @@ goTm prec ns t = go prec ns t where
           | x /= "_"  = piBind ns x i a . goPi (x:ns) b
         goPi ns b = (" → "++) . go pip ns b
 
-    Sg NUnused a b ->
+    Sg _ NUnused a b ->
       par p sigmap $ go eqp ns a . (" × "++) . go sigmap ("_":ns) b
-    Sg (show -> x) a b ->
+    Sg _ (show -> x) a b ->
       par p sigmap $ sgBind ns x a . (" × "++) . go sigmap (x:ns) b
 
     Postulate x _ -> runIO do
@@ -119,7 +119,7 @@ goTm prec ns t = go prec ns t where
     TransSym   -> ("trans"++)
     ApSym      -> ("ap"++)
     ExfalsoSym -> ("exfalso"++)
-    -- PropextSym -> ("propext"++)
+    ElSym      -> ("El"++)
 
     Magic m -> case m of
       Undefined  -> ("undefined"++)

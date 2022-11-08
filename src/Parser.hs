@@ -128,6 +128,7 @@ atom =
   branch $(kw "coe")     (pure . Coe)          $
   branch $(kw "trans")   (pure . Trans)        $
   branch $(kw "sym")     (pure . Sym)          $
+  branch $(kw "El")      (pure . El)           $
   empty
 
 parens :: Span -> Parser Tm

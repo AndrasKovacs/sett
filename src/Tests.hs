@@ -129,8 +129,8 @@ t10 = justElab $ unlines [
   "  tt",
 
   "test : (x y : ⊤) → _ = y → x = y := λ x y p. p"
-
   ]
+
 
 tFreeze :: IO ()
 tFreeze = justElab $ unlines [
@@ -155,7 +155,6 @@ t12 = justElab $ unlines [
   "  :=  λ A x y p. p"
   ]
 
--- TODO: TraceId unification
 t13 :: IO ()
 t13 = justElab $ unlines [
   -- "foo : Set = Set → Set = Set",
@@ -173,9 +172,9 @@ tCoeCoe3 = justElab $ unlines [
   "  := λ A x y. x = y",
   "",
   "testcoecoe3 : {A1 A2 C1 C2 : Set} {f : A1 × A2} {r : (A1 × A2) = (C1 × C2)}",
-  "  -> Eq (C1 × C2) (coe {A1 × A2} {C1 × C2} r f) (coe {A1} {C1} r.1 f.1, coe {A2} {C2} _ f.2)",
-  "  := \\{A1} {A2} {C1} {C2} {f} {r}. refl {_} {coe {A1 × A2} {C1 × C2} r f}",
-  "foo :=Set"
+  "  -> Eq (C1 × C2) (coe {A1 × A2} {C1 × C2} r f)",
+  "                  (coe {A1} {C1} r.1 f.1, coe {A2} {C2} (r.2 f.1) f.2)",
+  "  := λ {A1} {A2} {C1} {C2} {f} {r}. refl {C1 × C2} {coe {A1 × A2} {C1 × C2} r f}"
   ]
 
 t14 :: IO ()
@@ -198,26 +197,29 @@ t14 = justElab $ unlines [
 
   "trp : {A : Set}(B : A → Prop){x y} → x = y → B x → B y := λ B p bx. coep (ap B p) bx",
 
-  "testsymeq : {A : Set} {x y : A} -> x = y -> (x = x) = (y = x)",
+  "testsymeq : {A : Set} {x y : A} → x = y → (x = x) = (y = x)",
   "          := λ {x:=x} p. ap (λ y. y = x) p",
 
-  "testsym : {A : Set} {x y : A} -> x = y -> y = x",
-  "     := λ p. coep (testsymeq p) refl"
+  "testsym : {A : Set} {x y : A} → x = y → y = x",
+  "     := λ p. coep (testsymeq p) refl",
 
-  -- "testcoerefl : {A : Set} {x : A} {p : A = A} -> coe {A} {A} p x = x",
-  -- "            := refl",
+  "testcoerefl : {A : Set} {x : A} {p : A = A} -> coe {A} {A} p x = x",
+  "            := refl",
 
-  -- "testcoecoe : {A B C : Set} {x : A} {p : A = B} {q : B = C}",
-  -- "              -> coe {B} {C} q (coe {A} {B} p x) = coe {A} {C} (trans p q) x",
-  -- "           := refl",
+  "testcoecoe : {A B C : Set} {x : A} {p : A = B} {q : B = C}",
+  "              -> coe {B} {C} q (coe {A} {B} p x) = coe {A} {C} (trans p q) x",
+  "           := refl",
 
-  -- "testfunext : {A B : Set} {f g : A -> B} -> f = g -> ((a : A) -> f a = g a)",
-  -- "        := \\p. p",
+  "testfunext : {A B : Set} {f g : A -> B} -> f = g -> ((a : A) -> f a = g a)",
+  "        := \\p. p",
 
-  -- "testcoecoe2 : {A1 A2 B C1 C2 : Set} {f : A1 -> A2} {p : (A1 -> A2) = B} {q : B =",
-  -- "              (C1 -> C2)} {r : (A1 -> A2) = (C1 -> C2)}",
-  -- "            -> coe q (coe p f) = coe r f",
-  -- "            := refl"
+  "testcoecoe2 : (A1 A2 C1 C2 : Set)(f : A1 -> A2)(r : (A1 -> A2) = (C1 -> C2))",
+  "              → (C1 → C2) := λ A1 A2 C1 C2 f r. coe r f",
+
+  "testcoecoe2 : {A1 A2 B C1 C2 : Set} {f : A1 -> A2} {p : (A1 -> A2) = B} {q : B =",
+  "              (C1 -> C2)} {r : (A1 -> A2) = (C1 -> C2)}",
+  "            -> coe q (coe p f) = coe r f",
+  "            := refl"
 
   ]
 
@@ -225,6 +227,10 @@ t14 = justElab $ unlines [
 t15 :: IO ()
 t15 = justElab $ unlines [
   "propext : {P Q : Prop} → (P → Q) → (Q → P) → P = Q := λ f g. (f,g)",
-  "idl : {A : Prop} → (⊤ × A) = A := (λ y. y.2, λ x. (tt, x))",
-  "idr : {A : Prop} → (A × ⊤) = A := (λ y. y.1, λ x. (x, tt))"
+  "idl   : {A : Prop} → (⊤ × A) = A := (λ y. y.2, λ x. (tt, x))",
+  "idr   : {A : Prop} → (A × ⊤) = A := (λ y. y.1, λ x. (x, tt))",
+  "swapP : {A B : Prop} → A × B → B × A := λ ab. (ab.2, ab.1)",
+  "comm  : {A B : Prop} → (A × B) = (B × A) := (swapP, swapP)",
+  "ass   : {A B C : Prop} → (A × B × C) = ((A × B) × C) :=",
+  "         (λ abc. ((abc.1, abc.2.1), abc.2.2), λ abc. (abc.1.1, abc.1.2, abc.2))"
   ]

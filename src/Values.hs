@@ -22,7 +22,6 @@ data RigidHead
   | RHSym Val Val Val Val
   | RHTrans Val Val Val Val Val Val
   | RHAp Val Val Val Val Val Val
-  -- | RHPropext Val Val Val Val
   deriving Show
 
 data FlexHead
@@ -136,11 +135,12 @@ data Val
 
   -- Canonical values
   | Set
+  | El Val
 
   | Pi Name Icit Ty Closure
   | Lam Name Icit Ty Closure
 
-  | SgPrim Name Ty Closure
+  | Sg SP Name Ty Closure
   | Pair Val Val
 
   | Prop
@@ -165,7 +165,8 @@ pattern LamI x a t = Lam x Impl a (Cl t)
 
 pattern PiE  x a b = Pi x Expl a (Cl b)
 pattern PiI  x a b = Pi x Impl a (Cl b)
-pattern Sg   x a b = SgPrim x a (Cl b)
+pattern SgP  x a b = Sg P x a (Cl b)
+pattern SpS  x a b = Sg S x a (Cl b)
 
 pattern VUndefined  = Magic Undefined
 pattern VNonlinear  = Magic Nonlinear
@@ -175,14 +176,22 @@ infixr 1 ==>
 (==>) :: Val -> Val -> Val
 (==>) a b = PiE NUnused a \_ -> b
 
-prod :: Val -> Val -> Val
-prod a b = Sg NUnused a \_ -> b
+andP :: Val -> Val -> Val
+andP a b = SgP NUnused a \_ -> b
 
 gSet  = gjoin Set
 gProp = gjoin Prop
 
 gU S = gSet
 gU P = gProp
+
+gEl (G a fa) = G (El a) (El fa)
+{-# inline gEl #-}
+
+elSP :: SP -> Val -> Val
+elSP S a = a
+elSP P a = El a
+{-# inline elSP #-}
 
 --------------------------------------------------------------------------------
 

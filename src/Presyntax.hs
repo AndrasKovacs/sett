@@ -37,6 +37,7 @@ data Tm
   | Tt   Span
   | Bot  Span
   | Parens Pos Tm Pos
+  | El Span
 
   | Eq Tm Tm
   | Exfalso Span
@@ -45,7 +46,7 @@ data Tm
   | Sym Span
   | Trans Span
   | Ap Span
-  -- | Propext Span
+
 
   | Hole Span
   deriving Show
@@ -79,6 +80,7 @@ span t = Span (left t) (right t) where
     Ap (Span l _)      -> l
     Parens l _ _       -> l
     Hole    (Span l _) -> l
+    El (Span l _)      -> l
 
   right :: Tm -> Pos
   right = \case
@@ -108,6 +110,7 @@ span t = Span (left t) (right t) where
     Ap (Span _ r)             -> r
     Hole (Span l r)           -> r
     Parens _ t r              -> r
+    El (Span _ r)             -> r
 
 showTm :: Tm -> String
 showTm t = spanToString (Presyntax.span t)

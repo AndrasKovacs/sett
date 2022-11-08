@@ -69,10 +69,6 @@ data PartialSub = PSub {
 makeFields ''PartialSub
 
 
--- showPSub :: PartialSub -> String
--- showPSub (PSub domvars occ dom cod sub allowpruning) = _
-
-
 -- | Evaluate something in the domain of the `PartialSub`.
 evalInDom :: PartialSub -> S.Tm -> Val
 evalInDom psub t = let ?env = psub^.domVars; ?lvl = psub^.dom in eval t
@@ -197,12 +193,12 @@ approxOccurs occ t = do
     S.ProjField t _ _  -> go t
     S.Proj1 t          -> go t
     S.Proj2 t          -> go t
-    S.Pi x i a b       -> go a >>  go b
-    S.Sg x a b         -> go a >>  go b
+    S.Pi _ _ a b       -> go a >> go b
+    S.Sg _ _ a b       -> go a >> go b
     S.HidePostulate{}  -> pure ()
     S.InsertedMeta m _ -> goMeta m
     S.Meta m           -> goMeta m
-    S.Let x a t u      -> go a >> go t >> go u
+    S.Let _ a t u      -> go a >> go t >> go u
     S.Set{}            -> pure ()
     S.Prop{}           -> pure ()
     S.Top{}            -> pure ()
@@ -215,7 +211,7 @@ approxOccurs occ t = do
     S.TransSym{}       -> pure ()
     S.ApSym{}          -> pure ()
     S.ExfalsoSym{}     -> pure ()
-    -- S.PropextSym{}     -> pure ()
+    S.ElSym            -> pure ()
     S.Magic{}          -> pure ()
 
 psubstSp :: PartialSub -> S.Tm -> Spine -> IO S.Tm
@@ -261,7 +257,6 @@ psubst psub topt = do
           RHSym a x y p        -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
           RHTrans a x y z p q  -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
           RHAp a b f x y p     -> S.Ap <$!> go a <*!> go b <*!> go f <*!> go x <*!> go y <*!> go p
-          -- RHPropext p q f g    -> S.Propext <$!> go p <*!> go q <*!> go f <*!> go g
         goSp h sp
 
       goUnfold h sp = do
@@ -307,8 +302,9 @@ psubst psub topt = do
     Set                -> pure S.Set
     Pi x i a b         -> goBind a b (S.Pi x i)
     Lam x i a t        -> goBind a t (S.Lam x i)
-    SgPrim x a b       -> goBind a b (S.Sg x)
+    Sg sp x a b        -> goBind (elSP sp a) b (S.Sg sp x)
     Pair t u           -> S.Pair <$!> go t <*!> go u
+    El a               -> S.El <$!> go a
     Prop               -> pure S.Prop
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
@@ -345,12 +341,21 @@ metaExpansion' a sp = do
     (Pi x i a b, RSApp t _ sp) -> do
       let qa = quote a
       bind x a qa \var -> S.Lam x i qa <$!> go (b $$ var) sp
-    (Sg x a b, RSProj1 sp) -> do
+    (El (Pi x i a b), RSApp t _ sp) -> do
+      let qa = quote a
+      bind x a qa \var -> S.Lam x i qa <$!> go (El (b $$ var)) sp
+    (Sg _ x a b, RSProj1 sp) -> do
       fst <- go a sp
-      S.Pair fst <$!> freshMeta (gjoin (b (eval fst)))
-    (Sg x a b, RSProj2 sp) -> do
+      S.Pair fst <$!> freshMeta (gjoin (b $$~ eval fst))
+    (Sg _ x a b, RSProj2 sp) -> do
       fst <- freshMeta (gjoin a)
-      S.Pair fst <$!> go (b (eval fst)) sp
+      S.Pair fst <$!> go (b $$~ eval fst) sp
+    (El (Sg _ x a b), RSProj1 sp) -> do
+      fst <- go (El a) sp
+      S.Pair fst <$!> freshMeta (gjoin (El (b $$~ eval fst)))
+    (El (Sg _ x a b), RSProj2 sp) -> do
+      fst <- freshMeta (gjoin (El a))
+      S.Pair fst <$!> go (El (b $$~ eval fst)) sp
     (a, RSProjField _  _  0 sp) ->
       go a (RSProj1 sp)
     (a, RSProjField tv ta n sp) ->
@@ -439,58 +444,98 @@ mkPruneSp psub = \case
   RSApp t i sp -> PApp <$!> mkPruneVal psub t <*!> mkPruneSp psub sp
   _            -> impossible
 
-prArgTy :: LvlArg => PruneVal -> Ty -> Ty
-prArgTy p a = case (p, runIO (forceSet a)) of
+prArgTyEl :: LvlArg => PruneVal -> Ty -> Ty
+prArgTyEl p a = case (p, runIO (forceAll a)) of
   (PKeep      , a              ) -> a
   (PDrop      , a              ) -> Top
-  (PLam p     , Pi x i a b     ) -> Pi x i a $ Cl \x -> prArgTy p (b $$ x)
-  (PPair p1 p2, Sg x a b       ) -> Sg x (prArgTy p1 a) \x ->
-                                    prArgTy p2 (b (fromPrArg p1 a x))
+  (PLam p     , Pi x i a b     ) -> Pi x i a $ Cl \x -> prArgTyEl p (b $$~ x)
+  (PPair p1 p2, Sg _ x a b     ) -> Sg S x (prArgTyEl p1 a) $ Cl \x ->
+                                    prArgTyEl p2 (b $$~ fromPrArgEl p1 a x)
   (_          , VUndefined     ) -> VUndefined
   _                              -> impossible
 
+prArgTy :: LvlArg => PruneVal -> Ty -> Ty
+prArgTy p a = case (p, runIO (forceAll a)) of
+  (PKeep      , a              ) -> a
+  (PDrop      , a              ) -> El Top
+  (p          , El a           ) -> El (prArgTyEl p a)
+  (PLam p     , Pi x i a b     ) -> Pi x i a $ Cl \x -> prArgTy p (b $$~ x)
+  (PPair p1 p2, Sg _ x a b     ) -> Sg S x (prArgTy p1 a) $ Cl \x ->
+                                    prArgTy p2 (b $$~ fromPrArg p1 a x)
+  (_          , VUndefined     ) -> VUndefined
+  _                              -> impossible
 
-toPrArg :: LvlArg => PruneVal -> Ty -> Val -> Val
-toPrArg p a t = case (p, runIO (forceSet a)) of
+toPrArgEl :: LvlArg => PruneVal -> Ty -> Val -> Val
+toPrArgEl p a t = case (p, runIO (forceAll a)) of
   (PKeep      , a              ) -> t
   (PDrop      , a              ) -> Tt
+  (PLam p     , Pi x i a b     ) -> Lam x i a $ Cl \x -> toPrArgEl p (b $$~ x) (app t x i)
+  (PPair p1 p2, Sg _ x a b     ) -> let t1 = proj1 t; t2 = proj2 t in
+                                    Pair (toPrArgEl p1 a t1) (toPrArgEl p2 (b $$ t1) t2)
+  (_          , VUndefined     ) -> VUndefined
+  _                              -> impossible
+
+toPrArg :: LvlArg => PruneVal -> Ty -> Val -> Val
+toPrArg p a t = case (p, runIO (forceAll a)) of
+  (PKeep      , a              ) -> t
+  (PDrop      , a              ) -> Tt
+  (p          , El a           ) -> toPrArgEl p a t
   (PLam p     , Pi x i a b     ) -> Lam x i a $ Cl \x -> toPrArg p (b $$ x) (app t x i)
-  (PPair p1 p2, Sg x a b       ) -> let t1 = proj1 t; t2 = proj2 t in
-                                    Pair (toPrArg p1 a t1) (toPrArg p2 (b t1) t2)
+  (PPair p1 p2, Sg _ x a b     ) -> let t1 = proj1 t; t2 = proj2 t in
+                                    Pair (toPrArg p1 a t1) (toPrArg p2 (b $$ t1) t2)
+  (_          , VUndefined     ) -> VUndefined
+  _                              -> impossible
+
+fromPrArgEl :: LvlArg => PruneVal -> Ty -> Val -> Val
+fromPrArgEl p a t = case (p, runIO (forceAll a)) of
+  (PKeep      , a              ) -> t
+  (PDrop      , a              ) -> VUndefined
+  (PLam p     , Pi x i a b     ) -> Lam x i a $ Cl \x -> fromPrArgEl p (b $$ x) (app t x i)
+  (PPair p1 p2, Sg _ x a b     ) -> let t1 = proj1 t; t2 = proj2 t; fst = fromPrArgEl p1 a t1 in
+                                    Pair fst (fromPrArgEl p2 (b $$ fst) t2)
   (_          , VUndefined     ) -> VUndefined
   _                              -> impossible
 
 fromPrArg :: LvlArg => PruneVal -> Ty -> Val -> Val
-fromPrArg p a t = case (p, runIO (forceSet a)) of
+fromPrArg p a t = case (p, runIO (forceAll a)) of
   (PKeep      , a              ) -> t
   (PDrop      , a              ) -> VUndefined
-  (PLam p     , Pi x i a b     ) -> Lam x i a $ Cl \x -> fromPrArg p (b $$ x) (app t x i)
-  (PPair p1 p2, Sg x a b       ) -> let t1 = proj1 t; t2 = proj2 t; fst = fromPrArg p1 a t1 in
-                                    Pair fst (fromPrArg p2 (b fst) t2)
+  (p          , El a           ) -> fromPrArgEl p a t
+  (PLam p     , Pi x i a b     ) -> Lam x i a $ Cl \x -> fromPrArg p (b $$~ x) (app t x i)
+  (PPair p1 p2, Sg _ x a b     ) -> let t1 = proj1 t; t2 = proj2 t; fst = fromPrArg p1 a t1 in
+                                    Pair fst (fromPrArg p2 (b $$ fst) t2)
   (_          , VUndefined     ) -> VUndefined
   _                              -> impossible
 
+prTyEl :: LvlArg => PruneSp -> Ty -> Ty
+prTyEl p a = case (p, runIO (forceAll a)) of
+  (PId, a)                -> a
+  (PApp p sp, Pi x i a b) -> Pi x i (prArgTy p a) $ Cl \x -> prTyEl sp (b $$~ fromPrArg p a x)
+  (_, VUndefined)         -> VUndefined
+  _                       -> impossible
+
 prTy :: LvlArg => PruneSp -> Ty -> Ty
-prTy p a = case (p, runIO (forceSet a)) of
-  (PId, a) ->
-    a
-  (PApp p sp, Pi x i a b) ->
-    Pi x i (prArgTy p a) $ Cl \x -> prTy sp (b $$ fromPrArg p a x)
-  (_, VUndefined) ->
-    VUndefined
-  _ ->
-    impossible
+prTy p a = case (p, runIO (forceAll a)) of
+  (PId, a)                -> a
+  (PApp p sp, Pi x i a b) -> Pi x i (prArgTy p a) $ Cl \x -> prTy sp (b $$~ fromPrArg p a x)
+  (p, El a)               -> El (prTyEl p a)
+  (_, VUndefined)         -> VUndefined
+  _                       -> impossible
+
+fromPrTyEl :: LvlArg => PruneSp -> Ty -> Val -> Val
+fromPrTyEl p a t = case (p, runIO (forceAll a)) of
+  (PId, a)                -> t
+  (PApp p sp, Pi x i a b) -> Lam x i a $ Cl \x -> fromPrTyEl sp (b $$~ x) (app t (toPrArg p a x) i)
+  (_, VUndefined)         -> VUndefined
+  _                       -> impossible
 
 fromPrTy :: LvlArg => PruneSp -> Ty -> Val -> Val
-fromPrTy p a t = case (p, runIO (forceSet a)) of
-  (PId, a) ->
-    t
-  (PApp p sp, Pi x i a b) ->
-    Lam x i a $ Cl \x -> fromPrTy sp (b $$ x) (app t (toPrArg p a x) i)
-  (_, VUndefined) ->
-    VUndefined
-  _ ->
-    impossible
+fromPrTy p a t = case (p, runIO (forceAll a)) of
+  (PId, a)                -> t
+  (PApp p sp, Pi x i a b) -> Lam x i a $ Cl \x -> fromPrTy sp (b $$~ x) (app t (toPrArg p a x) i)
+  (p, El a)               -> fromPrTyEl p a t
+  (_, VUndefined)         -> VUndefined
+  _                       -> impossible
 
 prTy0     = let ?lvl = 0 in prTy
 fromPrTy0 = let ?lvl = 0 in fromPrTy
@@ -542,7 +587,6 @@ partialQuote t = do
       RHPostulate x a     -> pure $ S.Postulate x a
       RHCoe a b p t       -> S.Coe <$!> go a <*!> go b <*!> go p <*!> go t
       RHExfalso a t       -> S.Exfalso <$!> go a <*!> go t
-      -- RHPropext p q f g   -> S.Propext <$!> go p <*!> go q <*!> go f <*!> go g
       RHRefl a t          -> S.Refl <$!> go a <*!> go t
       RHSym a x y p       -> S.Sym <$!> go a <*!> go x <*!> go y <*!> go p
       RHTrans a x y z p q -> S.Trans <$!> go a <*!> go x <*!> go y <*!> go z <*!> go p <*!> go q
@@ -563,7 +607,8 @@ partialQuote t = do
     TraceEq a t u v    -> go v
     Pair t u           -> S.Pair <$!> go t <*!> go u
     Lam x i a t        -> S.Lam x i <$!> go a <*!> goBind a x t
-    SgPrim x a b       -> S.Sg x <$!> go a <*!> goBind a x b
+    El a               -> S.El <$!> go a
+    Sg sp x a b        -> S.Sg sp x <$!> go a <*!> goBind (elSP sp a) x b
     Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a x b
     Set                -> pure S.Set
     Prop               -> pure S.Prop
@@ -594,11 +639,11 @@ merge :: LvlArg => Val -> Val -> IO S.Tm
 merge topt topu = do
 
   let guardIrr a act = act >>= \case
-        S.Magic Nonlinear -> typeIsProp a >>= \case
-          ItsNotProp  -> pure $ S.Magic Nonlinear
-          ItsProp     -> pure $! quote topt -- TODO: choose the more defined side?
-          IPBlockOn{} -> pure $ S.Magic Nonlinear
-          IPMagic{}   -> impossible
+        S.Magic Nonlinear -> case setRelevance a of
+          RRel       -> pure $ S.Magic Nonlinear
+          RIrr       -> pure $! quote topt -- TODO: choose the more defined side?
+          RBlockOn{} -> pure $ S.Magic Nonlinear
+          RMagic{}   -> impossible
         t -> pure t
 
   case (topt, topu) of
@@ -737,16 +782,37 @@ solveTopSp psub ls a sp rhs rhsty = do
       psub  <- invertVal 0 psub (psub^.cod) u SId
       S.Lam x i qa <$!> go psub ls (b $$ var) t
 
-    (Sg x a b, RSProj1 t) -> do
+    (El (Pi x i a b), RSApp u _ t) -> do
+      let var   = Var' ?lvl a True
+      let qa    = quote a
+      let ?lvl  = ?lvl + 1
+      psub  <- pure (psub & domVars %~ (`EDef` var) & dom .~ ?lvl)
+      ls    <- pure (S.LBind ls x qa)
+      psub  <- invertVal 0 psub (psub^.cod) u SId
+      S.Lam x i qa <$!> go psub ls (El (b $$ var)) t
+
+    (Sg _ x a b, RSProj1 t) -> do
       fst <- go psub ls a t
       let ~vfst = eval fst
-      snd <- freshMeta (gjoin (b vfst))
+      snd <- freshMeta (gjoin (b $$~ vfst))
       pure $ S.Pair fst snd
 
-    (Sg x a b, RSProj2 t) -> do
+    (Sg _ x a b, RSProj2 t) -> do
       fst <- freshMeta (gjoin a)
       let ~vfst = eval fst
-      snd <- go psub ls (b vfst) t
+      snd <- go psub ls (b $$~ vfst) t
+      pure $ S.Pair fst snd
+
+    (El (Sg _ x a b), RSProj1 t) -> do
+      fst <- go psub ls (El a) t
+      let ~vfst = eval fst
+      snd <- freshMeta (gjoin (El (b $$~ vfst)))
+      pure $ S.Pair fst snd
+
+    (El (Sg _ x a b), RSProj2 t) -> do
+      fst <- freshMeta (gjoin (El a))
+      let ~vfst = eval fst
+      snd <- go psub ls (El (b $$~ vfst)) t
       pure $ S.Pair fst snd
 
     -- TODO: do it properly
@@ -781,12 +847,27 @@ solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
       psub <- invertVal solvable psub (psub^.cod) u SId
       S.Lam x i qa <$!> go psub (b $$ u) t
 
-    (Sg x a b, RSProj1 t) ->
+    (El (Pi x i a b), RSApp u _ t) -> do
+      (qa, a) <- psubst' psub a
+      let domvar = Var' ?lvl a True
+      let ?lvl = ?lvl + 1
+      psub <- pure (psub & domVars %~ (`EDef` domvar) & dom .~ ?lvl)
+      psub <- invertVal solvable psub (psub^.cod) u SId
+      S.Lam x i qa <$!> go psub (El (b $$ u)) t
+
+    (Sg _ x a b, RSProj1 t) ->
       S.Pair <$!> go psub a t <*!> pure (S.Magic Undefined)
 
-    (Sg x a b, RSProj2 t) ->
-      S.Pair (S.Magic Undefined) <$!> go psub (b (Magic Undefined)) t
+    (Sg _ x a b, RSProj2 t) ->
+      S.Pair (S.Magic Undefined) <$!> go psub (b $$ Magic Undefined) t
 
+    (El (Sg _ x a b), RSProj1 t) ->
+      S.Pair <$!> go psub (El a) t <*!> pure (S.Magic Undefined)
+
+    (El (Sg _ x a b), RSProj2 t) ->
+      S.Pair (S.Magic Undefined) <$!> go psub (El (b $$ Magic Undefined)) t
+
+    -- TODO: do properly
     (a, RSProjField tv tty n t) ->
       case n of
         0 -> go psub a (RSProj1 t)
@@ -829,12 +910,11 @@ solve x sp rhs rhsty = do
           -- clean up unnecessary eta-expansion metas
           (do ES.resetMetaCxt metaCxtSize)
 
-
-  typeIsProp rhsty >>= \case
-    ItsNotProp  -> goRelevant
-    IPBlockOn{} -> goRelevant -- TODO: postpone
-    ItsProp     -> goIrrelevant
-    IPMagic{}   -> impossible
+  case setRelevance rhsty of
+    RRel       -> goRelevant
+    RBlockOn{} -> goRelevant -- TODO: postpone
+    RIrr       -> goIrrelevant
+    RMagic{}   -> impossible
 
 solveEtaShort :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solveEtaShort m sp rhs rhsty =
@@ -925,11 +1005,11 @@ unify (G topt ftopt) (G topt' ftopt') = do
       {-# inline goBind #-}
 
       withRelevance :: Ty -> (UnifyStateArg => IO ()) -> IO ()
-      withRelevance a act = typeIsProp a >>= \case
-        ItsNotProp   -> act
-        IPBlockOn{}  -> act -- TODO: postpone
-        IPMagic{}    -> impossible
-        ItsProp      -> irr act
+      withRelevance a act = case setRelevance a of
+        RRel       -> act
+        RBlockOn{} -> act -- TODO: postpone
+        RMagic{}   -> impossible
+        RIrr       -> irr act
       {-# inline withRelevance #-}
 
       goRH :: UnifyStateArg => RigidHead -> RigidHead -> IO ()
@@ -953,9 +1033,6 @@ unify (G topt ftopt) (G topt' ftopt') = do
         (RHAp a b f x y p, RHAp a' b' f' x' y' p') ->
           goJoin a a' >> goJoin b b' >> goJoin f f' >> goJoin x x' >>
           goJoin y y' >> irr (goJoin p p')
-
-        -- (RHPropext p q f g, RHPropext p' q' f' g') ->
-        --   goJoin p p' >> goJoin q q' >> irr (goJoin f f' >> goJoin g g')
 
         _ -> throwIO CantUnify
 
@@ -1006,7 +1083,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
   ftopt' <- forceUS ftopt'
 
   debug ["unify", showTm' (quote ftopt), showTm' (quote ftopt')]
-  -- debug ["unifyV ", show ftopt, show ftopt']
+  -- debug ["unifyNofrc", showTm' (quote topt), showTm' (quote topt')]
   -- debug ["unifyF", showTm' (quote ftopt), showTm' (quote ftopt'), show ?unifyState]
 
   case (ftopt, ftopt') of
@@ -1015,7 +1092,9 @@ unify (G topt ftopt) (G topt' ftopt') = do
     ------------------------------------------------------------
 
     (Pi x i a b , Pi x' i' a' b' ) -> unifyEq i i' >> goJoin a a' >> goBind a x b b'
-    (Sg x a b   , Sg x' a' b'    ) -> goJoin a a' >> goBind a x (Cl b) (Cl b')
+    (Sg sp x a b, Sg _ x' a' b'  ) -> goJoin a a' >> goBind (elSP sp a) x b b'
+    (El a       , El a'          ) -> do debug ["unifyel", showTm' (quote a), showTm' (quote a')]
+                                         goJoin a a'
     (Set        , Set            ) -> pure ()
     (Prop       , Prop           ) -> pure ()
     (Top        , Top            ) -> pure ()

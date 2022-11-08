@@ -5,7 +5,6 @@ import IO
 import qualified Data.Array.Dynamic.L as ADL
 import qualified Data.Ref.F           as RF
 import qualified Data.Ref.L           as RL
--- import qualified Data.ByteString      as B
 
 import Common
 import Values
@@ -13,8 +12,6 @@ import NameTable
 import qualified Values as V
 import qualified Syntax as S
 import qualified Presyntax as P
-
-
 
 -- Metacontext
 --------------------------------------------------------------------------------
