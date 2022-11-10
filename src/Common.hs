@@ -8,30 +8,48 @@ module Common (
   ) where
 
 
-import Control.Monad
 import Control.Exception
-import Data.List
-import GHC.Exts
+import Control.Monad
 import Data.Bits
 import Data.Flat
+import Data.List
 import Data.Time.Clock
-import GHC.Stack
 import Debug.Trace
+import GHC.Exts
+import GHC.Stack
+import IO
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
+import qualified Data.Ref.L as RL
 import qualified FlatParse.Stateful as FP
 
--- Debug printing, toggled by "debug" cabal flag
+
+-- Debug printing, toggled by "debug" CPP flag or by a runtime toggle
 --------------------------------------------------------------------------------
+
+debugToggle :: RL.Ref Bool
+debugToggle = runIO $ RL.new True
+{-# noinline debugToggle #-}
+
+enableDebug :: IO ()
+enableDebug = RL.write debugToggle True
+
+disableDebug :: IO ()
+disableDebug = RL.write debugToggle False
+
+readDebugToggle :: IO Bool
+readDebugToggle = RL.read debugToggle
 
 #define DEBUG
 #ifdef DEBUG
 type Dbg = HasCallStack
 
-debug :: Monad m => [String] -> m ()
-debug strs =
-  traceM (intercalate " | " strs ++ " END")
+debug :: [String] -> IO ()
+debug strs = do
+  RL.read debugToggle >>= \case
+    True -> traceM (intercalate " | " strs ++ " END")
+    False -> pure ()
 
 debugging :: IO () -> IO ()
 debugging act = act

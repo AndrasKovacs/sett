@@ -6,9 +6,9 @@ resolver: nightly-2022-07-07
 packages:
 - .
 
-build:
-  library-profiling: true
-  executable-profiling: true
+# build:
+#   library-profiling: true
+#   executable-profiling: true
 
 ghc-options:
     "$everything": -split-sections
@@ -22,3 +22,4 @@ extra-deps:
   commit: 4a7ed6b807a367a90c8dffaf1e98c3a0d0c28c32
 - git: https://github.com/AndrasKovacs/ghc-strict-implicit-params.git
   commit: 215e0353374a61c0f8790371e4826b247c69580f
+- dir-traverse-0.2.3.0@sha256:adcc128f201ff95131b15ffe41365dc99c50dc3fa3a910f021521dc734013bfa,2137

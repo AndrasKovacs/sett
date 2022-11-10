@@ -1,9 +1,9 @@
+{-# options_ghc -Wno-unused-imports #-}
 
 module Tests where
 
 import MainInteraction
-
--- TODO: organize tests! succeed, fail, regression, etc. Add CI testing.
+import Common
 
 tParse :: IO ()
 tParse = justElab $ unlines [

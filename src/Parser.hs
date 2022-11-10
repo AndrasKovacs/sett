@@ -178,9 +178,7 @@ goApp t = branch braceL
 
   (branch atom
      (\u -> do
-         debug ["bar", show t]
          u <- goProj u
-         debug ["foo", show u]
          goApp (App t u AIExpl))
      (pure t))
 
@@ -364,6 +362,7 @@ topLevel = branch eof (\_ -> pure Nil) do
 parse :: Parser TopLevel
 parse = ws *> topLevel
 
+-- Testing helpers
 --------------------------------------------------------------------------------
 
 parseFile :: FilePath -> IO (Src, TopLevel)
@@ -372,7 +371,7 @@ parseFile path = do
   case runParser parse src of
     OK a _ _ -> pure (src, a)
     Fail     -> impossible
-    Err e    -> putStrLn (prettyError src e) >> error "parse error"
+    Err e    -> error $ prettyError src e
 
 parseBS :: FilePath -> B.ByteString -> IO (Src, TopLevel)
 parseBS path bs = do
@@ -380,7 +379,7 @@ parseBS path bs = do
   case runParser parse src of
     OK a _ _ -> pure (src, a)
     Fail     -> impossible
-    Err e    -> putStrLn (prettyError src e) >> error "parse error"
+    Err e    -> error $ prettyError src e
 
 parseString :: String -> IO (Src, TopLevel)
 parseString str = do
@@ -388,4 +387,4 @@ parseString str = do
   case runParser parse src of
     OK a _ _ -> pure (src, a)
     Fail     -> impossible
-    Err e    -> putStrLn (prettyError src e) >> error "parse error"
+    Err e    -> error $ prettyError src e

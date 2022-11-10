@@ -1,0 +1,2 @@
+
+fail : Set -> Set := Set

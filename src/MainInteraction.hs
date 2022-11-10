@@ -1,6 +1,6 @@
 
 
-module MainInteraction (main, loadFile, justElab) where
+module MainInteraction (main, loadFile, justElab, testElab) where
 
 import System.IO
 import qualified Control.Exception    as Ex
@@ -64,6 +64,17 @@ loadFile path = do
 
 ------------------------------------------------------------
 
+-- | Elaborate a file, don't print anything, throw exception on error.
+testElab :: FilePath -> IO ()
+testElab path = do
+  reset
+  bstr <- B.readFile path
+  (src, top) <- parseBS path bstr
+  writeElabSource (Just src)
+  _ <- elab top
+  pure ()
+
+-- | Elaborate a string, render output.
 justElab :: String -> IO ()
 justElab src = do
   reset
