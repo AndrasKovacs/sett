@@ -4,8 +4,14 @@ module Evaluation (
   , eval, quote, eval0, quote0, nf, nf0, spine, spine0, spineIn, coe, eq
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
   , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty
-  , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt, quoteNf
-  , quoteSpWithOpt, localVar, forceAllWithTraceEq, eqProp, quoteInWithOpt
+  , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt
+  , quoteNf, quoteSpWithOpt, localVar, forceAllWithTraceEq, eqProp, quoteInWithOpt
+  , pattern Exfalso
+  , pattern Coe
+  , pattern Refl
+  , pattern Sym
+  , pattern Ap
+  , pattern Trans
   ) where
 
 import Control.Exception

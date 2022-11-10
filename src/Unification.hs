@@ -406,7 +406,7 @@ etaExpandMeta m sp = do
    Undefined without throwing any error. So we mostly just copy code from
    `quote` to `partialQuote` which does ensure that the output is fully defined.
 
-TODO (long term): handle pruning contractible types! In that case we should insert
+TODO : handle pruning contractible types! In that case we should insert
   the unique value instead of Undefined.
 
 -}
@@ -725,8 +725,6 @@ invertVal solvable psub param t rhsSp = do
       let ?lvl = param + 1
       invertVal solvable psub ?lvl (t $$ var) (SApp rhsSp var i)
 
-    -- TODO: consider passing an *un-psubsted* variable type to solveNestedSp!!!
-
     Rigid (RHLocalVar x xty _) sp rhsTy -> do
       unless (solvable <= x && x < psub^.cod) (throw CantInvertSpine)
 
@@ -741,10 +739,6 @@ invertVal solvable psub param t rhsSp = do
 
         -- general case
         _ -> do
-          -- debug ["PRE", showTm0 $ quoteInWithOpt (psub^.dom) UnfoldNothing xty]
-          -- debug ["PRE", showTm0 $ quoteInWithOpt (psub^.dom) UnfoldEverything xty]
-          -- (_, ~xty) <- psubst' psub xty
-          -- debug ["POST"]
           let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
           sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom - 1, rhsSp) rhsTy
           res <- updatePSub x (evalInDom psub sol) psub
@@ -1012,29 +1006,35 @@ unify (G topt ftopt) (G topt' ftopt') = do
         RIrr       -> irr act
       {-# inline withRelevance #-}
 
-      goRH :: UnifyStateArg => RigidHead -> RigidHead -> IO ()
-      goRH h h' = case (h, h') of
-        (RHLocalVar x _ _ , RHLocalVar x' _ _ ) -> unifyEq x x'
-        (RHPostulate x _  , RHPostulate x' _  ) -> unifyEq x x'
-        (RHExfalso a p    , RHExfalso a' p'   ) -> goJoin a a' >> irr (goJoin p p')
+      goRH :: UnifyStateArg => RigidHead -> RigidHead -> Spine -> Spine -> IO ()
+      goRH h h' sp sp' = do
+        case (h, h') of
+          (RHLocalVar x _ _ , RHLocalVar x' _ _ ) -> unifyEq x x'
+          (RHPostulate x _  , RHPostulate x' _  ) -> unifyEq x x'
+          (RHExfalso a p    , RHExfalso a' p'   ) -> goJoin a a' >> irr (goJoin p p')
 
-        -- TODO: handle coe-trans here
-        (RHCoe a b p t    , RHCoe a' b' p' t' ) -> goJoin a a' >> goJoin b b' >>
-                                                   irr (goJoin p p') >> goJoin t t'
+          (RHCoe a b p t, RHCoe a' b' p' t' ) -> do
 
-        (RHRefl a t    , RHRefl a' t'      ) -> goJoin a a' >> goJoin t t'
-        (RHSym a x y p , RHSym a' x' y' p' ) -> goJoin a a' >> goJoin x x' >>
-                                                goJoin y y' >> irr (goJoin p p')
+            case (sp, sp') of
+              (SId, SId) -> pure ()  -- if spines are empty, target types must be the same
+              _          -> goJoin b b'
 
-        (RHTrans a x y z p q, RHTrans a' x' y' z' p' q') ->
-          goJoin a a' >> goJoin x x' >> goJoin y y' >> goJoin z z' >>
-          irr (goJoin p p' >> goJoin q q')
+            goJoin (coe a a' (Trans Set a b a' p (Sym Set a' b p')) t) t'
 
-        (RHAp a b f x y p, RHAp a' b' f' x' y' p') ->
-          goJoin a a' >> goJoin b b' >> goJoin f f' >> goJoin x x' >>
-          goJoin y y' >> irr (goJoin p p')
+          (RHRefl a t    , RHRefl a' t'      ) -> goJoin a a' >> goJoin t t'
+          (RHSym a x y p , RHSym a' x' y' p' ) -> goJoin a a' >> goJoin x x' >>
+                                                  goJoin y y' >> irr (goJoin p p')
 
-        _ -> throwIO CantUnify
+          (RHTrans a x y z p q, RHTrans a' x' y' z' p' q') ->
+            goJoin a a' >> goJoin x x' >> goJoin y y' >> goJoin z z' >>
+            irr (goJoin p p' >> goJoin q q')
+
+          (RHAp a b f x y p, RHAp a' b' f' x' y' p') ->
+            goJoin a a' >> goJoin b b' >> goJoin f f' >> goJoin x x' >>
+            goJoin y y' >> irr (goJoin p p')
+
+          _ -> throwIO CantUnify
+        goSp sp sp'
 
       goFH :: UnifyStateArg => FlexHead -> Spine -> FlexHead -> Spine -> Ty -> IO ()
       goFH h sp h' sp' a = case (h, h') of
@@ -1101,7 +1101,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (Bot        , Bot            ) -> pure ()
     (Tt         , Tt             ) -> pure ()
 
-    (Rigid h sp a   , Rigid h' sp' _   ) -> withRelevance a (goRH h h' >> goSp sp sp')
+    (Rigid h sp a   , Rigid h' sp' _   ) -> withRelevance a (goRH h h' sp sp')
     (Lam x i a t    , Lam _ _ _ t'     ) -> goBind a x t t'
     (Pair t u       , Pair t' u'       ) -> goJoin t t' >> goJoin u u'
     (RigidEq a t u  , RigidEq a' t' u' ) -> goJoin a a' >> goJoin t t' >> goJoin u u'
