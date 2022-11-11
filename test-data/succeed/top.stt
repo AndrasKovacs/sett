@@ -1,0 +1,8 @@
+
+top : Prop := Top
+topset : Set := Top
+
+toptt : Top := tt
+
+topprop : {x y : Top} -> x = y
+  := tt

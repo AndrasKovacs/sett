@@ -1,0 +1,12 @@
+
+bot : Prop := Bot
+botset : Set := Bot
+
+botrec : {A : Set} -> bot -> A
+  := \x. exfalso x
+
+botind : {A : bot -> Set} -> (x : bot) -> A x
+  := \x. exfalso x
+
+botprop : {a : bot} -> a = a
+  := tt
