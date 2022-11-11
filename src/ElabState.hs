@@ -121,9 +121,7 @@ readElabSource :: IO (Maybe Src)
 readElabSource = RL.read elabSource
 
 writeElabSource :: Maybe Src -> IO ()
-writeElabSource msrc = do
-  debug ["WRITTEN", case msrc of Nothing -> "Nothing"; _ -> "Just"]
-  RL.write elabSource msrc
+writeElabSource msrc = RL.write elabSource msrc
 
 -- Top-level nametable
 --------------------------------------------------------------------------------

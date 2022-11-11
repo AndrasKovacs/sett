@@ -520,12 +520,15 @@ forceAll' v = case v of
 -- | Eliminate all unfoldings from the head but remember a TraceEq version of the result (if there's one).
 forceAllWithTraceEq :: LvlArg => Val -> IO (Val,Val)
 forceAllWithTraceEq v = case v of
-  topv@(Flex h sp _)    -> forceAllWithTraceEqFlex topv h sp
-  topv@(FlexEq x a t u) -> forceAllWithTraceEqFlexEq topv x a t u
-  Unfold _ _ v _        -> forceAllWithTraceEq' v
-  TraceEq a t u v       -> forceAllWithTraceEqTrace a t u v
-  UnfoldEq _ _ _ v      -> forceAllWithTraceEq' v
-  t                     -> pure (t,t)
+  topv@(Flex h sp _)               -> forceAllWithTraceEqFlex topv h sp
+  topv@(FlexEq x a t u)            -> forceAllWithTraceEqFlexEq topv x a t u
+  Unfold _ _ v _                   -> forceAllWithTraceEq' v
+  TraceEq a t u v                  -> forceAllWithTraceEqTrace a t u v
+
+  -- TODO: rethink UnfoldEq & TraceEq interaction
+  UnfoldEq a t u (TraceEq _ _ _ v) -> forceAllWithTraceEqTrace a t u v
+  UnfoldEq _ _ _ v                 -> forceAllWithTraceEq' v
+  t                                -> pure (t,t)
 {-# inline forceAllWithTraceEq #-}
 
 forceAllWithTraceEqTrace :: LvlArg => Val -> Val -> Val -> Val -> IO (Val, Val)

@@ -1100,8 +1100,8 @@ unify (G topt ftopt) (G topt' ftopt') = do
   ftopt' <- forceUS ftopt'
 
   debug ["unify", showTm' (quote ftopt), showTm' (quote ftopt')]
-  -- debug ["unifyNofrc", showTm' (quote topt), showTm' (quote topt')]
-  -- debug ["unifyF", showTm' (quote ftopt), showTm' (quote ftopt'), show ?unifyState]
+  debug ["unifyNofrc", showTm' (quote topt), showTm' (quote topt')]
+  -- debug ["unifyV", show ftopt, show ftopt']
 
   case (ftopt, ftopt') of
 
@@ -1110,7 +1110,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
     (Pi x i a b , Pi x' i' a' b' ) -> unifyEq i i' >> goJoin a a' >> goBind a x b b'
     (Sg sp x a b, Sg _ x' a' b'  ) -> goJoin a a' >> goBind (elSP sp a) x b b'
-    (El a       , El a'          ) -> do debug ["unifyel", showTm' (quote a), showTm' (quote a')]
+    (El a       , El a'          ) -> do debug ["unifyEl", showTm' (quote a), showTm' (quote a')]
                                          goJoin a a'
     (Set        , Set            ) -> pure ()
     (Prop       , Prop           ) -> pure ()
@@ -1180,6 +1180,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
     (FlexEq _ a t u, RigidEq a' t' u')   -> goJoin a a' >> goJoin t t' >> goJoin u u'
     (FlexEq _ a t u, TraceEq a' t' u' _) -> do
+      debug ["FLEXTRACE"]
       goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
     (RigidEq a t u  , FlexEq _ a' t' u') -> goJoin a a' >> goJoin t t' >> goJoin u u'

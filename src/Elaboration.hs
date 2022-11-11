@@ -145,12 +145,15 @@ subtype pt t ~tv (G a fa) (G b fb) = do
 {-# inline subtype #-}
 
 checkEl :: InCxt (P.Tm -> GTy -> IO S.Tm)
-checkEl topt (G topa ftopa) = do
-  (ftopaTrace, ftopa) <- forceAllWithTraceEq ftopa
+checkEl topt (G topa ftopaold) = do
+  (ftopaTrace, ftopa) <- forceAllWithTraceEq ftopaold
   debug ["checkEl"
         , P.showTm topt
-        , show topt
-        , showTm (quote topa)
+        -- , showTm (quote topa)
+        -- , showTm (quote ftopa)
+        -- , show ftopaold
+        , showTm (quote ftopaold)
+        , showTm (quote ftopaTrace)
         ]
   -- debug [show ftopa]
   case (topt, ftopa) of

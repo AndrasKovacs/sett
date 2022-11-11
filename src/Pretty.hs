@@ -68,7 +68,7 @@ goTm prec ns t = go prec ns t where
       goLam ns t                       = (". "++) . go letp ns t
 
     EqSym `AppI` a `AppE` t `AppE` u ->
-      par p eqp $ go appp ns t . (" = "++) . go appp ns u
+      par p eqp $ go appp ns t . (" ={"++) . go pairp ns a . ("} "++). go appp ns u
 
     -- Coe a b _ t -> par p appp $ ("coe "++) . go appp ns a . ws . go appp ns b . (" _ "++) . go projp ns t
 

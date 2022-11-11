@@ -1,0 +1,5 @@
+
+Pointed : Set := (type : Set) × (point : type) × ⊤
+
+foo : (P : Pointed) → P = P
+  := λ p. refl

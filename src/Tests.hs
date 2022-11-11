@@ -255,3 +255,10 @@ coeProd = justElab $ unlines [
   "  := λ p. refl"
 
   ]
+
+nounfold = justElab $ unlines [
+  "Pointed : Set := (type : Set) × (point : type) × ⊤",
+  "",
+  "foo : (P : Pointed) → P = P",
+  "  := λ p. refl  "
+  ]
