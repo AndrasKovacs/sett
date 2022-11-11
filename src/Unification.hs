@@ -1024,18 +1024,9 @@ unify (G topt ftopt) (G topt' ftopt') = do
           (RHLocalVar x _ _ , RHLocalVar x' _ _ ) -> unifyEq x x'
           (RHPostulate x _  , RHPostulate x' _  ) -> unifyEq x x'
           (RHExfalso a p    , RHExfalso a' p'   ) -> goJoin a a' >> irr (goJoin p p')
-
-          (RHCoe a b p t, RHCoe a' b' p' t' ) -> do
-
-            case (sp, sp') of
-              (SId, SId) -> pure ()  -- if spines are empty, target types must be the same
-              _          -> goJoin b b'
-
-            goJoin (coe a a' (Trans Set a b a' p (Sym Set a' b p')) t) t'
-
-          (RHRefl a t    , RHRefl a' t'      ) -> goJoin a a' >> goJoin t t'
-          (RHSym a x y p , RHSym a' x' y' p' ) -> goJoin a a' >> goJoin x x' >>
-                                                  goJoin y y' >> irr (goJoin p p')
+          (RHRefl a t       , RHRefl a' t'      ) -> goJoin a a' >> goJoin t t'
+          (RHSym a x y p    , RHSym a' x' y' p' ) -> goJoin a a' >> goJoin x x' >>
+                                                     goJoin y y' >> irr (goJoin p p')
 
           (RHTrans a x y z p q, RHTrans a' x' y' z' p' q') ->
             goJoin a a' >> goJoin x x' >> goJoin y y' >> goJoin z z' >>
@@ -1045,13 +1036,27 @@ unify (G topt ftopt) (G topt' ftopt') = do
             goJoin a a' >> goJoin b b' >> goJoin f f' >> goJoin x x' >>
             goJoin y y' >> irr (goJoin p p')
 
+          (RHCoe a b p t, RHCoe a' b' p' t' ) -> do
+
+            case (sp, sp') of
+              (SId, SId) -> pure ()  -- if spines are empty, target types must be the same
+              _          -> goJoin b b'
+
+            goJoin (coe a a' (Trans Set a b a' p (Sym Set a' b p')) t) t'
+
           _ -> throwIO CantUnify
         goSp sp sp'
 
       goFH :: UnifyStateArg => FlexHead -> Spine -> FlexHead -> Spine -> Ty -> IO ()
       goFH h sp h' sp' a = case (h, h') of
-        (FHCoe _ a b p t, FHCoe _ a' b' p' t') ->
-          goJoin a a' >> goJoin b b' >> irr (goJoin p p') >> goJoin t t'
+        (FHCoe _ a b p t, FHCoe _ a' b' p' t') -> case (sp, sp') of
+          (SId, SId) ->
+            goJoin (coe a a' (Trans Set a b a' p (Sym Set a' b p')) t) t'
+
+          -- approximated!
+          _ ->
+            goJoin a a' >> goJoin b b' >> irr (goJoin p p') >> goJoin t t'
+
         (FHMeta m, FHMeta m') ->
           if m == m' then unifySp sp sp' -- TODO: intersect
                      else unifyMetaMeta m sp m' sp' a
@@ -1190,6 +1195,16 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (t, UnfoldEq _ _ _ t') -> lopsidedUnfold (G topt t) (G topt' t')
     (TraceEq _ _ _ t, t' ) -> lopsidedUnfold (G topt t) (G topt' t')
     (t, TraceEq _ _ _ t' ) -> lopsidedUnfold (G topt t) (G topt' t')
+
+    -- flexible coe-coe
+    ------------------------------------------------------------
+
+    (Flex (FHCoe x a b p t) SId _, Rigid (RHCoe a' b' p' t') SId _) -> do
+      goJoin t (coe a' a (Trans Set a' b a p' (Sym Set a b p)) t')
+
+    (Rigid (RHCoe a b p t) SId _, Flex (FHCoe x' a' b' p' t') SId _) -> do
+      goJoin (coe a a' (Trans Set a b a' p (Sym Set a' b p')) t) t'
+
 
     -- syntax-directed eta
     ------------------------------------------------------------
