@@ -1,9 +1,9 @@
 
 module Evaluation (
-    app, appE, appI, proj1, proj2, gproj1, gproj2, projField
+    app, appE, appI, proj1, proj2, gproj1, gproj2, projField, untag, guntag
   , eval, quote, eval0, quote0, nf, nf0, spine, spine0, spineIn, coe, eq
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
-  , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty
+  , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty, untagTy
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt
   , quoteNf, quoteSpWithOpt, localVar, forceAllWithTraceEq, eqProp, quoteInWithOpt
   , pattern Exfalso
@@ -134,6 +134,10 @@ gproj1 (G t ft) = G (proj1 t) (proj1 ft)
 gproj2 :: LvlArg => G -> G
 gproj2 (G t ft) = G (proj2 t) (proj2 ft)
 {-# inline gproj2 #-}
+
+guntag :: LvlArg => G -> G
+guntag (G t ft) = G (untag t) (untag ft)
+{-# inline guntag #-}
 
 -- | Args: type which is a sigma, value for the first projection, returns type of the
 --   second projection.
@@ -772,6 +776,7 @@ convSp sp sp' = do
     (SProj1 t           , SProjField t' _ _ n)  -> do
       t <- ensureNProj2 n t
       convSp t t'
+    (SUntag t           , SUntag t')            -> goSp t t'
     _                                           -> throwIO Diff
 
 -- | Magical rigid coe conversion.
@@ -823,6 +828,11 @@ conv t u = do
       go a a'
       goBind (elSP sp a) b b'
 
+    (Tagged a x b, Tagged a' x' b') -> do
+      go a a'
+      go x x'
+      go b b'
+
     (El a, El a' ) -> go a a'
     (Set , Set   ) -> pure ()
     (Prop, Prop  ) -> pure ()
@@ -839,14 +849,17 @@ conv t u = do
     (RigidEq a t u , RigidEq a' t' u') -> go a a' >> go t t' >> go u u'
     (Lam _ _ _ t   , Lam _ _ a t'    ) -> goBind a t t'
     (Pair t u      , Pair t' u'      ) -> go t t' >> go u u'
+    (Tag t         , Tag t')           -> go t t'
 
     -- eta
     --------------------------------------------------------------------------------
 
-    (Lam _ i a t , t'              ) -> goBind a t (Cl \u -> app t' u i)
-    (t              , Lam _ i a t' ) -> goBind a (Cl \u -> app t u i) t'
-    (Pair t u    , t'              ) -> go t (proj1 t') >> go u (proj2 t')
-    (t              , Pair t' u'   ) -> go (proj1 t) t' >> go (proj2 t) u'
+    (Lam _ i a t , t'           ) -> goBind a t (Cl \u -> app t' u i)
+    (t           , Lam _ i a t' ) -> goBind a (Cl \u -> app t u i) t'
+    (Pair t u    , t'           ) -> go t (proj1 t') >> go u (proj2 t')
+    (t           , Pair t' u'   ) -> go (proj1 t) t' >> go (proj2 t) u'
+    (Tag t       , t'           ) -> go t (untag t')
+    (t           , Tag t'       ) -> go t (untag t')
 
     ------------------------------------------------------------
 

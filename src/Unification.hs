@@ -979,6 +979,7 @@ unifySp sp sp' = case (sp, sp') of
   (SProj1 t           , SProjField t' _ _ n)  -> do
     t <- ensureNProj2 n t
     unifySp t t'
+  (SUntag t           , SUntag t'           ) -> unifySp t t'
   _                                           -> throwIO CantUnify
 
 unify :: LvlArg => UnifyStateArg => S.NamesArg => G -> G -> IO ()
@@ -1123,6 +1124,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
                                          goJoin a a'
     (Set        , Set            ) -> pure ()
     (Prop       , Prop           ) -> pure ()
+    (Tagged a x b , Tagged a' x' b') -> goJoin a a' >> goJoin x x' >> goJoin b b'
     (Top        , Top            ) -> pure ()
     (Bot        , Bot            ) -> pure ()
     (Tt         , Tt             ) -> pure ()
@@ -1130,6 +1132,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (Rigid h sp a   , Rigid h' sp' _   ) -> withRelevance a (goRH h h' sp sp')
     (Lam x i a t    , Lam _ _ _ t'     ) -> goBind a x t t'
     (Pair t u       , Pair t' u'       ) -> goJoin t t' >> goJoin u u'
+    (Tag t          , Tag t'           ) -> goJoin t t'
     (RigidEq a t u  , RigidEq a' t' u' ) -> goJoin a a' >> goJoin t t' >> goJoin u u'
 
     (FlexEq _ a t u, FlexEq _ a' t' u') -> do
@@ -1222,6 +1225,10 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
     (Pair t u, t')  -> go (gjoin t) (gproj1 (G topt' t')) >> go (gjoin u) (gproj2 (G topt' t'))
     (t, Pair t' u') -> go (gproj1 (G topt t)) (gjoin t') >> go (gproj2 (G topt t)) (gjoin u')
+
+    (Tag t, t')  -> go (gjoin t) (guntag (G topt' t'))
+    (t, Tag t')  -> go (guntag (G topt t)) (gjoin t')
+
 
     (Tt, _) -> pure ()
     (_, Tt) -> pure ()
