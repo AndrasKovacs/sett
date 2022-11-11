@@ -1053,7 +1053,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
           (SId, SId) ->
             goJoin (coe a a' (Trans Set a b a' p (Sym Set a' b p')) t) t'
 
-          -- approximated!
+          -- TODO: approximated
           _ ->
             goJoin a a' >> goJoin b b' >> irr (goJoin p p') >> goJoin t t'
 

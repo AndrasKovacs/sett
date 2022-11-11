@@ -243,9 +243,6 @@ coe a b p t = case (a, b) of
 coeTrans :: LvlArg => Val -> Val -> Val -> Val -> Val
 coeTrans a b p t = case t of
   Flex (FHCoe x a' _ p' t') SId _ -> coe a' b (Trans Set a' a b p' p) t'
-
-  -- TODO: coe-refl should compute if the types are rigid but the body is flex!
-  t@(Flex h sp _)                 -> Flex (FHCoe (flexHeadMeta h) a b p t) SId b
   t@(Unfold h sp ft _)            -> Unfold (UHCoe a b p t) SId (coeTrans a b p ft) b
   Rigid (RHCoe a' _ p' t') SId _  -> coe a' b (Trans Set a' a b p' p) t'
   Magic m                         -> Magic m
