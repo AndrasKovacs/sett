@@ -3,6 +3,7 @@
 module MainInteraction (main, loadFile, justElab, testElab) where
 
 import System.IO
+import System.Environment
 import System.Exit
 import qualified Control.Exception    as Ex
 import qualified Data.Array.Dynamic.L as ADL
@@ -41,7 +42,13 @@ main = do
   putStrLn "sett 0.1.0.0"
   putStrLn "enter :? for help"
   disableDebug
-  loop Empty
+
+  args <- getArgs
+  state <- case args of
+    [path] -> loadFile path
+    _      -> pure Empty
+
+  loop state
 
 loadFile :: FilePath -> IO State
 loadFile path = do
