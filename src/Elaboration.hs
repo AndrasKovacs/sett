@@ -2,6 +2,8 @@
 module Elaboration where
 
 import Control.Exception
+import Data.String (fromString)
+import Data.ByteString()
 
 import Common
 import Cxt
@@ -267,6 +269,10 @@ check topt (G topa ftopa) = do
       u <- check u (gjoin (b $$~ eval t))
       pure $ S.Pair t u
 
+    (P.ProjField t span, V.Tagged a x b) | spanToBs span == fromString "tag" -> do
+      t <- check t (gjoin b)
+      pure $ S.Tag t
+
     (P.Let _ x ma t u, ftopa) -> do
       (a, va) <- case ma of
         Just a  -> do
@@ -466,20 +472,24 @@ infer topt = do
       Infer t ga <- infer topt
       let ~vt = eval t
 
-      let go a ix = forceSet a >>= \case
-            V.Sg _ x' a b | fieldName == x' -> do
-              pure (ix, a)
-            V.Sg _ x' a b -> do
-              go (b $$~ projField vt ix) (ix + 1)
-            V.El (V.Sg _ x' a b) | fieldName == x' -> do
-              pure (ix, V.El a)
-            V.El (V.Sg _ x' a b) -> do
-              go (V.El (b $$~ projField vt ix)) (ix + 1)
-            _ ->
-              elabError topt $ NoSuchField x  -- TODO: postpone
+      forceSet (g2 ga) >>= \case
+        V.Tagged _ _ b | spanToBs x == fromString "untag" -> do
+          pure $! Infer (S.Untag t) (gjoin b)
+        _ -> do
+          let go a ix = forceSet a >>= \case
+                V.Sg _ x' a b | fieldName == x' -> do
+                  pure (ix, a)
+                V.Sg _ x' a b -> do
+                  go (b $$~ projField vt ix) (ix + 1)
+                V.El (V.Sg _ x' a b) | fieldName == x' -> do
+                  pure (ix, V.El a)
+                V.El (V.Sg _ x' a b) -> do
+                  go (V.El (b $$~ projField vt ix)) (ix + 1)
+                _ ->
+                  elabError topt $ NoSuchField x  -- TODO: postpone
 
-      (ix, b) <- go (g2 ga) 0
-      pure $! Infer (S.ProjField t fieldName ix) (gjoin b)
+          (ix, b) <- go (g2 ga) 0
+          pure $! Infer (S.ProjField t fieldName ix) (gjoin b)
 
     P.Let _ x ma t u -> do
 
@@ -497,6 +507,10 @@ infer topt = do
       define x a (gjoin va) t (eval t) do
         Infer u uty <- infer u
         pure $ Infer (S.Let (NSpan x) a t u) uty
+
+    P.Tagged _ -> do
+      let ty = V.PiE na V.Set \a -> V.PiE nx a \x -> V.PiE nb V.Set \_ -> V.Set
+      pure $! Infer S.TaggedSym (gjoin ty)
 
     P.Exfalso _ -> do
       let ty = V.PiI na V.Set \a -> V.El V.Bot ==> a

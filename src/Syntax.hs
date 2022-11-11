@@ -72,6 +72,10 @@ data Tm
   | Pi Name Icit Ty Ty
   | Sg SP Name Ty Ty
 
+  | TaggedSym
+  | Tag Tm
+  | Untag Tm
+
   | HidePostulate Lvl ~(Hide V.Ty)
   | InsertedMeta MetaVar Locals
   | Meta MetaVar
@@ -120,3 +124,5 @@ pattern Sym a x y p       = SymSym `AppI`  a `AppI`  x `AppI`  y `AppE`  p
 pattern Trans a x y z p q = TransSym `AppI`  a `AppI`  x `AppI`  y `AppI` z  `AppE` p `AppE` q
 pattern Ap a b f x y p    = ApSym  `AppI` a `AppI`  b `AppE`  f `AppI`  x `AppI`  y `AppE`  p
 pattern El a              = ElSym `AppE` a
+
+pattern Tagged a x b      = TaggedSym `AppE` a `AppE` x `AppE` b

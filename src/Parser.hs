@@ -43,7 +43,7 @@ Precedence summary from strongest to weakest:
 
 Context-free grammar (disregarding indentation!)
 
-  builtin     = "Set" | "Prop" | "refl" | "coe" | "ap" | "sym" | "trans" | "⊤" | "Top" | "Bot" | "tt" | "⊥" | "exfalso"
+  builtin     = "Set" | "Prop" | "refl" | "coe" | "ap" | "sym" | "trans" | "⊤" | "Top" | "Bot" | "tt" | "⊥" | "exfalso" | "Tagged"
 
   identifier  = <non-empty string of alphanumeric characters or "'", starting with a letter>
   binder      = identifier | "_"
@@ -129,6 +129,7 @@ atom =
   branch $(kw "trans")   (pure . Trans)        $
   branch $(kw "sym")     (pure . Sym)          $
   branch $(kw "El")      (pure . El)           $
+  branch $(kw "Tagged")  (pure . Tagged)       $
   empty
 
 parens :: Span -> Parser Tm

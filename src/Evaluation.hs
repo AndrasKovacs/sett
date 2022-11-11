@@ -188,6 +188,26 @@ projField topt n = case topt of
   Magic m         -> Magic m
   _               -> impossible
 
+-- Tagged types
+--------------------------------------------------------------------------------
+
+taggedSym :: Val
+taggedSym = LamE na Set \a -> LamE nx a \x -> LamE nb Set \b -> Tagged a x b
+
+untagTy :: LvlArg => Ty -> Ty
+untagTy a = runIO $ forceSet a >>= \case
+  Tagged _ _ b    -> pure b
+  a               -> impossible
+
+untag :: LvlArg => Val -> Val
+untag t = case t of
+  Pair t u        -> t
+  Rigid h sp a    -> Rigid  h (SUntag sp) (untagTy a)
+  Flex h sp a     -> Flex   h (SUntag sp) (untagTy a)
+  Unfold h sp t a -> Unfold h (SUntag sp) (untag t) (untagTy a)
+  Magic m         -> Magic m
+  _               -> impossible
+
 -- Coercion
 --------------------------------------------------------------------------------
 
@@ -350,6 +370,7 @@ spine v sp =
     SProj1 t           -> proj1 (go t)
     SProj2 t           -> proj2 (go t)
     SProjField t _ _ n -> projField (go t) n
+    SUntag t           -> untag (go t)
 
 spineIn :: Lvl -> Val -> Spine -> Val
 spineIn l v sp = let ?lvl = l in spine v sp
@@ -418,6 +439,9 @@ eval t =
     S.InsertedMeta m ls -> insertedMeta m ls
     S.Meta x            -> meta x
     S.Let x a t u       -> let ?env = EDef ?env (eval t) in eval u
+    S.TaggedSym         -> taggedSym
+    S.Tag t             -> Tag (go t)
+    S.Untag t           -> untag (go t)
     S.Set               -> Set
     S.Prop              -> Prop
     S.Top               -> Top
@@ -876,6 +900,7 @@ quoteSpWithOpt opt hd sp = let
     SProj1 t            -> S.Proj1 (goSp t)
     SProj2 t            -> S.Proj2 (goSp t)
     SProjField t tv x n -> S.ProjField (goSp t) (projFieldName tv x n) n
+    SUntag t            -> S.Untag (goSp t)
 
 quoteWithOpt :: LvlArg => UnfoldOpt -> Val -> S.Tm
 quoteWithOpt opt t = let
@@ -918,6 +943,8 @@ quoteWithOpt opt t = let
     Set                -> S.Set
     El a               -> S.El (go a)
     Prop               -> S.Prop
+    Tagged a x b       -> S.Tagged (go a) (go x) (go b)
+    Tag y              -> S.Tag (go y)
     Top                -> S.Top
     Tt                 -> S.Tt
     Bot                -> S.Bot

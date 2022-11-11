@@ -199,6 +199,9 @@ approxOccurs occ t = do
     S.InsertedMeta m _ -> goMeta m
     S.Meta m           -> goMeta m
     S.Let _ a t u      -> go a >> go t >> go u
+    S.TaggedSym{}      -> pure ()
+    S.Tag t            -> go t
+    S.Untag t          -> go t
     S.Set{}            -> pure ()
     S.Prop{}           -> pure ()
     S.Top{}            -> pure ()
@@ -225,6 +228,7 @@ psubstSp psub hd sp = do
     SProj1 t            -> S.Proj1 <$!> goSp t
     SProj2 t            -> S.Proj2 <$!> goSp t
     SProjField t tv a n -> S.ProjField <$!> goSp t <*!> pure (projFieldName tv a n) <*!> pure n
+    SUntag t            -> S.Untag <$!> goSp t
 
 psubst :: PartialSub -> Val -> IO S.Tm
 psubst psub topt = do
@@ -306,6 +310,8 @@ psubst psub topt = do
     Pair t u           -> S.Pair <$!> go t <*!> go u
     El a               -> S.El <$!> go a
     Prop               -> pure S.Prop
+    Tagged a x b       -> S.Tagged <$!> go a <*!> go x <*!> go b
+    Tag y              -> S.Tag <$!> go y
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
     Bot                -> pure S.Bot
@@ -568,6 +574,7 @@ partialQuoteSp hd sp = let
     SProj1 t            -> S.Proj1 <$!> goSp t
     SProj2 t            -> S.Proj2 <$!> goSp t
     SProjField t tv x n -> S.ProjField <$!> goSp t <*!> (pure $! projFieldName tv x n) <*!> pure n
+    SUntag t            -> S.Untag <$!> goSp t
 
 -- | Quote a value but ensure that the output contains no `Magic`.
 partialQuote :: LvlArg => S.NamesArg => Val -> IO S.Tm
@@ -612,6 +619,8 @@ partialQuote t = do
     Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a x b
     Set                -> pure S.Set
     Prop               -> pure S.Prop
+    Tagged a x b       -> S.Tagged <$!> go a <*> go x <*> go b
+    Tag y              -> S.Tag <$!> go y
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
     Bot                -> pure S.Bot
