@@ -1110,7 +1110,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
   ftopt' <- forceUS ftopt'
 
   debug ["unify", showTm' (quote ftopt), showTm' (quote ftopt')]
-  debug ["unifyNofrc", showTm' (quote topt), showTm' (quote topt')]
+  -- debug ["unifyNofrc", showTm' (quote topt), showTm' (quote topt')]
   -- debug ["unifyV", show ftopt, show ftopt']
 
   case (ftopt, ftopt') of
@@ -1184,15 +1184,15 @@ unify (G topt ftopt) (G topt' ftopt') = do
     ------------------------------------------------------------
 
     (Flex h sp a, Flex h' sp' _) -> goFH h sp h' sp' a
-    (Flex (FHMeta m) sp a, rhs)  -> solveEtaShort m sp rhs a
-    (lhs, Flex (FHMeta m) sp a)  -> solveEtaShort m sp lhs a
+    (Flex (FHMeta m) sp a, _   ) -> solveEtaShort m sp topt' a
+    (_  , Flex (FHMeta m) sp a ) -> solveEtaShort m sp topt a
 
     -- approximate Eq
     ------------------------------------------------------------
 
     (FlexEq _ a t u, RigidEq a' t' u')   -> goJoin a a' >> goJoin t t' >> goJoin u u'
     (FlexEq _ a t u, TraceEq a' t' u' _) -> do
-      debug ["FLEXTRACE"]
+      debug ["FLEXTRACE", showTm' (quote a), showTm' (quote a')]
       goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
     (RigidEq a t u  , FlexEq _ a' t' u') -> goJoin a a' >> goJoin t t' >> goJoin u u'

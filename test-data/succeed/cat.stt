@@ -16,7 +16,7 @@ op : Cat -> Cat
          , C.idr
          , C.idl
          , \f g h. sym (C.assoc h g f)
-         , tt)
+         , tt )
 
 opop : (C : Cat) -> op (op C) = C
   := \_. refl
@@ -41,7 +41,7 @@ PshId : (C : Cat) (F : Psh C) -> PshHom C F F
 PshComp : (C : Cat) (F G H : Psh C) (A : PshHom C G H) (B : PshHom C F G) -> PshHom C F H
   := \C F G H A B.
      ( \v. A.map (B.map v)
-     , \{x} {y} {f} {v}. trans (ap A.map (B.natural{_}{_}{f}{v})) (A.natural)
+     , \{x} {y} {f} {v}. trans (ap A.map (B.natural{_}{_}{f}{v})) A.natural
      , tt)
 
 PshCat : Cat -> Cat
