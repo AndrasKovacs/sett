@@ -245,6 +245,6 @@ tConst = justElab $ unlines [
   ]
 
 eqProd = justElab $ unlines [
-  "eqprod : {A B : Set} {p q : A * B} -> (p = q) = ((p.1 = q.1) * (p.2 = q.2))",
-  " := \\{A} {B} {p} {q}. refl {Set} {p = q}"
+  "eqprod : {A B : Set} {x y : A * B} -> (x = y) = ((x.1 = y.1) * (x.2 = y.2))",
+  " := \\{A} {B} {x} {y}. refl {Set} {x = y}"
   ]

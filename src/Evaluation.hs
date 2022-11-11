@@ -277,7 +277,7 @@ eq a t u = case a of
         bt1 = b $$ t1
 
     in markEq topA t u $!
-       SgP np (eq a t1 u2) \p ->
+       SgP np (eq a t1 u1) \p ->
           eq bu1
             (coe bt1 bu1
                  (Ap a Set (LamE x a (unCl b)) t1 u1 p)

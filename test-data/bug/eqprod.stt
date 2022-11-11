@@ -1,3 +1,15 @@
 
-eqprod : {A B : Set} {p q : A * B} -> (p = q) = ((p.1 = q.1) * (p.2 = q.2))
-  := \{A} {B} {p} {q}. refl {Set} {p = q}
+-- foo : {A B : Set} {x y : A * B} → Prop
+--   := λ {A}{B}{x}{y}. (x = y) = (x = y)
+
+foo : {A B : Set} {x y : A * B} → Prop
+  := λ {A}{B}{x}{y}. (x = y) -- ((x.1 = y.1) * (x.2 = y.2))
+
+-- eqprod : {A B : Set} {x y : A * B} -> (x = y) = ((x.1 = y.1) * (x.2 = y.2))
+--   := \{A} {B} {x} {y}. refl {Set} {x = y}
+
+--   (El ((p : x.1 = y.2) × x.2 = y.2) → (p : x.1 = y.2) × x.2 = y.2)
+-- × (El ((p : x.1 = y.2) × x.2 = y.2) → (p : x.1 = y.2) × x.2 = y.2)
+
+--   (El ((p : x.1 = y.2) × x.2 = y.2) → x.1 = y.1 × x.2 = y.2)
+-- × (El (x.1 = y.1 × x.2 = y.2) → (p : x.1 = y.2) × x.2 = y.2)
