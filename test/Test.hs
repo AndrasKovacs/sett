@@ -16,6 +16,8 @@ import Common
 import MainInteraction
 import System.Console.ANSI (setSGRCode)
 
+-- NOTE: stack test --coverage
+
 dropPrefix :: Eq a => [a] -> [a] -> [a]
 dropPrefix (x:xs) (y:ys) | x == y = dropPrefix xs ys
 dropPrefix _      ys              = ys

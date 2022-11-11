@@ -189,7 +189,7 @@ eq' :: Parser Tm
 eq' = (do
   t <- app'
   branch $(sym "=")
-    (\_ -> Eq t <$> app')
+    (\_ -> Eq t <$> optional (braceL *> tm <* braceR') <*> app')
     (pure t))
   `cut` eqErr
 

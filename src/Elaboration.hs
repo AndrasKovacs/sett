@@ -32,7 +32,6 @@ TODO
 --------------------------------------------------------------------------------
 
 
-
 elabError :: LocalsArg => LvlArg => P.Tm -> Error -> IO a
 elabError t err = do
   src <- readElabSource >>= \case
@@ -205,7 +204,7 @@ checkEl topt (G topa ftopa) = do
       freshMeta (gEl (G topa ftopa))
 
     (topt, ftopa) -> do
-      Infer t tty <- insertApps' $ infer topt
+      Infer t tty <- insertApps $ infer topt
       unify topt tty (gEl (G topa ftopaTrace))
       pure t
 
@@ -281,7 +280,7 @@ check topt (G topa ftopa) = do
       freshMeta (G topa ftopa)
 
     (topt, ftopa) -> do
-      Infer t tty <- insertApps' $ infer topt
+      Infer t tty <- insertApps $ infer topt
       debug ["subtype", showTm (quote (g1 tty)), showTm (quote (g2 tty)), showTm (quote topa), showTm (quote ftopa)]
       subtype topt t (eval t) tty (G topa ftopa)
 
@@ -296,6 +295,8 @@ ensureSP topt a = forceAll a >>= \case
   V.Prop -> pure P
   Flex{} -> elabError topt AmbiguousUniverse
   _      -> elabError topt ExpectedSetProp
+
+-- TODO: infer with SetProp arg, only for going under lambdas without ambiguity
 
 infer :: InCxt (P.Tm -> IO Infer)
 infer topt = do
@@ -354,11 +355,18 @@ infer topt = do
     P.Tt _ ->
       pure $! Infer S.Tt (gjoin (V.El V.Top))
 
-    topt@(P.Eq t u) -> do
+    topt@(P.Eq t Nothing u) -> do
       Infer t tty <- infer t
       Infer u uty <- infer u
       unify topt tty uty
       let a = quote (g1 tty)
+      pure $! Infer (S.Eq a t u) gProp
+
+    topt@(P.Eq t (Just a) u) -> do
+      a <- check a gSet
+      let ga = gjoin (eval a)
+      t <- check t ga
+      u <- check u ga
       pure $! Infer (S.Eq a t u) gProp
 
     P.Hole _ -> do
@@ -437,7 +445,7 @@ infer topt = do
         V.Sg _ x a b        -> pure $! Infer (Proj2 t) (gjoin (b $$~ proj1 (eval t)))
         V.El (V.Sg _ x a b) -> pure $! Infer (Proj2 t) (gjoin (V.El (b $$~ proj1 (eval t))))
 
-        -- fty@Flex{} -> do                      -- universe ambiguity! TODO: popstpone
+        -- fty@Flex{} -> do                      -- universe ambiguity! TODO: postpone
         --   a <- freshMeta gSet
         --   let va = eval a
         --   b <- freshMeta1 a gSet
@@ -471,7 +479,7 @@ infer topt = do
     P.Let _ x ma t u -> do
 
       (a, va) <- case ma of
-        Just a  -> do
+        Just a -> do
           a <- check a gSet
           pure (a, eval a)
         Nothing -> do

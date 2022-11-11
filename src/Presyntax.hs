@@ -39,7 +39,7 @@ data Tm
   | Parens Pos Tm Pos
   | El Span
 
-  | Eq Tm Tm
+  | Eq Tm (Maybe Tm) Tm
   | Exfalso Span
   | Refl Span
   | Coe Span
@@ -72,7 +72,7 @@ span t = Span (left t) (right t) where
     Tt      (Span l _) -> l
     Bot     (Span l _) -> l
     Exfalso (Span l _) -> l
-    Eq t u             -> left t
+    Eq t _ u           -> left t
     Refl (Span l _)    -> l
     Coe (Span l _)     -> l
     Sym (Span l _)     -> l
@@ -102,7 +102,7 @@ span t = Span (left t) (right t) where
     Tt      (Span _ r)        -> r
     Bot     (Span _ r)        -> r
     Exfalso (Span _ r)        -> r
-    Eq _ t                    -> right t
+    Eq _ _ t                  -> right t
     Refl (Span _ r)           -> r
     Coe (Span _ r)            -> r
     Sym (Span _ r)            -> r

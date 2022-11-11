@@ -234,3 +234,12 @@ t15 = justElab $ unlines [
   "ass   : {A B C : Prop} → (A × B × C) = ((A × B) × C) :=",
   "         (λ abc. ((abc.1, abc.2.1), abc.2.2), λ abc. (abc.1.1, abc.1.2, abc.2))"
   ]
+
+t16 :: IO ()
+t16 = justElab $ unlines [
+  "myRefl : {A x} → x ={A} x := refl"
+  ]
+
+tConst = justElab $ unlines [
+  "const := λ {A}{B}(x : A) (y : B). x"
+  ]
