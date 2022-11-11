@@ -121,7 +121,9 @@ readElabSource :: IO (Maybe Src)
 readElabSource = RL.read elabSource
 
 writeElabSource :: Maybe Src -> IO ()
-writeElabSource msrc = RL.write elabSource msrc
+writeElabSource msrc = do
+  debug ["WRITTEN", case msrc of Nothing -> "Nothing"; _ -> "Just"]
+  RL.write elabSource msrc
 
 -- Top-level nametable
 --------------------------------------------------------------------------------
@@ -137,5 +139,5 @@ reset = do
   ADL.clear metaCxt
   RF.write frozen 0
   ADL.clear topInfo
-  RL.write elabSource Nothing
+  writeElabSource Nothing
   RL.write topNameTable mempty

@@ -36,7 +36,7 @@ elabError :: LocalsArg => LvlArg => P.Tm -> Error -> IO a
 elabError t err = do
   src <- readElabSource >>= \case
     Just src -> pure src
-    Nothing  -> impossible
+    Nothing  -> debug ["HOW IS THIS POSSILE"] >> impossible
   throwIO $ ErrorInCxt src ?locals ?lvl t err
 
 unify :: LvlArg => LocalsArg => P.Tm -> G -> G -> IO ()
@@ -568,10 +568,10 @@ inferTop = \case
 
     inferTop top
 
--- | Reset ElabState, elaborate top-level presyntax, fill up `topInfo`.
+-- | Elaborate top-level presyntax, fill up `topInfo`.
+--   Precondition: ElabState is in reset state.
 elab :: P.TopLevel -> IO NT.NameTable
 elab top = do
-  reset
   let ?nameTable = mempty
       ?topLvl    = 0
   inferTop top

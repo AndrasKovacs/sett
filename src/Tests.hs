@@ -243,3 +243,8 @@ t16 = justElab $ unlines [
 tConst = justElab $ unlines [
   "const := λ {A}{B}(x : A) (y : B). x"
   ]
+
+eqProd = justElab $ unlines [
+  "eqprod : {A B : Set} {p q : A * B} -> (p = q) = ((p.1 = q.1) * (p.2 = q.2))",
+  " := \\{A} {B} {p} {q}. refl {Set} {p = q}"
+  ]
