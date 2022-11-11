@@ -1,0 +1,22 @@
+Cat : Set
+  := (Ob : Set)
+   * (Hom : Ob -> Ob -> Set)
+   * (id : {x : Ob} -> Hom x x)
+   * (comp : {x y z : Ob} -> Hom y z -> Hom x y -> Hom x z)
+   * (idl : {x y : Ob} (f : Hom x y) -> comp id f = f)
+   * (idr : {x y : Ob} (f : Hom x y) -> comp f id = f)
+   * (assoc : {x y z w : Ob} (f : Hom z w) (g : Hom y z) (h : Hom x y) -> comp f (comp g h) = comp (comp f g) h)
+   * Top
+
+op : Cat -> Cat
+  := \C. ( C.Ob
+         , \x y. C.Hom y x
+         , C.id
+         , \f g. C.comp g f
+         , C.idr
+         , C.idl
+         , \f g h. sym (C.assoc h g f)
+         , tt)
+
+opop : (C : Cat) -> op (op C) = C
+  := \_. refl

@@ -2,8 +2,8 @@
 Iso : Set -> Set -> Set
   := \A B. (to    : A -> B)
          * (from  : B -> A)
-         * (eto   : (a : A) -> from (to a) = a)
-         * (efrom : (b : B) -> to (from b) = b)
+         * (eto   : El ((a : A) -> from (to a) = a))
+         * (efrom : El ((b : B) -> to (from b) = b))
          * Top
 
 id : {A} -> Iso A A
@@ -24,5 +24,20 @@ comp : {A B C} -> Iso B C -> Iso A B -> Iso A C
 idl : {A B} {f : Iso A B} -> comp id f = f
   := ( \_. refl
      , \_. refl
-     , _
-     )
+     , tt
+     , tt
+     , tt)
+
+idr : {A B} {f : Iso A B} -> comp f id = f
+  := ( \_. refl
+     , \_. refl
+     , tt
+     , tt
+     , tt)
+
+assoc : {A B C D} {f : Iso C D} {g : Iso B C} {h : Iso A B} -> comp f (comp g h) = comp (comp f g) h
+  := ( \_. refl
+     , \_. refl
+     , tt
+     , tt
+     , tt)
