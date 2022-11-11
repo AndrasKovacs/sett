@@ -4,3 +4,5 @@ id2 : {A : Set} → A → A := λ x. id x
 id3 : {A} → A → A := id
 
 const := λ {A}{B}(x : A) (y : B). x
+
+foo := Set ={Set} Set
