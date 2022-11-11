@@ -248,3 +248,9 @@ eqProd = justElab $ unlines [
   "eqprod : {A B : Set} {x y : A * B} -> (x = y) = ((x.1 = y.1) * (x.2 = y.2))",
   " := \\{A} {B} {x} {y}. refl {Set} {x = y}"
   ]
+
+coeProd = justElab $ unlines [
+  "coeprod : {A1 B1 A2 B2 : Set} (p : (A1 * B1) = (A2 * B2)) {x}",
+  "        -> coe {A1 * B1} {A2 * B2} p x = {A2 * B2} (coe {A1} {A2} p.1 x.1 , coe {B1} {B2} (p.2 x.1) x.2)",
+  "  := refl"
+  ]
