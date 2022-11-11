@@ -1,0 +1,7 @@
+
+
+coerefl : {A : Set} {x : A} {p : A = A} -> coe {A} {A} p x = x
+  := refl
+
+coetrans : {A B C : Set} {x : A} {p : A = B} {q : B = C} -> (coe {B} {C} q (coe {A} {B} p x)) = coe {A} {C} (trans p q) x
+  := refl
