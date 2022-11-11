@@ -147,7 +147,12 @@ subtype pt t ~tv (G a fa) (G b fb) = do
 checkEl :: InCxt (P.Tm -> GTy -> IO S.Tm)
 checkEl topt (G topa ftopa) = do
   (ftopaTrace, ftopa) <- forceAllWithTraceEq ftopa
-  debug ["checkEl", P.showTm topt, show topt, showTm (quote topa), show ftopa]
+  debug ["checkEl"
+        , P.showTm topt
+        , show topt
+        , showTm (quote topa)
+        ]
+  -- debug [show ftopa]
   case (topt, ftopa) of
 
     (P.Parens _ t _, ftopa) ->
