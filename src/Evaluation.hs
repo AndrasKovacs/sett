@@ -213,7 +213,7 @@ coe a b p t = case (a, b) of
     let t1  = proj1 t
         t2  = proj2 t
         t1' = coe a a' (proj1 p) t1
-        t2' = coe (b $$ t1) (b' $$ t1') (proj2 p) t2
+        t2' = coe (b $$ t1) (b' $$ t1') (proj2 p `appE` t1) t2
     in Pair t1' t2'
 
   (Set,  Set )   -> t
@@ -242,11 +242,14 @@ coe a b p t = case (a, b) of
 
 coeTrans :: LvlArg => Val -> Val -> Val -> Val -> Val
 coeTrans a b p t = case t of
-  t@(Flex h sp _)                -> Flex (FHCoe (flexHeadMeta h) a b p t) SId b
-  t@(Unfold h sp ft _)           -> Unfold (UHCoe a b p t) SId (coeTrans a b p ft) b
-  Rigid (RHCoe a' _ p' t') SId _ -> coe a' b (Trans Set a' a b p' p) t'
-  Magic m                        -> Magic m
-  t                              -> coeRefl a b p t
+  Flex (FHCoe x a' _ p' t') SId _ -> coe a' b (Trans Set a' a b p' p) t'
+
+  -- TODO: coe-refl should compute if the types are rigid but the body is flex!
+  t@(Flex h sp _)                 -> Flex (FHCoe (flexHeadMeta h) a b p t) SId b
+  t@(Unfold h sp ft _)            -> Unfold (UHCoe a b p t) SId (coeTrans a b p ft) b
+  Rigid (RHCoe a' _ p' t') SId _  -> coe a' b (Trans Set a' a b p' p) t'
+  Magic m                         -> Magic m
+  t                               -> coeRefl a b p t
 
 coeRefl :: LvlArg => Val -> Val -> Val -> Val -> Val
 coeRefl a b p t = case runConv (conv a b) of
@@ -735,8 +738,8 @@ convSp sp sp' = do
     _                                           -> throwIO Diff
 
 -- | Magical rigid coe conversion.
-convCoe :: LvlArg => Val -> Val -> Val -> Val -> Spine -> Val -> Val -> Val -> Val -> Spine -> IO ()
-convCoe a b p t sp a' b' p' t' sp' = do
+convCoeCoe :: LvlArg => Val -> Val -> Val -> Val -> Spine -> Val -> Val -> Val -> Val -> Spine -> IO ()
+convCoeCoe a b p t sp a' b' p' t' sp' = do
 
   -- if spines are empty, then by assumption we know that target types are the same
   case (sp, sp') of (SId, SId) -> pure ()
@@ -755,7 +758,7 @@ convRigidRel :: LvlArg => RigidHead -> Spine -> RigidHead -> Spine -> IO ()
 convRigidRel h sp h' sp' = case (h, h') of
   (RHLocalVar x _ _, RHLocalVar x' _ _ ) -> convEq x x' >> convSp sp sp'
   (RHPostulate x _ , RHPostulate x' _  ) -> convEq x x' >> convSp sp sp'
-  (RHCoe a b p t   , RHCoe a' b' p' t' ) -> convCoe a b p t sp a' b' p' t' sp'
+  (RHCoe a b p t   , RHCoe a' b' p' t' ) -> convCoeCoe a b p t sp a' b' p' t' sp'
   (RHExfalso a p   , RHExfalso a' p'   ) -> convExfalso a a' sp sp'
   _                                      -> throwIO Diff
 
