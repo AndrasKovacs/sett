@@ -1,55 +1,56 @@
 Cat : Set
-  := (Ob : Set)
-   * (Hom : Ob -> Ob -> Set)
-   * (id : {x : Ob} -> Hom x x)
-   * (comp : {x y z : Ob} -> Hom y z -> Hom x y -> Hom x z)
-   * (idl : El ({x y : Ob} (f : Hom x y) -> comp id f = f))
-   * (idr : El ({x y : Ob} (f : Hom x y) -> comp f id = f))
-   * (assoc : El ({x y z w : Ob} (f : Hom z w) (g : Hom y z) (h : Hom x y) -> comp f (comp g h) = comp (comp f g) h))
-   * Top
+  := (Ob    : Set)
+   × (Hom   : Ob → Ob → Set)
+   × (id    : {x} → Hom x x)
+   × (comp  : {x y z} → Hom y z → Hom x y → Hom x z)
+   × (idl   : {x y} (f : Hom x y) → comp id f = f)
+   × (idr   : {x y} (f : Hom x y) → comp f id = f)
+   × (assoc : {x y z w} (f : Hom z w) (g : Hom y z) (h : Hom x y) → comp f (comp g h) = comp (comp f g) h)
+   × ⊤
 
-op : Cat -> Cat
-  := \C. ( C.Ob
-         , \x y. C.Hom y x
-         , C.id
-         , \f g. C.comp g f
-         , C.idr
-         , C.idl
-         , \f g h. sym (C.assoc h g f)
-         , tt )
+op : Cat → Cat
+  := λ C. ( C.Ob
+          , λ x y. C.Hom y x
+          , C.id
+          , λ f g. C.comp g f
+          , C.idr
+          , C.idl
+          , λ f g h. sym (C.assoc h g f)
+          , tt )
 
-opop : (C : Cat) -> op (op C) = C
-  := \_. refl
+opop : (C : Cat) → op (op C) = C
+  := λ _. refl
 
-Psh : Cat -> Set
-  := \C. (ob : C.Ob -> Set)
-       * (subst : {x y} -> ob y -> C.Hom x y -> ob x)
-       * (id : El ({x} (v : ob x) -> subst v C.id = v))
-       * (comp : El ({x y z} {f : C.Hom y z} {g: C.Hom x y} (v : ob z) -> subst v (C.comp f g) = subst (subst v f) g))
-       * Top
+Psh : Cat → Set
+  := λ C. (ob    : C.Ob → Set)
+        × (subst : {x y} → ob y → C.Hom x y → ob x)
+        × (id    : {x} (v : ob x) → subst v C.id = v)
+        × (comp  : {x y z} {f : C.Hom y z} {g: C.Hom x y} (v : ob z)
+                   → subst v (C.comp f g) = subst (subst v f) g)
+        × ⊤
 
-PshHom : (C : Cat) -> Psh C -> Psh C -> Set
-  := \C F G. (map : {x} -> F.ob x -> G.ob x)
-           * (natural : El ({x y} {f : C.Hom x y} {v : F.ob y} -> map (F.subst v f) = G.subst (map v) f))
-           * Top
+PshHom : (C : Cat) → Psh C → Psh C → Set
+  := λ C F G. (map : {x} → F.ob x → G.ob x)
+            × (natural : {x y} {f : C.Hom x y} {v : F.ob y} → map (F.subst v f) = G.subst (map v) f)
+            × ⊤
 
-PshId : (C : Cat) (F : Psh C) -> PshHom C F F
-  := \C F. ( \v. v
-           , refl
-           , tt)
+PshId : (C : Cat) (F : Psh C) → PshHom C F F
+  := λ C F. ( λ v. v
+            , refl
+            , tt)
 
-PshComp : (C : Cat) (F G H : Psh C) (A : PshHom C G H) (B : PshHom C F G) -> PshHom C F H
-  := \C F G H A B.
-     ( \v. A.map (B.map v)
-     , \{x} {y} {f} {v}. trans (ap A.map (B.natural{_}{_}{f}{v})) A.natural
+PshComp : (C : Cat) (F G H : Psh C) (A : PshHom C G H) (B : PshHom C F G) → PshHom C F H
+  := λ C F G H A B.
+     ( λ v. A.map (B.map v)
+     , λ {f:=f} {v}. trans (ap A.map (B.natural{_}{_}{f}{v})) A.natural
      , tt)
 
-PshCat : Cat -> Cat
-  := \C. ( Psh C
+PshCat : Cat → Cat
+  := λ C.( Psh C
          , PshHom C
-         , \{F}. PshId C F
-         , \{F} {G} {H} A B. PshComp C F G H A B
-         , \A. refl
-         , \A. refl
-         , \_ _ _. refl
+         , λ {F}. PshId C F
+         , λ {F} {G} {H} A B. PshComp C F G H A B
+         , λ _. refl
+         , λ _. refl
+         , λ _ _ _. refl
          , tt)

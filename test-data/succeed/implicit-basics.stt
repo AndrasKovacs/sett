@@ -5,4 +5,4 @@ id3 : {A} → A → A := id
 
 const := λ {A}{B}(x : A) (y : B). x
 
-foo := Set ={Set} Set
+const2 := const {B := Set}

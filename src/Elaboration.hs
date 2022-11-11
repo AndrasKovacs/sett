@@ -370,8 +370,8 @@ infer topt = do
       pure $! Infer S.Tt (gjoin (V.El V.Top))
 
     topt@(P.Eq t Nothing u) -> do
-      Infer t tty <- infer t
-      Infer u uty <- infer u
+      Infer t tty <- insertApps $ infer t
+      Infer u uty <- insertApps $ infer u
       unify topt tty uty
       let a = quote (g1 tty)
       pure $! Infer (S.Eq a t u) gProp

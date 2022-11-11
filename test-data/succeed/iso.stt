@@ -1,43 +1,31 @@
+id : {A : Set} → A → A
+ := λ x. x
 
-Iso : Set -> Set -> Set
-  := \A B. (to    : A -> B)
-         * (from  : B -> A)
-         * (eto   : El ((a : A) -> from (to a) = a))
-         * (efrom : El ((b : B) -> to (from b) = b))
+comp : {A B C : Set} → (B → C) → (A → B) → A → C
+ := λ f g x. f (g x)
+
+Iso : Set → Set → Set
+ := λ A B. (to    : A → B)
+         * (from  : B → A)
+         * (eto   : comp from to = id)
+         * (efrom : comp to from = id)
          * Top
 
-id : {A} -> Iso A A
-  := ( \a. a
-     , \a. a
-     , \a. refl
-     , \a. refl
-     , tt)
+Id : {A} → Iso A A
+  := (id, id, refl, refl, tt)
 
-
-comp : {A B C} -> Iso B C -> Iso A B -> Iso A C
+Comp : {A B C} → Iso B C → Iso A B → Iso A C
   := \f g. ( \a. f.to (g.to a)
            , \c. g.from (f.from c)
            , \a. trans (ap g.from (f.eto (g.to a))) (g.eto a)
            , \c. trans (ap f.to (g.efrom (f.from c))) (f.efrom c)
            , tt)
 
-idl : {A B} {f : Iso A B} -> comp id f = f
-  := ( \_. refl
-     , \_. refl
-     , tt
-     , tt
-     , tt)
+Idl : {A B} {f : Iso A B} → Comp Id f = f
+  := refl
 
-idr : {A B} {f : Iso A B} -> comp f id = f
-  := ( \_. refl
-     , \_. refl
-     , tt
-     , tt
-     , tt)
+Idr : {A B} {f : Iso A B} → Comp f Id = f
+  := refl
 
-assoc : {A B C D} {f : Iso C D} {g : Iso B C} {h : Iso A B} -> comp f (comp g h) = comp (comp f g) h
-  := ( \_. refl
-     , \_. refl
-     , tt
-     , tt
-     , tt)
+Assoc : {A B C D} {f : Iso C D} {g : Iso B C} {h : Iso A B} → Comp f (Comp g h) = Comp (Comp f g) h
+  := refl

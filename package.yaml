@@ -98,7 +98,7 @@ library:
   - -Wno-missing-pattern-synonym-signatures
   - -fmax-relevant-binds=3
   - -fmax-valid-hole-fits=0
-  # - -fplugin StrictImplParams
+  - -fplugin StrictImplParams
 
 executable:
   source-dirs: exe

@@ -330,19 +330,22 @@ psubst' psub t = do
 
 metaExpansion' :: LvlArg => EnvArg => S.LocalsArg => Ty -> RevSpine -> IO S.Tm
 metaExpansion' a sp = do
-  let go = metaExpansion'; {-# inline go #-}
+  let go :: LvlArg => EnvArg => S.LocalsArg => Ty -> RevSpine -> IO S.Tm
+      go = metaExpansion'; {-# inline go #-}
 
-      bind x a qa k = do
-        let var     = Var ?lvl a
-        let ?lvl    = ?lvl + 1
-        let ?env    = EDef ?env
-        let ?locals = S.LBind ?locals x qa
+      bind :: Name -> Ty -> S.Ty -> (LvlArg => EnvArg => S.LocalsArg => Val -> a)
+                                 -> LvlArg => EnvArg => S.LocalsArg => a
+      bind x a qa k =
+        let var     = Var ?lvl a in
+        let ?lvl    = ?lvl + 1 in
+        let ?env    = EDef ?env var in
+        let ?locals = S.LBind ?locals x qa in
         k var
       {-# inline bind #-}
 
   a <- forceSet a
   case (a, sp) of
-    (a, RSId) ->
+    (a, RSId) -> do
       freshMeta (gjoin a)
     (Pi x i a b, RSApp t _ sp) -> do
       let qa = quote a
@@ -551,6 +554,7 @@ fromPrTy0 = let ?lvl = 0 in fromPrTy
 prune :: PartialSub -> MetaVar -> Spine -> IO (MetaVar, Spine)
 prune psub m sp = do
   unless (psub^.allowPruning) (throwIO PruningNotAllowed)
+  debug ["try expand", show m, show sp]
   (m, sp) <- etaExpandMeta m sp
   psp     <- mkPruneSp psub (reverseSpine sp)
   a       <- ES.unsolvedMetaType m
@@ -707,14 +711,6 @@ updatePSub (Lvl x) t psub = case IM.lookup x (psub^.sub) of
     let ?lvl = psub^.dom
     merged <- evalInDom psub <$!> merge t t'
     pure $! (psub & sub %~ IM.insert x merged)
-
-debugRhsSp :: Spine -> String
-debugRhsSp sp = go sp [] where
-  go SId = id
-  go (SApp sp (Var' x _ _) _) = go sp . (' ':) . (show x++)
-  go (SProj1 sp) = go sp . (" .1"++)
-  go (SProj2 sp) = go sp . (" .2"++)
-  go _ = id
 
 invertVal :: Lvl -> PartialSub -> Lvl -> Val -> Spine -> IO PartialSub
 invertVal solvable psub param t rhsSp = do

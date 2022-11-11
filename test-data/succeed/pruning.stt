@@ -1,13 +1,62 @@
 
-UEq : {A : Set} → A → A → Set
-  := \{A} x y. (P : A → Set) → P x → P y
+UEq : (A : Set) → A → A → Set
+  := λ A x y. (P : A → Set) → P x → P y
 
-urefl : {A : Set}{x : A} → UEq {A} x x
-  := \_ px. px
-
-the : (A : Set) → A → A := \ _ x. x
+urefl : (A : Set)(x : A) → UEq A x x
+  := λ _ _ _ px. px
 
 test1 : Set
-  := let m1 : (A B : Set) -> Set -> Set -> Set := _;
-     let test1 := \A B. the (UEq (m1 A A) (\x y. y)) urefl;
+  := let m1 : Set → Set → Set := _;
+     let m2 : Set → Set := _;
+     let p  : (A B : Set) → UEq Set (m2 A) (m1 A B → m1 A B)
+            := λ A B. urefl Set (m2 A);
+     Set
+
+test2 : Set
+  := let m1 : ⊥ → ⊥ → Set := _;
+     let m2 : ⊥ → Set := _;
+     let p  : (A B : ⊥) → UEq Set (m2 A) (m1 A B → m1 A B)
+            := λ A B. urefl Set (m2 A);
+     Set
+
+test3 : Set
+  := let m1 : Set × Set → Set := _;
+     let m2 : Set → Set := _;
+     let p  : (A B : Set) → UEq Set (m2 A) (m1 (A, B) → m1 (A, B))
+            := λ A B. urefl Set (m2 A);
+     Set
+
+test4 : Set
+  := let m1 : Set × Set → Set := _;
+     let m2 : Set → Set := _;
+     let p  : (A B : Set) → UEq Set (m2 A) (m1 (A, B) → m1 (B, A))
+            := λ A B. urefl Set (m2 A);
+     Set
+
+test5 : Set
+  := let m1 : Set → Set → Set × Set := _;
+     let m2 : Set → Set := _;
+     let p  : (A B : Set) → UEq Set (m2 A) ((m1 A B).1 → (m1 A B).1)
+            := λ A B. urefl Set (m2 A);
+     Set
+
+test6 : Set
+  := let m1 : Set → Set → Set × Set := _;
+     let m2 : Set → Set := _;
+     let p  : (A B : Set) → UEq Set (m2 A) ((m1 A B).2 → (m1 A B).2)
+            := λ A B. urefl Set (m2 A);
+     Set
+
+test7 : Set
+  := let m1 : Set → (Set → Set) → Set := _;
+     let m2 : Set → Set := _;
+     let p  : (A B : Set) → UEq Set (m2 A) (m1 A (λ _. B) → Set)
+            := λ A B. urefl Set (m2 A);
+     Set
+
+test8 : Set
+  := let m1 : Set → (Set → Set × Set) → Set := _;
+     let m2 : Set → Set := _;
+     let p  : (A B : Set) → UEq Set (m2 A) (m1 A (λ x. (B, x)) → Set)
+            := λ A B. urefl Set (m2 A);
      Set

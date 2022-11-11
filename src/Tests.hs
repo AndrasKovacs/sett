@@ -262,3 +262,25 @@ nounfold = justElab $ unlines [
   "foo : (P : Pointed) → P = P",
   "  := λ p. refl  "
   ]
+
+-- implicit multiple lambda binder syntax
+-- local name shadowing in printing
+-- fewer db indices in printed syntax
+-- Tagged
+-- small meta solution inlining
+-- disallow top shadowing
+
+
+pruneProj = justElab $ unlines [
+  "UEq : (A : Set) → A → A → Set",
+  "  := λ A x y. (P : A → Set) → P x → P y",
+  "",
+  "urefl : (A : Set)(x : A) → UEq A x x",
+  "  := λ _ _ _ px. px  ",
+  "test5 : Set",
+  "  := let m1 : Set → Set → Set × Set := _;",
+  "     let m2 : Set → Set := _;",
+  "     let p  : (A B : Set) → UEq Set (m2 A) ((m1 A B).1 → (m1 A B).1)",
+  "            := λ A B. urefl Set (m2 A);",
+  "     Set  "
+  ]

@@ -11,5 +11,6 @@ coefun : {A1 A2 B1 B2 : Set} {p : (A1 -> B1) = (A2 -> B2)} {f : A1 -> B1}
   := refl
 
 coepi : {A1 A2 : Set} {B1 : A1 -> Set} {B2 : A2 -> Set} {p : ((a : A1) -> B1 a) = ((a : A2) -> B2 a)} {f : (a : A1) -> B1 a}
-       -> coe {(a : A1) -> B1 a} {(a : A2) -> B2 a} p f = {(a : A2) -> B2 a} (\a. let a1 := coe {A2} {A1} (sym p.1) a; coe {B1 a1} {B2 a} (p.2 a1) (f a1))
+       -> coe {(a : A1) -> B1 a} {(a : A2) -> B2 a} p f ={(a : A2) -> B2 a}
+         (\a. let a1 := coe {A2} {A1} (sym p.1) a; coe {B1 a1} {B2 a} (p.2 a1) (f a1))
   := refl
