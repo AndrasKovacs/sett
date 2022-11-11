@@ -721,7 +721,14 @@ convEq :: Eq a => a -> a -> IO ()
 convEq x y = when (x /= y) $ throwIO Diff
 {-# inline convEq #-}
 
--- TODO: handle fieldProj vs proj1/2
+ensureNProj2 :: Int -> Spine -> IO Spine
+ensureNProj2 n sp
+  | n == 0 = pure sp
+  | n > 0 = case sp of
+      SProj2 t -> ensureNProj2 (n-1) t
+      _ -> throwIO Diff
+  | otherwise = impossible
+
 convSp :: LvlArg => Spine -> Spine -> IO ()
 convSp sp sp' = do
   let go   = conv; {-# inline go #-}
@@ -732,6 +739,12 @@ convSp sp sp' = do
     (SProj1 t           , SProj1 t'           ) -> goSp t t'
     (SProj2 t           , SProj2 t'           ) -> goSp t t'
     (SProjField t _ _ n , SProjField t' _ _ n') -> goSp t t' >> convEq n n'
+    (SProjField t _ _ n , SProj1 t')            -> do
+      t' <- ensureNProj2 n t'
+      convSp t t'
+    (SProj1 t           , SProjField t' _ _ n)  -> do
+      t <- ensureNProj2 n t
+      convSp t t'
     _                                           -> throwIO Diff
 
 -- | Magical rigid coe conversion.
