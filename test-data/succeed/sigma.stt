@@ -1,0 +1,12 @@
+
+Sigma : (A : Set) (B : A -> Set) -> Set
+  := \A B. (a : A) * B a
+
+proj1 : {A B} -> Sigma A B -> A
+  := \p. p.1
+
+proj2 : {A B} (p : Sigma A B) -> B (proj1 p)
+  := \p. p.2
+
+pair : {A} {B : A -> Set} (a : A) (b : B a) -> Sigma A B
+  := \a b. (a , b)

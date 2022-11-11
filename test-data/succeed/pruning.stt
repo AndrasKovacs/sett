@@ -1,0 +1,13 @@
+
+UEq : {A : Set} → A → A → Set
+  := \{A} x y. (P : A → Set) → P x → P y
+
+urefl : {A : Set}{x : A} → UEq {A} x x
+  := \_ px. px
+
+the : (A : Set) → A → A := \ _ x. x
+
+test1 : Set
+  := let m1 : (A B : Set) -> Set -> Set -> Set := _;
+     let test1 := \A B. the (UEq (m1 A A) (\x y. y)) urefl;
+     Set

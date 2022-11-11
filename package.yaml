@@ -126,6 +126,7 @@ tests:
       - sett
       - filepath
       - bytestring
+      - ansi-terminal
     ghc-options:
       - -O
       - -rtsopts
