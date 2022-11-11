@@ -209,6 +209,8 @@ loop state = do
       putStrLn ":out         show whole elaboration output"
       putStrLn ":bro         show defined top-level names and their types"
       putStrLn ":q           quit"
+      putStrLn ":debug       enable printing debugging information"
+      putStrLn ":nodebug     disable printing debugging information"
       putStrLn ":?           show this message"
       loop state
     ':':'q':_ -> do
