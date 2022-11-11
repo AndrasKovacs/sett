@@ -31,6 +31,8 @@ data Tm
   | Proj1 Tm Pos
   | Proj2 Tm Pos
 
+  | Tagged Span
+
   | Set  Span
   | Prop Span
   | Top  Span
@@ -46,7 +48,6 @@ data Tm
   | Sym Span
   | Trans Span
   | Ap Span
-
 
   | Hole Span
   deriving Show
@@ -66,6 +67,7 @@ span t = Span (left t) (right t) where
     Proj2 t _          -> left t
     ProjField t _      -> left t
     Lam l _ _ _ _      -> l
+    Tagged (Span l _)  -> l
     Set (Span l _)     -> l
     Prop (Span l _)    -> l
     Top     (Span l _) -> l
@@ -96,6 +98,7 @@ span t = Span (left t) (right t) where
     App _ _ (AINamedImpl _ r) -> r
     App _ u _                 -> right u
     Lam _ _ _ _ t             -> right t
+    Tagged (Span _ r)         -> r
     Set (Span _ r)            -> r
     Prop (Span _ r)           -> r
     Top     (Span _ r)        -> r

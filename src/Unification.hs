@@ -199,6 +199,9 @@ approxOccurs occ t = do
     S.InsertedMeta m _ -> goMeta m
     S.Meta m           -> goMeta m
     S.Let _ a t u      -> go a >> go t >> go u
+    S.TaggedSym{}      -> pure ()
+    S.Tag t            -> go t
+    S.Untag t          -> go t
     S.Set{}            -> pure ()
     S.Prop{}           -> pure ()
     S.Top{}            -> pure ()
@@ -225,6 +228,7 @@ psubstSp psub hd sp = do
     SProj1 t            -> S.Proj1 <$!> goSp t
     SProj2 t            -> S.Proj2 <$!> goSp t
     SProjField t tv a n -> S.ProjField <$!> goSp t <*!> pure (projFieldName tv a n) <*!> pure n
+    SUntag t            -> S.Untag <$!> goSp t
 
 psubst :: PartialSub -> Val -> IO S.Tm
 psubst psub topt = do
@@ -306,6 +310,8 @@ psubst psub topt = do
     Pair t u           -> S.Pair <$!> go t <*!> go u
     El a               -> S.El <$!> go a
     Prop               -> pure S.Prop
+    Tagged a x b       -> S.Tagged <$!> go a <*!> go x <*!> go b
+    Tag y              -> S.Tag <$!> go y
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
     Bot                -> pure S.Bot
@@ -568,6 +574,7 @@ partialQuoteSp hd sp = let
     SProj1 t            -> S.Proj1 <$!> goSp t
     SProj2 t            -> S.Proj2 <$!> goSp t
     SProjField t tv x n -> S.ProjField <$!> goSp t <*!> (pure $! projFieldName tv x n) <*!> pure n
+    SUntag t            -> S.Untag <$!> goSp t
 
 -- | Quote a value but ensure that the output contains no `Magic`.
 partialQuote :: LvlArg => S.NamesArg => Val -> IO S.Tm
@@ -612,6 +619,8 @@ partialQuote t = do
     Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a x b
     Set                -> pure S.Set
     Prop               -> pure S.Prop
+    Tagged a x b       -> S.Tagged <$!> go a <*> go x <*> go b
+    Tag y              -> S.Tag <$!> go y
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
     Bot                -> pure S.Bot
@@ -970,6 +979,7 @@ unifySp sp sp' = case (sp, sp') of
   (SProj1 t           , SProjField t' _ _ n)  -> do
     t <- ensureNProj2 n t
     unifySp t t'
+  (SUntag t           , SUntag t'           ) -> unifySp t t'
   _                                           -> throwIO CantUnify
 
 unify :: LvlArg => UnifyStateArg => S.NamesArg => G -> G -> IO ()
@@ -1114,6 +1124,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
                                          goJoin a a'
     (Set        , Set            ) -> pure ()
     (Prop       , Prop           ) -> pure ()
+    (Tagged a x b , Tagged a' x' b') -> goJoin a a' >> goJoin x x' >> goJoin b b'
     (Top        , Top            ) -> pure ()
     (Bot        , Bot            ) -> pure ()
     (Tt         , Tt             ) -> pure ()
@@ -1121,6 +1132,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (Rigid h sp a   , Rigid h' sp' _   ) -> withRelevance a (goRH h h' sp sp')
     (Lam x i a t    , Lam _ _ _ t'     ) -> goBind a x t t'
     (Pair t u       , Pair t' u'       ) -> goJoin t t' >> goJoin u u'
+    (Tag t          , Tag t'           ) -> goJoin t t'
     (RigidEq a t u  , RigidEq a' t' u' ) -> goJoin a a' >> goJoin t t' >> goJoin u u'
 
     (FlexEq _ a t u, FlexEq _ a' t' u') -> do
@@ -1214,6 +1226,10 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
     (Pair t u, t')  -> go (gjoin t) (gproj1 (G topt' t')) >> go (gjoin u) (gproj2 (G topt' t'))
     (t, Pair t' u') -> go (gproj1 (G topt t)) (gjoin t') >> go (gproj2 (G topt t)) (gjoin u')
+
+    (Tag t, t')  -> go (gjoin t) (guntag (G topt' t'))
+    (t, Tag t')  -> go (guntag (G topt t)) (gjoin t')
+
 
     (Tt, _) -> pure ()
     (_, Tt) -> pure ()

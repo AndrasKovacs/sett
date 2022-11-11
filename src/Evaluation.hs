@@ -1,9 +1,9 @@
 
 module Evaluation (
-    app, appE, appI, proj1, proj2, gproj1, gproj2, projField
+    app, appE, appI, proj1, proj2, gproj1, gproj2, projField, untag, guntag
   , eval, quote, eval0, quote0, nf, nf0, spine, spine0, spineIn, coe, eq
   , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
-  , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty
+  , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty, untagTy
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt
   , quoteNf, quoteSpWithOpt, localVar, forceAllWithTraceEq, eqProp, quoteInWithOpt
   , pattern Exfalso
@@ -135,6 +135,10 @@ gproj2 :: LvlArg => G -> G
 gproj2 (G t ft) = G (proj2 t) (proj2 ft)
 {-# inline gproj2 #-}
 
+guntag :: LvlArg => G -> G
+guntag (G t ft) = G (untag t) (untag ft)
+{-# inline guntag #-}
+
 -- | Args: type which is a sigma, value for the first projection, returns type of the
 --   second projection.
 proj2Ty :: LvlArg => Ty -> Val -> Ty
@@ -185,6 +189,26 @@ projField topt n = case topt of
   Rigid h sp a    -> Rigid  h (SProjField sp topt a n) (projFieldTy topt a n)
   Flex h sp a     -> Flex   h (SProjField sp topt a n) (projFieldTy topt a n)
   Unfold h sp t a -> Unfold h (SProjField sp topt a n) (projField t n) (projFieldTy topt a n)
+  Magic m         -> Magic m
+  _               -> impossible
+
+-- Tagged types
+--------------------------------------------------------------------------------
+
+taggedSym :: Val
+taggedSym = LamE na Set \a -> LamE nx a \x -> LamE nb Set \b -> Tagged a x b
+
+untagTy :: LvlArg => Ty -> Ty
+untagTy a = runIO $ forceSet a >>= \case
+  Tagged _ _ b    -> pure b
+  a               -> impossible
+
+untag :: LvlArg => Val -> Val
+untag t = case t of
+  Pair t u        -> t
+  Rigid h sp a    -> Rigid  h (SUntag sp) (untagTy a)
+  Flex h sp a     -> Flex   h (SUntag sp) (untagTy a)
+  Unfold h sp t a -> Unfold h (SUntag sp) (untag t) (untagTy a)
   Magic m         -> Magic m
   _               -> impossible
 
@@ -347,6 +371,7 @@ spine v sp =
     SProj1 t           -> proj1 (go t)
     SProj2 t           -> proj2 (go t)
     SProjField t _ _ n -> projField (go t) n
+    SUntag t           -> untag (go t)
 
 spineIn :: Lvl -> Val -> Spine -> Val
 spineIn l v sp = let ?lvl = l in spine v sp
@@ -415,6 +440,9 @@ eval t =
     S.InsertedMeta m ls -> insertedMeta m ls
     S.Meta x            -> meta x
     S.Let x a t u       -> let ?env = EDef ?env (eval t) in eval u
+    S.TaggedSym         -> taggedSym
+    S.Tag t             -> Tag (go t)
+    S.Untag t           -> untag (go t)
     S.Set               -> Set
     S.Prop              -> Prop
     S.Top               -> Top
@@ -748,6 +776,7 @@ convSp sp sp' = do
     (SProj1 t           , SProjField t' _ _ n)  -> do
       t <- ensureNProj2 n t
       convSp t t'
+    (SUntag t           , SUntag t')            -> goSp t t'
     _                                           -> throwIO Diff
 
 -- | Magical rigid coe conversion.
@@ -799,6 +828,11 @@ conv t u = do
       go a a'
       goBind (elSP sp a) b b'
 
+    (Tagged a x b, Tagged a' x' b') -> do
+      go a a'
+      go x x'
+      go b b'
+
     (El a, El a' ) -> go a a'
     (Set , Set   ) -> pure ()
     (Prop, Prop  ) -> pure ()
@@ -815,14 +849,17 @@ conv t u = do
     (RigidEq a t u , RigidEq a' t' u') -> go a a' >> go t t' >> go u u'
     (Lam _ _ _ t   , Lam _ _ a t'    ) -> goBind a t t'
     (Pair t u      , Pair t' u'      ) -> go t t' >> go u u'
+    (Tag t         , Tag t')           -> go t t'
 
     -- eta
     --------------------------------------------------------------------------------
 
-    (Lam _ i a t , t'              ) -> goBind a t (Cl \u -> app t' u i)
-    (t              , Lam _ i a t' ) -> goBind a (Cl \u -> app t u i) t'
-    (Pair t u    , t'              ) -> go t (proj1 t') >> go u (proj2 t')
-    (t              , Pair t' u'   ) -> go (proj1 t) t' >> go (proj2 t) u'
+    (Lam _ i a t , t'           ) -> goBind a t (Cl \u -> app t' u i)
+    (t           , Lam _ i a t' ) -> goBind a (Cl \u -> app t u i) t'
+    (Pair t u    , t'           ) -> go t (proj1 t') >> go u (proj2 t')
+    (t           , Pair t' u'   ) -> go (proj1 t) t' >> go (proj2 t) u'
+    (Tag t       , t'           ) -> go t (untag t')
+    (t           , Tag t'       ) -> go t (untag t')
 
     ------------------------------------------------------------
 
@@ -876,6 +913,7 @@ quoteSpWithOpt opt hd sp = let
     SProj1 t            -> S.Proj1 (goSp t)
     SProj2 t            -> S.Proj2 (goSp t)
     SProjField t tv x n -> S.ProjField (goSp t) (projFieldName tv x n) n
+    SUntag t            -> S.Untag (goSp t)
 
 quoteWithOpt :: LvlArg => UnfoldOpt -> Val -> S.Tm
 quoteWithOpt opt t = let
@@ -918,6 +956,8 @@ quoteWithOpt opt t = let
     Set                -> S.Set
     El a               -> S.El (go a)
     Prop               -> S.Prop
+    Tagged a x b       -> S.Tagged (go a) (go x) (go b)
+    Tag y              -> S.Tag (go y)
     Top                -> S.Top
     Tt                 -> S.Tt
     Bot                -> S.Bot

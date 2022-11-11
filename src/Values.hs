@@ -46,6 +46,7 @@ data Spine
   | SProj1 Spine
   | SProj2 Spine
   | SProjField Spine Val ~Ty Int -- projected value, its type, field index
+  | SUntag Spine
   deriving Show
 
 -- | Reversed spine.
@@ -55,6 +56,7 @@ data RevSpine
   | RSProj1 RevSpine
   | RSProj2 RevSpine
   | RSProjField Val ~Ty Int RevSpine
+  | RSUntag RevSpine
 
 reverseSpine :: Spine -> RevSpine
 reverseSpine = go RSId where
@@ -64,6 +66,7 @@ reverseSpine = go RSId where
     SProj1 t            -> go (RSProj1 acc) t
     SProj2 t            -> go (RSProj2 acc) t
     SProjField t tv a n -> go (RSProjField tv a n acc) t
+    SUntag t            -> go (RSUntag acc) t
 
 hasProjection :: Spine -> Bool
 hasProjection = \case
@@ -72,6 +75,7 @@ hasProjection = \case
   SProj1{}     -> True
   SProj2{}     -> True
   SProjField{} -> True
+  SUntag{}     -> True
 
 computeProjField :: Spine -> Int -> Spine
 computeProjField t n
@@ -147,6 +151,9 @@ data Val
 
   | Sg SP Name Ty Closure
   | Pair Val Val
+
+  | Tagged Val Val Val
+  | Tag Val
 
   | Prop
   | Top
