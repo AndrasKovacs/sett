@@ -1,0 +1,43 @@
+
+Iso : Set -> Set -> Set
+  := \A B. (to    : A -> B)
+         * (from  : B -> A)
+         * (eto   : El ((a : A) -> from (to a) = a))
+         * (efrom : El ((b : B) -> to (from b) = b))
+         * Top
+
+id : {A} -> Iso A A
+  := ( \a. a
+     , \a. a
+     , \a. refl
+     , \a. refl
+     , tt)
+
+
+comp : {A B C} -> Iso B C -> Iso A B -> Iso A C
+  := \f g. ( \a. f.to (g.to a)
+           , \c. g.from (f.from c)
+           , \a. trans (ap g.from (f.eto (g.to a))) (g.eto a)
+           , \c. trans (ap f.to (g.efrom (f.from c))) (f.efrom c)
+           , tt)
+
+idl : {A B} {f : Iso A B} -> comp id f = f
+  := ( \_. refl
+     , \_. refl
+     , tt
+     , tt
+     , tt)
+
+idr : {A B} {f : Iso A B} -> comp f id = f
+  := ( \_. refl
+     , \_. refl
+     , tt
+     , tt
+     , tt)
+
+assoc : {A B C D} {f : Iso C D} {g : Iso B C} {h : Iso A B} -> comp f (comp g h) = comp (comp f g) h
+  := ( \_. refl
+     , \_. refl
+     , tt
+     , tt
+     , tt)

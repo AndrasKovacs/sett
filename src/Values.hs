@@ -73,6 +73,11 @@ hasProjection = \case
   SProj2{}     -> True
   SProjField{} -> True
 
+computeProjField :: Spine -> Int -> Spine
+computeProjField t n
+  | n > 0  = SProj1 (computeProjField t (n-1))
+  | n == 0 = SProj2 t
+  | otherwise = impossible
 
 --------------------------------------------------------------------------------
 

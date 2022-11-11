@@ -949,7 +949,14 @@ unifyEq :: Eq a => a -> a -> IO ()
 unifyEq x y = when (x /= y) $ throwIO CantUnify
 {-# inline unifyEq #-}
 
--- TODO: handle FieldProj vs Proj1/2
+ensureNProj2 :: Int -> Spine -> IO Spine
+ensureNProj2 n sp
+  | n == 0 = pure sp
+  | n > 0 = case sp of
+      SProj2 t -> ensureNProj2 (n-1) t
+      _ -> throwIO CantUnify
+  | otherwise = impossible
+
 unifySp :: LvlArg => UnifyStateArg => S.NamesArg => Spine -> Spine -> IO ()
 unifySp sp sp' = case (sp, sp') of
   (SId                , SId                 ) -> pure ()
@@ -957,8 +964,13 @@ unifySp sp sp' = case (sp, sp') of
   (SProj1 t           , SProj1 t'           ) -> unifySp t t'
   (SProj2 t           , SProj2 t'           ) -> unifySp t t'
   (SProjField t _ _ n , SProjField t' _ _ n') -> unifySp t t' >> unifyEq n n'
+  (SProjField t _ _ n , SProj1 t')            -> do
+    t' <- ensureNProj2 n t'
+    unifySp t t'
+  (SProj1 t           , SProjField t' _ _ n)  -> do
+    t <- ensureNProj2 n t
+    unifySp t t'
   _                                           -> throwIO CantUnify
-
 
 unify :: LvlArg => UnifyStateArg => S.NamesArg => G -> G -> IO ()
 unify (G topt ftopt) (G topt' ftopt') = do
