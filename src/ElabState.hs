@@ -110,14 +110,6 @@ isFrozen x = do
   frz <- RF.read frozen
   pure $! x < frz
 
--- Loaded filepath
---------------------------------------------------------------------------------
-
-loadedFile :: RL.Ref (Maybe FilePath)
-loadedFile = runIO $ RL.new Nothing
-{-# noinline loadedFile #-}
-
-
 -- Source of code being elaborated
 --------------------------------------------------------------------------------
 
@@ -130,7 +122,6 @@ readElabSource = RL.read elabSource
 
 writeElabSource :: Maybe Src -> IO ()
 writeElabSource msrc = RL.write elabSource msrc
-
 
 -- Top-level nametable
 --------------------------------------------------------------------------------
@@ -146,5 +137,5 @@ reset = do
   ADL.clear metaCxt
   RF.write frozen 0
   ADL.clear topInfo
-  RL.write loadedFile Nothing
+  RL.write elabSource Nothing
   RL.write topNameTable mempty

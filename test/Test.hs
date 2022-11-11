@@ -13,6 +13,8 @@ import Paths_sett
 import Common
 import MainInteraction
 
+-- NOTE: stack test --coverage
+
 dropPrefix :: Eq a => [a] -> [a] -> [a]
 dropPrefix (x:xs) (y:ys) | x == y = dropPrefix xs ys
 dropPrefix _      ys              = ys
