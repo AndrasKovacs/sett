@@ -17,3 +17,9 @@ test2 : Set
      let test2 : (Set -> Set) -> UEq _ _
            := \f. the (UEq (m2 (\x. f x)) (f Set)) urefl;
      Set
+
+test3 : Set
+  := let m3 : ((Set -> Set) -> Set) -> Set := _;
+     let test3 : ((Set -> Set) -> Set) -> UEq _ _
+           := \f. the (UEq (m3 (\x. f (\y. x y))) (f (\x. Set))) urefl;
+     Set
