@@ -1,0 +1,8 @@
+funext : {A B : Set} {f g : A -> B} -> f = g -> ((a : A) -> f a = g a)
+  := \p a. p a
+
+eqfun : {A B : Set} {f g : A -> B} -> (f = g) = ((a : A) -> f a = g a)
+  := refl
+
+eqpi : {A : Set} {B : A -> Set} {f g : (a : A) -> B a} -> (f = g) = ((a : A) -> f a = g a)
+  := refl
