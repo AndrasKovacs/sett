@@ -204,7 +204,7 @@ checkEl topt (G topa ftopa) = do
       freshMeta (gEl (G topa ftopa))
 
     (topt, ftopa) -> do
-      Infer t tty <- insertApps' $ infer topt
+      Infer t tty <- insertApps $ infer topt
       unify topt tty (gEl (G topa ftopaTrace))
       pure t
 
@@ -280,7 +280,7 @@ check topt (G topa ftopa) = do
       freshMeta (G topa ftopa)
 
     (topt, ftopa) -> do
-      Infer t tty <- insertApps' $ infer topt
+      Infer t tty <- insertApps $ infer topt
       debug ["subtype", showTm (quote (g1 tty)), showTm (quote (g2 tty)), showTm (quote topa), showTm (quote ftopa)]
       subtype topt t (eval t) tty (G topa ftopa)
 

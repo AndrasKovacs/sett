@@ -239,3 +239,7 @@ t16 :: IO ()
 t16 = justElab $ unlines [
   "myRefl : {A x} → x ={A} x := refl"
   ]
+
+tConst = justElab $ unlines [
+  "const := λ {A}{B}(x : A) (y : B). x"
+  ]
