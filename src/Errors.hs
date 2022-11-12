@@ -28,6 +28,7 @@ data Error
   | AmbiguousUniverse
   | ExpectedSetProp
   | TypeIsNotProp
+  | TopLevelShadowing
 
 data ErrorInCxt = ErrorInCxt Src Locals Lvl P.Tm Error
 
@@ -69,6 +70,8 @@ instance Show ErrorInCxt where
             "Expected a type in Set or Prop"
           TypeIsNotProp ->
             "Expected a type in Prop"
+          TopLevelShadowing ->
+            "Top-level name is already defined"
 
     in render (srcToBs src) (P.span t) msg
 

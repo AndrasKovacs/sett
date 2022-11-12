@@ -278,7 +278,6 @@ nounfold = justElab $ unlines [
 -- printing overhaul:
 --   options:
 --     - toggle meta type printing
---     - compressed meta spine printing (when applied to all boundvars)
 --     - toggle inserted implicits printing (TODO: track inserted things)
 --     - toggle all implicit printing
 --     - toggle irrelevant term printing (we need type-informed printing for this!)
@@ -306,10 +305,5 @@ pruneProj = justElab $ unlines [
 
 
 test = justElab $ unlines [
-  "Nat : Set",
-  " := (n : Set) → (n → n) → n → n",
-  "",
-  "n10 : Nat := λ N s z. s (s (s (s (s (s z)))))",
-  "",
-  "approxConv  : n10 ={Nat} n10 := refl"
+  "foo : Set → Set → Set → Set → Set := λ A A A A. A"
   ]

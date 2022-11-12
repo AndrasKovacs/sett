@@ -575,6 +575,11 @@ inferTop = \case
 
     frz <- freezeMetas
     pushTop (TEDef x a t frz)
+
+    case NT.lookup x ?nameTable of
+      Nothing -> pure ()
+      Just _  -> elabError (P.Var x) TopLevelShadowing
+
     let ?nameTable = NT.insert (Bind x) (NT.Top ?topLvl a (gjoin va) (eval t)) ?nameTable
         ?topLvl    = ?topLvl + 1
 

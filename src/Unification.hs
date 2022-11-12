@@ -310,7 +310,7 @@ psubst psub topt = do
     Pair t u           -> S.Pair <$!> go t <*!> go u
     El a               -> S.El <$!> go a
     Prop               -> pure S.Prop
-    Tagged a x b       -> S.Tagged <$!> go a <*!> go x <*!> go b
+    -- Tagged a x b       -> S.Tagged <$!> go a <*!> go x <*!> go b
     Tag y              -> S.Tag <$!> go y
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
@@ -623,7 +623,7 @@ partialQuote t = do
     Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a x b
     Set                -> pure S.Set
     Prop               -> pure S.Prop
-    Tagged a x b       -> S.Tagged <$!> go a <*> go x <*> go b
+    -- Tagged a x b       -> S.Tagged <$!> go a <*> go x <*> go b
     Tag y              -> S.Tag <$!> go y
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
@@ -1127,7 +1127,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (El a        , El a'          ) -> goJoin a a'
     (Set         , Set            ) -> pure ()
     (Prop        , Prop           ) -> pure ()
-    (Tagged a x b, Tagged a' x' b') -> goJoin a a' >> goJoin x x' >> goJoin b b'
+    -- (Tagged a x b, Tagged a' x' b') -> goJoin a a' >> goJoin x x' >> goJoin b b'
     (Top         , Top            ) -> pure ()
     (Bot         , Bot            ) -> pure ()
     (Tt          , Tt             ) -> pure ()

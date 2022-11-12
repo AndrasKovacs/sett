@@ -9,7 +9,8 @@ import Common
 import Syntax
 import ElabState
 
--- TODO: shadowing is not handled at all now!
+-- import Debug.Trace
+
 --------------------------------------------------------------------------------
 
 -- printing precedences
@@ -34,6 +35,25 @@ ws = (' ':)
 
 goTm :: Int -> [String] -> Tm -> ShowS
 goTm prec ns t = go prec ns t where
+
+  -- TODO: more efficient printing & freshening
+  --       or just overhaul printing
+  count :: [String] -> String -> Int
+  count ns n = go ns 0 where
+    go []      acc = acc
+    go (n':ns) acc | n == n' = go ns (acc + 1)
+                   | True    = go ns acc
+
+  counted :: String -> Int -> String
+  counted x 0 = x
+  counted x n = x ++ show n
+
+  fresh :: [String] -> Name -> (String, String)
+  fresh ns NUnused   = ("_", "_")
+  fresh ns (NLit n)  = (,) $$! n $$! counted n (count ns n)
+  fresh ns (NSpan x) =
+    let n = spanToString x in
+    (,) $$! n $$! counted n (count ns n)
 
   piBind ns x Expl a = ('(':) . (x++) . (" : "++) . go letp ns a .(')':)
   piBind ns x Impl a = braces  ((x++) . (" : "++) . go letp ns a)
@@ -69,18 +89,18 @@ goTm prec ns t = go prec ns t where
     (Meta x, sp) -> par p appp $ (show x++) . goMetaSp ns sp
     (h, sp)      -> par p appp $ go appp ns h . goSpine ns sp
 
+  local :: [String] -> Ix -> String
+  local ns topIx = go ns topIx where
+    go (n:ns) 0 = case n of "_" -> '@':show topIx
+                            n   -> snd (fresh ns (NLit n))
+    go (n:ns) x = go ns (x - 1)
+    go _      _ = impossible
+
   go :: Int -> [String] -> Tm -> ShowS
   go p ns = \case
 
-    -- LocalVar (Ix x) -> case ns !! x of
-    --   "_" -> (('@':show x)++)
-    --   x   -> (x++)
-
-    LocalVar (Ix x) | x < length ns ->
-      case ns !! x of
-        "_" -> (('@':show x)++)
-        x   -> (x++)
-    LocalVar (Ix x) -> (('@':show x)++)
+    LocalVar x ->
+      (local ns x++)
 
     TopDef x _ _ -> runIO do
       str <- readTopInfo x >>= \case
@@ -88,9 +108,9 @@ goTm prec ns t = go prec ns t where
         _                   -> impossible
       pure $! (str++)
 
-    Lam (show -> x) i a t -> par p letp $ ("λ "++) . lamBind x i . goLam (x:ns) t where
-      goLam ns (Lam (show -> x) i a t) = ws . lamBind x i . goLam (x:ns) t
-      goLam ns t                       = (". "++) . go letp ns t
+    Lam (fresh ns -> (n,x)) i a t -> par p letp $ ("λ "++) . lamBind x i . goLam (n:ns) t where
+      goLam ns (Lam (fresh ns -> (n,x)) i a t) = ws . lamBind x i . goLam (n:ns) t
+      goLam ns t                               = (". "++) . go letp ns t
 
     EqSym `AppI` a `AppE` t `AppE` u ->
       par p eqp $ go appp ns t . (" ={"++) . go pairp ns a . ("} "++). go appp ns u
@@ -110,16 +130,16 @@ goTm prec ns t = go prec ns t where
     Proj2 t -> par p projp $ go projp ns t . (".2"++)
 
     Pi NUnused Expl a b  -> par p pip $ go sigmap ns a . (" → "++) . go pip ("_":ns) b
-    Pi (show -> x) i a b ->
-      par p pip $ piBind ns x i a . goPi (x:ns) b where
-        goPi ns (Pi (show -> x) i a b)
-          | x /= "_"  = piBind ns x i a . goPi (x:ns) b
+    Pi (fresh ns -> (n,x)) i a b ->
+      par p pip $ piBind ns x i a . goPi (n:ns) b where
+        goPi ns (Pi (fresh ns -> (n,x)) i a b)
+          | x /= "_"  = piBind ns x i a . goPi (n:ns) b
         goPi ns b = (" → "++) . go pip ns b
 
     Sg _ NUnused a b ->
       par p sigmap $ go eqp ns a . (" × "++) . go sigmap ("_":ns) b
-    Sg _ (show -> x) a b ->
-      par p sigmap $ sgBind ns x a . (" × "++) . go sigmap (x:ns) b
+    Sg _ (fresh ns -> (n,x)) a b ->
+      par p sigmap $ sgBind ns x a . (" × "++) . go sigmap (n:ns) b
 
     Postulate x _ -> runIO do
       str <- readTopInfo x >>= \case
@@ -132,9 +152,9 @@ goTm prec ns t = go prec ns t where
 
     Meta x -> (show x++)
 
-    Let (show -> x) a t u ->
+    Let (fresh ns -> (n,x)) a t u ->
       par p letp $ ("let "++) . (x++) . (" : "++) . go letp ns a
-      . (" := "++) . go letp ns t . ("; "++) . go letp (x:ns) u
+      . (" := "++) . go letp ns t . ("; "++) . go letp (n:ns) u
 
     TaggedSym  -> ("Tagged"++)
     Tag t      -> par p projp $ go projp ns t . (".tag"++)
