@@ -196,7 +196,11 @@ projField topt n = case topt of
 --------------------------------------------------------------------------------
 
 taggedSym :: Val
-taggedSym = LamE na Set \a -> LamE nx a \x -> LamE nb Set \b -> Tagged a x b
+taggedSym =
+  LamE na Set \a ->
+  LamE nb (PiE nx a \_ -> Set) \b ->
+  LamE nx a \x ->
+  Tagged a (Cl \x -> b `appE` x) x
 
 untagTy :: LvlArg => Ty -> Ty
 untagTy a = runIO $ forceSet a >>= \case
@@ -828,10 +832,10 @@ conv t u = do
       go a a'
       goBind (elSP sp a) b b'
 
-    (Tagged a x b, Tagged a' x' b') -> do
+    (Tagged a b x, Tagged a' b' x') -> do
       go a a'
+      goBind a b b'
       go x x'
-      go b b'
 
     (El a, El a' ) -> go a a'
     (Set , Set   ) -> pure ()
@@ -956,7 +960,7 @@ quoteWithOpt opt t = let
     Set                -> S.Set
     El a               -> S.El (go a)
     Prop               -> S.Prop
-    Tagged a x b       -> S.Tagged (go a) (go x) (go b)
+    Tagged a b x       -> S.Tagged (go a) (goBind a b) (go x)
     Tag y              -> S.Tag (go y)
     Top                -> S.Top
     Tt                 -> S.Tt

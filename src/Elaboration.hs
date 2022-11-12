@@ -272,8 +272,8 @@ check topt (G topa ftopa) = do
       u <- check u (gjoin (b $$~ eval t))
       pure $ S.Pair t u
 
-    (P.ProjField t span, V.Tagged a x b) | spanToBs span == fromString "tag" -> do
-      t <- check t (gjoin b)
+    (P.ProjField t span, V.Tagged a b x) | spanToBs span == fromString "tag" -> do
+      t <- check t (gjoin (b $$ x))
       pure $ S.Tag t
 
     (P.Let _ x ma t u, ftopa) -> do
@@ -470,14 +470,14 @@ infer topt = do
         _ -> do
           elabError topt $! ExpectedSg ty
 
-    P.ProjField topt x -> do
-      let fieldName = NSpan x
+    P.ProjField topt fieldSpan -> do
+      let fieldName = NSpan fieldSpan
       Infer t ga <- infer topt
       let ~vt = eval t
 
       forceSet (g2 ga) >>= \case
-        V.Tagged _ _ b | spanToBs x == fromString "untag" -> do
-          pure $! Infer (S.Untag t) (gjoin b)
+        V.Tagged _ b x | spanToBs fieldSpan == fromString "untag" -> do
+          pure $! Infer (S.Untag t) (gjoin (b $$ x))
         _ -> do
           let go a ix = forceSet a >>= \case
                 V.Sg _ x' a b | fieldName == x' -> do
@@ -489,7 +489,7 @@ infer topt = do
                 V.El (V.Sg _ x' a b) -> do
                   go (V.El (b $$~ projField vt ix)) (ix + 1)
                 _ ->
-                  elabError topt $ NoSuchField x  -- TODO: postpone
+                  elabError topt $ NoSuchField fieldSpan  -- TODO: postpone
 
           (ix, b) <- go (g2 ga) 0
           pure $! Infer (S.ProjField t fieldName ix) (gjoin b)
@@ -512,7 +512,7 @@ infer topt = do
         pure $ Infer (S.Let (NSpan x) a t u) uty
 
     P.Tagged _ -> do
-      let ty = V.PiE na V.Set \a -> V.PiE nx a \x -> V.PiE nb V.Set \_ -> V.Set
+      let ty = V.PiE na V.Set \a -> V.PiE nb (V.PiE nx a \x -> V.Set) \b -> V.PiE nx a \x -> V.Set
       pure $! Infer S.TaggedSym (gjoin ty)
 
     P.Exfalso _ -> do

@@ -247,6 +247,13 @@ psubst psub topt = do
         pure $! k a t
       {-# inline goBind #-}
 
+      goBindIO :: Val -> Closure -> (S.Tm -> S.Tm -> IO S.Tm) -> IO S.Tm
+      goBindIO a t k = do
+        (!a, ~va) <- psubst' psub a
+        t <- psubst (lift psub va) (appClIn (?lvl + 1) t (Var ?lvl va))
+        k a t
+      {-# inline goBindIO #-}
+
       goUnfolding unf act =
         catch @UnifyEx act (\_ -> go unf)
 
@@ -310,7 +317,7 @@ psubst psub topt = do
     Pair t u           -> S.Pair <$!> go t <*!> go u
     El a               -> S.El <$!> go a
     Prop               -> pure S.Prop
-    Tagged a x b       -> S.Tagged <$!> go a <*!> go x <*!> go b
+    Tagged a b x       -> goBindIO a b (\a' b' -> S.Tagged a' b' <$!> go x)
     Tag y              -> S.Tag <$!> go y
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
@@ -623,7 +630,7 @@ partialQuote t = do
     Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a x b
     Set                -> pure S.Set
     Prop               -> pure S.Prop
-    Tagged a x b       -> S.Tagged <$!> go a <*> go x <*> go b
+    Tagged a b x       -> S.Tagged <$!> go a <*> goBind a nx b <*> go x
     Tag y              -> S.Tag <$!> go y
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
@@ -1120,7 +1127,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
                                          goJoin a a'
     (Set        , Set            ) -> pure ()
     (Prop       , Prop           ) -> pure ()
-    (Tagged a x b , Tagged a' x' b') -> goJoin a a' >> goJoin x x' >> goJoin b b'
+    (Tagged a b x , Tagged a' b' x') -> goJoin a a' >> goBind a nx b b' >> goJoin x x'
     (Top        , Top            ) -> pure ()
     (Bot        , Bot            ) -> pure ()
     (Tt         , Tt             ) -> pure ()
