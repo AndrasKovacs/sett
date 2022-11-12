@@ -265,10 +265,29 @@ nounfold = justElab $ unlines [
 
 -- implicit multiple lambda binder syntax
 -- local name shadowing in printing
--- fewer db indices in printed syntax
--- Tagged
--- small meta solution inlining
 -- disallow top shadowing
+-- fewer db indices in printed syntax
+-- Allow Coq-style definition parameters
+-- Syntactic sugar for record construction:
+--   (field1 := x, field2 := y, ..., tt)
+
+-- Tagged
+-- tests
+-- small meta solution inlining
+--
+-- printing overhaul:
+--   options:
+--     - toggle meta type printing
+--     - compressed meta spine printing (when applied to all boundvars)
+--     - toggle inserted implicits printing (TODO: track inserted things)
+--     - toggle all implicit printing
+--     - toggle irrelevant term printing (we need type-informed printing for this!)
+--     - meta zonking
+--   where to put options
+--     - pragma in files
+--     - set from CLI
+
+-- printing options affect all printing including errors
 
 
 pruneProj = justElab $ unlines [
@@ -283,4 +302,14 @@ pruneProj = justElab $ unlines [
   "     let p  : (A B : Set) → UEq Set (m2 A) ((m1 A B).1 → (m1 A B).1)",
   "            := λ A B. urefl Set (m2 A);",
   "     Set  "
+  ]
+
+
+test = justElab $ unlines [
+  "Nat : Set",
+  " := (n : Set) → (n → n) → n → n",
+  "",
+  "n10 : Nat := λ N s z. s (s (s (s (s (s z)))))",
+  "",
+  "approxConv  : n10 ={Nat} n10 := refl"
   ]

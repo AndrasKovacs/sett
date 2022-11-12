@@ -134,6 +134,7 @@ subtype :: InCxt (P.Tm -> S.Tm -> Val -> V.GTy -> V.GTy -> IO S.Tm)
 subtype pt t ~tv (G a fa) (G b fb) = do
   fa <- forceAll fa
   fb <- forceAll fb
+  debug ["subtype", showTm (quote a), showTm (quote fa), showTm (quote b), showTm (quote fb)]
   case (fa, fb) of
     (V.Prop, V.Set ) -> pure $ S.El t
     (V.Set , V.Prop) -> case t of
@@ -142,7 +143,10 @@ subtype pt t ~tv (G a fa) (G b fb) = do
                    unify pt (gjoin tv) (gjoin (V.El m))
                    pure $! quote m
     (fa, fb) -> do
-      unify pt (G a fa) (G b fb)
+      unify pt (gjoin a) (gjoin b) -- TODO: we forget forcing for the sake of more approximation!
+                                   -- think about how to avoid forgetting.
+                                   -- Suggestion: pack the old and new fa-s into some "Unfold"
+                                   -- which witnesses equality of two arbitrary values.
       pure t
 {-# inline subtype #-}
 
@@ -295,7 +299,6 @@ check topt (G topa ftopa) = do
 
     (topt, ftopa) -> do
       Infer t tty <- insertApps $ infer topt
-      debug ["subtype", showTm (quote (g1 tty)), showTm (quote (g2 tty)), showTm (quote topa), showTm (quote ftopa)]
       subtype topt t (eval t) tty (G topa ftopa)
 
 

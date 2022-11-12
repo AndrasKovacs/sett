@@ -936,15 +936,24 @@ unifyEtaLong m sp rhs rhsty = forceAll rhs >>= \case
   rhs ->
     solve m sp rhs rhsty
 
--- | Try to unify when the sides are headed by different metas. We only retry in case of inversion
---   failure because we can't backtrack from destructive updates.
-unifyMetaMeta :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
-unifyMetaMeta m sp m' sp' ty =
+goUnifyMetaMeta :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
+goUnifyMetaMeta m sp m' sp' ty =
   catch
     (solve m sp (Flex (FHMeta m') sp' ty) ty)
     (\case
         CantInvertSpine -> solve m' sp' (Flex (FHMeta m) sp ty) ty
         e               -> throwIO e)
+
+-- | Try to unify when the sides are headed by different metas. We only retry in case of inversion
+--   failure because we can't backtrack from destructive updates.
+unifyMetaMeta :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
+unifyMetaMeta m sp m' sp' ty
+  -- We try to solve older metas first, to get a bit more dependency ordering in
+  -- metacontext. That can be beneficial in meta inlining, where we might not
+  -- do dependecy-order traversal and just do chronological traversal.
+  | m < m' = goUnifyMetaMeta m  sp  m' sp' ty
+  | True   = goUnifyMetaMeta m' sp' m  sp  ty
+
 
 ----------------------------------------------------------------------------------------------------
 -- Unification
@@ -1097,15 +1106,14 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
       forceUS :: Val -> IO Val
       forceUS t = case ?unifyState of
-        USRigid{} -> forceAllButEq t
-        USFull    -> forceAll t
-        _         -> force t
+        USFull -> forceAll t
+        _      -> force t
       {-# inline forceUS #-}
 
   ftopt  <- forceUS ftopt
   ftopt' <- forceUS ftopt'
 
-  debug ["unify", showTm' (quote ftopt), showTm' (quote ftopt')]
+  debug ["unify", showTm' (quote ftopt), showTm' (quote ftopt'), show ?unifyState]
   -- debug ["unifyNofrc", showTm' (quote topt), showTm' (quote topt')]
   -- debug ["unifyV", show ftopt, show ftopt']
 
@@ -1114,16 +1122,15 @@ unify (G topt ftopt) (G topt' ftopt') = do
     -- matching sides
     ------------------------------------------------------------
 
-    (Pi x i a b , Pi x' i' a' b' ) -> unifyEq i i' >> goJoin a a' >> goBind a x b b'
-    (Sg sp x a b, Sg _ x' a' b'  ) -> goJoin a a' >> goBind (elSP sp a) x b b'
-    (El a       , El a'          ) -> do debug ["unifyEl", showTm' (quote a), showTm' (quote a')]
-                                         goJoin a a'
-    (Set        , Set            ) -> pure ()
-    (Prop       , Prop           ) -> pure ()
-    (Tagged a x b , Tagged a' x' b') -> goJoin a a' >> goJoin x x' >> goJoin b b'
-    (Top        , Top            ) -> pure ()
-    (Bot        , Bot            ) -> pure ()
-    (Tt         , Tt             ) -> pure ()
+    (Pi x i a b  , Pi x' i' a' b' ) -> unifyEq i i' >> goJoin a a' >> goBind a x b b'
+    (Sg sp x a b , Sg _ x' a' b'  ) -> goJoin a a' >> goBind (elSP sp a) x b b'
+    (El a        , El a'          ) -> goJoin a a'
+    (Set         , Set            ) -> pure ()
+    (Prop        , Prop           ) -> pure ()
+    (Tagged a x b, Tagged a' x' b') -> goJoin a a' >> goJoin x x' >> goJoin b b'
+    (Top         , Top            ) -> pure ()
+    (Bot         , Bot            ) -> pure ()
+    (Tt          , Tt             ) -> pure ()
 
     (Rigid h sp a   , Rigid h' sp' _   ) -> withRelevance a (goRH h h' sp sp')
     (Lam x i a t    , Lam _ _ _ t'     ) -> goBind a x t t'
@@ -1137,7 +1144,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (TraceEq  a t u v, TraceEq  a' t' u' v') -> goUnfoldEqs a t u v a' t' u' v'
     (UnfoldEq a t u v, UnfoldEq a' t' u' v') -> goUnfoldEqs a t u v a' t' u' v'
 
-    (Unfold h sp t a, Unfold h' sp' t' _) -> do
+    (ftopt@(Unfold h sp t a), ftopt'@(Unfold h' sp' t' _)) -> do
 
       let dontunfold = case (h, h') of
            (UHSolvedMeta m, UHSolvedMeta m'  ) -> unifyEq m m' >> goSp sp sp'
@@ -1169,6 +1176,8 @@ unify (G topt ftopt) (G topt' ftopt') = do
             (UHSolvedMeta m, UHSolvedMeta m'  ) -> if m == m' then speculateSp else unfold
             (UHTopDef x _ _, UHTopDef x' _ _  ) -> if x == x' then speculateSp else unfold
             (UHCoe a b p t , UHCoe a' b' p' t') -> speculateCoe a b p t a' b' p' t'
+            (UHSolvedMeta{}, _                ) -> go (G topt t) (G topt' ftopt')
+            (_             , UHSolvedMeta{}   ) -> go (G topt ftopt) (G topt' t')
             _                                   -> unfold
 
         USFlex       -> dontunfold

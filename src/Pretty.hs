@@ -44,6 +44,31 @@ goTm prec ns t = go prec ns t where
   sgBind ns "_" a = go eqp ns a
   sgBind ns x   a = ('(':).(x++).(" : "++).go pairp ns a.(')':)
 
+  splitSpine :: Tm -> (Tm, [(Tm, Icit)])
+  splitSpine t = go t [] where
+    go (App t u i) acc = go t ((u,i):acc)
+    go t           acc = (t, acc)
+
+  isIdSp ns sp =
+    let go l [] = l == 0
+        go l ((LocalVar x, _):sp) | x == l - 1 = go (l-1) sp
+        go _ _ = False
+
+    in go (Ix (length ns)) sp
+
+  goMetaSp :: [String] -> [(Tm,Icit)] -> ShowS
+  goMetaSp ns sp | isIdSp ns sp = ("(..)"++)
+                 | True         = goSpine ns sp
+
+  goSpine ns [] = id
+  goSpine ns ((t, Expl):sp) = ws . go projp ns t . goSpine ns sp
+  goSpine ns ((t, Impl):sp) = ws . braces (go pairp ns t) . goSpine ns sp
+
+  goApp :: Int -> [String] -> Tm -> ShowS
+  goApp p ns t = case splitSpine t of
+    (Meta x, sp) -> par p appp $ (show x++) . goMetaSp ns sp
+    (h, sp)      -> par p appp $ go appp ns h . goSpine ns sp
+
   go :: Int -> [String] -> Tm -> ShowS
   go p ns = \case
 
@@ -72,8 +97,10 @@ goTm prec ns t = go prec ns t where
 
     -- Coe a b _ t -> par p appp $ ("coe "++) . go appp ns a . ws . go appp ns b . (" _ "++) . go projp ns t
 
-    App t u Expl -> par p appp $ go appp ns t . ws . go projp ns u
-    App t u Impl -> par p appp $ go appp ns t . ws . braces (go pairp ns u)
+    t@App{} -> goApp p ns t
+
+    -- App t u Expl -> par p appp $ go appp ns t . ws . go projp ns u
+    -- App t u Impl -> par p appp $ go appp ns t . ws . braces (go pairp ns u)
 
     Pair t u -> par p pairp $ go letp ns t . (", "++) . go pairp ns u
 

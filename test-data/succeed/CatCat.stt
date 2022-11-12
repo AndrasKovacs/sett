@@ -1,0 +1,39 @@
+
+Cat : Set
+  := (Ob    : Set)
+   × (Hom   : Ob → Ob → Set)
+   × (id    : {x} → Hom x x)
+   × (comp  : {x y z} → Hom y z → Hom x y → Hom x z)
+   × (idl   : {x y} (f : Hom x y) → comp id f = f)
+   × (idr   : {x y} (f : Hom x y) → comp f id = f)
+   × (assoc : {x y z w} (f : Hom z w) (g : Hom y z) (h : Hom x y) → comp f (comp g h) = comp (comp f g) h)
+   × ⊤
+
+Functor : Cat → Cat → Set
+  := λ C D.
+     (Ob   : C.Ob → D.Ob)
+   × (Hom  : {x y} → C.Hom x y → D.Hom (Ob x) (Ob y))
+   × (id   : {x} → Hom (C.id {x}) = D.id)
+   × (comp : {x y z}(f : C.Hom y z)(g : C.Hom x y) → Hom (C.comp f g) = D.comp (Hom f) (Hom g))
+   × ⊤
+
+Id : (C : Cat) → Functor C C
+  := λ C. (λ x. x, λ f. f, refl, λ _ _. refl, tt)
+
+Comp : (C D E : Cat) → Functor D E → Functor C D → Functor C E
+  := λ C D E F G. (
+    λ x. F.Ob (G.Ob x)
+  , λ f. F.Hom (G.Hom f)
+  , trans (ap F.Hom G.id) F.id
+  , λ f g. trans (ap F.Hom (G.comp f g)) (F.comp (G.Hom f) (G.Hom g))
+  , tt)
+
+CatCat : Cat
+  := (Cat
+    , Functor
+    , λ {x}. Id x
+    , λ {x}{y}{z}. Comp x y z
+    , λ _. refl
+    , λ _. refl
+    , λ _ _ _. refl
+    , tt)

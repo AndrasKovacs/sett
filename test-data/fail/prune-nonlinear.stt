@@ -1,0 +1,13 @@
+
+UEq : (A : Set) → A → A → Set
+  := λ A x y. (P : A → Set) → P x → P y
+
+urefl : (A : Set)(x : A) → UEq A x x
+  := λ _ _ _ px. px
+
+test1 : Set
+  := let m1 : Set → Set  := _;
+     let m2 : Set → Set → Set := _;
+     let p  : (A B : Set) → UEq Set (m2 A A) (m1 A → Set)
+            := λ A B. urefl Set (m2 A A);
+     Set

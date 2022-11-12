@@ -2,7 +2,7 @@
 module Evaluation (
     app, appE, appI, proj1, proj2, gproj1, gproj2, projField, untag, guntag
   , eval, quote, eval0, quote0, nf, nf0, spine, spine0, spineIn, coe, eq
-  , force, forceAll, forceMetas, eqSet, forceAllButEq, forceSet, unblock
+  , force, forceAll, forceMetas, eqSet, forceSet, unblock
   , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty, untagTy
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt
   , quoteNf, quoteSpWithOpt, localVar, forceAllWithTraceEq, eqProp, quoteInWithOpt
@@ -623,44 +623,6 @@ forceSet' v = case v of
 
 ------------------------------------------------------------
 
--- | Eliminate all unfoldings from the head except for `TraceEq`.
-forceAllButEq :: LvlArg => Val -> IO Val
-forceAllButEq v = case v of
-  topv@(Flex h sp _)    -> forceAllButEqFlex topv h sp
-  topv@(FlexEq x a t u) -> forceAllButEqFlexEq topv x a t u
-  Unfold _ _ v _        -> forceAllButEq' v
-  UnfoldEq _ _ _ v      -> forceAllButEq' v
-  t                     -> pure t
-{-# inline forceAllButEq #-}
-
-forceAllButEqFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
-forceAllButEqFlex topv h sp = case h of
-  FHMeta x        -> unblock x topv \v _ -> forceAllButEq' $! spine v sp
-  FHCoe x a b p t -> unblock x topv \_ _ -> do
-    a <- forceSet a
-    b <- forceSet b
-    t <- force t
-    forceAllButEq' $! coe a b p t
-{-# noinline forceAllButEqFlex #-}
-
-forceAllButEqFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val
-forceAllButEqFlexEq topv x a t u = unblock x topv \_ _ -> do
-  a <- forceSet a
-  t <- force t
-  u <- force u
-  forceAllButEq' $! eq a t u
-{-# noinline forceAllButEqFlexEq #-}
-
-forceAllButEq' :: LvlArg => Val -> IO Val
-forceAllButEq' v = case v of
-  hsp@(Flex h sp _)     -> forceAllButEqFlex hsp h sp
-  topv@(FlexEq x a t u) -> forceAllButEqFlexEq topv x a t u
-  Unfold _ _ v _        -> forceAllButEq' v
-  UnfoldEq _ _ _ v      -> forceAllButEq' v
-  t                     -> pure t
-
-------------------------------------------------------------
-
 -- | Only eliminate meta unfoldings from the head.
 forceMetas :: LvlArg => Val -> IO Val
 forceMetas v = case v of
@@ -942,11 +904,11 @@ quoteWithOpt opt t = let
 
   cont :: Val -> S.Tm
   cont = \case
-    Flex h sp a        -> goSp (goFlexHead h) sp
+    Flex h sp _        -> goSp (goFlexHead h) sp
     FlexEq x a t u     -> S.Eq (go a) (go t) (go u)
-    Rigid h sp a       -> goSp (goRigidHead h) sp
+    Rigid h sp _       -> goSp (goRigidHead h) sp
     RigidEq a t u      -> S.Eq (go a) (go t) (go u)
-    Unfold h sp v a    -> goSp (goUnfoldHead v h) sp
+    Unfold h sp v _    -> goSp (goUnfoldHead v h) sp
     UnfoldEq a t u v   -> S.Eq (go a) (go t) (go u)
     TraceEq a t u v    -> S.Eq (go a) (go t) (go u)
     Pair t u           -> S.Pair (go t) (go u)

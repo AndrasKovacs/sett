@@ -4,17 +4,18 @@ module Main where
 import Control.Exception
 import Control.Monad
 import Data.List
+import System.Console.ANSI (setSGRCode)
 import System.Directory.Recursive
+import System.Exit
 import System.FilePath
 import System.IO
-import System.Exit
 import qualified System.Console.ANSI.Codes as ANSI
 
 import Paths_sett
 
 import Common
 import MainInteraction
-import System.Console.ANSI (setSGRCode)
+
 
 -- NOTE: stack test --coverage
 
