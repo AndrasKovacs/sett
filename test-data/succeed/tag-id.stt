@@ -1,7 +1,8 @@
 
+TaggedEq := Tagged ((A : Set) * A * A) (\p. p.2.1 = p.2.2)
 
 Id : {A : Set} -> A -> A -> Set
-  := \{A} x y. Tagged ((A : Set) * A * A) (A,x,y) (x = y)
+  := \{A} x y. TaggedEq (A,x,y)
 
 projId : {A : Set} {x y} -> Id {A} x y -> x = y
   := \p. p .untag

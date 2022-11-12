@@ -152,7 +152,7 @@ data Val
   | Sg SP Name Ty Closure
   | Pair Val Val
 
-  | Tagged Val Val Val
+  | Tagged Val Closure Val
   | Tag Val
 
   | Prop
@@ -178,7 +178,7 @@ pattern LamI x a t = Lam x Impl a (Cl t)
 pattern PiE  x a b = Pi x Expl a (Cl b)
 pattern PiI  x a b = Pi x Impl a (Cl b)
 pattern SgP  x a b = Sg P x a (Cl b)
-pattern SpS  x a b = Sg S x a (Cl b)
+pattern SgS  x a b = Sg S x a (Cl b)
 
 pattern VUndefined  = Magic Undefined
 pattern VNonlinear  = Magic Nonlinear
