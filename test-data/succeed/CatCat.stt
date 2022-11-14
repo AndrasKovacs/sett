@@ -34,6 +34,6 @@ Idl : {C D}{F : Functor C D} → Comp C C D F (Id C) = F
 Idr : {C D}{F : Functor C D} → Comp C D D (Id D) F = F
   := refl
 
-Ass : {C₁ C₂ C₃ C₄}{F : Functor C₃ C₄}{G : Functor C₂ C₃}{H : Functor C₁ C₂}
-      → Comp F (Comp G H) = Comp (Comp F G) H
+Ass : {C1 C2 C3 C4}{F : Functor C3 C4}{G : Functor C2 C3}{H : Functor C1 C2}
+      → Comp C1 C3 C4 F (Comp C1 C2 C3 G H) = Comp C1 C2 C4 (Comp C2 C3 C4 F G) H
   := refl

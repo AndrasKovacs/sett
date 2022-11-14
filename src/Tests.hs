@@ -62,21 +62,21 @@ t9 = justElab $ unlines [
   "Refl : (A : Set)(x : A) → Eq A x x",
   "  := λ A x P px. px",
   "",
-  "test : ⊤ :=",
+  "test1 : ⊤ :=",
   "  let m : Set → Set",
   "      := _;",
   "  let p : (A : Set) → (P : Set → Set) → P (m A) → P A",
   "       := λ A P px. px;",
   "  tt",
   "",
-  "test : ⊤ :=",
+  "test2 : ⊤ :=",
   "  let m : (A : Set)(B : A → Set)(a : A)(b : B a) → Set",
   "   := _;",
   "  let p : (A : Set)(B : A → Set)(a : A)(b : B a) → Eq Set (m A B a b) A",
   "   := λ A B a b. Refl Set A;",
   "  tt",
   "",
-  "test : ⊤ :=",
+  "test3 : ⊤ :=",
   "  let m : (A : Set)(B : A → Set)(x : (a : A) × B a) → Set := _;",
   "  let p : (A : Set)(B : A → Set)(x : (a : A) × B a) → Eq Set (m A B x) A",
   "    := λ A B x. Refl Set A;",
@@ -91,44 +91,44 @@ t10 = justElab $ unlines [
   "Refl : (A : Set)(x : A) → Eq A x x",
   "  := λ A x P px. px",
 
-  "test : ⊤ :=",
+  "test1 : ⊤ :=",
   "  let m : Set × Set × Set → Set",
   "   := _;",
   "  let p : (A B C : Set) → Eq Set (m (A,B,C)) C",
   "   := λ A B C. Refl Set C; tt",
 
-  "test : ⊤ :=",
+  "test2 : ⊤ :=",
   "  let m : Set → Set",
   "   := _;",
   "  let p : (A : Set × Set) → Eq Set (m A.1) A.1",
   "   := λ A. Refl Set A.1; tt",
 
-  "test := ",
+  "test3 := ",
   "  let m : Set × Set → Set",
   "   := _;",
   "  let p : (A : Set × Set) → Eq Set (m (A.1, A.2)) A.2",
   "   := λ A. Refl Set A.2; tt",
 
-  "test : ⊤ := ",
+  "test4 : ⊤ := ",
   "  let m : (Set → Set) → Set",
   "   := _;",
   "  let p : (f : Set → Set) → Eq Set (m (λ x. f x)) (f Set)",
   "   := λ f. Refl Set (f Set); tt",
 
-  "test : ⊤ :=",
+  "test5 : ⊤ :=",
   "  let m : (Set → Set → Set) → Set",
   "   := _;",
   "  let p : (f : Set → Set → Set) → Eq Set (m (λ x y. f y x)) (f Set (Set → Set))",
   "   := λ f. Refl Set (f Set (Set → Set));",
   "  tt",
 
-  "test : ⊤ :=",
+  "test6 : ⊤ :=",
   "  let m : Set × Set",
   "   := _;",
   "  let p : Eq Set m.1 Set := Refl Set Set; ",
   "  tt",
 
-  "test : (x y : ⊤) → _ = y → x = y := λ x y p. p"
+  "test7 : (x y : ⊤) → _ = y → x = y := λ x y p. p"
   ]
 
 
@@ -200,7 +200,7 @@ t14 = justElab $ unlines [
   "testsymeq : {A : Set} {x y : A} → x = y → (x = x) = (y = x)",
   "          := λ {x:=x} p. ap (λ y. y = x) p",
 
-  "testsym : {A : Set} {x y : A} → x = y → y = x",
+  "testsym2 : {A : Set} {x y : A} → x = y → y = x",
   "     := λ p. coep (testsymeq p) refl",
 
   "testcoerefl : {A : Set} {x : A} {p : A = A} -> coe {A} {A} p x = x",
@@ -216,7 +216,7 @@ t14 = justElab $ unlines [
   "testcoecoe2 : (A1 A2 C1 C2 : Set)(f : A1 -> A2)(r : (A1 -> A2) = (C1 -> C2))",
   "              → (C1 → C2) := λ A1 A2 C1 C2 f r. coe r f",
 
-  "testcoecoe2 : {A1 A2 B C1 C2 : Set} {f : A1 -> A2} {p : (A1 -> A2) = B} {q : B =",
+  "testcoecoe3 : {A1 A2 B C1 C2 : Set} {f : A1 -> A2} {p : (A1 -> A2) = B} {q : B =",
   "              (C1 -> C2)} {r : (A1 -> A2) = (C1 -> C2)}",
   "            -> coe q (coe p f) = coe r f",
   "            := refl"
@@ -319,8 +319,8 @@ invertSg = justElab $ unlines [
   "  tt  "
   ]
 
-               a
-           m (A, x)
+           --     a
+           -- m (A, x)
 
-           A -> a.1
-           x -> a.2 : A
+           -- A -> a.1
+           -- x -> a.2 : A

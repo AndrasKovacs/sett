@@ -95,7 +95,7 @@ goTm prec ns t = go prec ns t where
                             n   -> snd (fresh ns (NLit n))
     go (n:ns) x = go ns (x - 1)
     go _      _ = "@" ++ show topIx
-    go _      _ = impossible
+    -- go _      _ = impossible
 
   go :: Int -> [String] -> Tm -> ShowS
   go p ns = \case

@@ -1,5 +1,5 @@
 
-module Unification where
+module Unification (freshMeta, freshMeta0, freshMeta1, unify, PartialSub(..)) where
 
 import Common
 
@@ -31,17 +31,25 @@ newVar a x cont =
 ----------------------------------------------------------------------------------------------------
 
 -- TODO: optimize
-freshMeta :: LvlArg => S.LocalsArg => GTy -> IO S.Tm
-freshMeta (G a fa) = do
-  let closed   = eval0 $ S.closeTy $ quote a
-  let ~fclosed = eval0 $ S.closeTy $ quote fa
-  m <- ES.newMeta (G closed fclosed)
+freshMeta :: LvlArg => S.LocalsArg => Ty -> IO S.Tm
+freshMeta a = do
+  let closed = eval0 $ S.closeTy $ quote a
+  m <- ES.newMeta closed
   pure $ S.InsertedMeta m ?locals
 
-freshMeta0 :: GTy -> IO S.Tm
+-- | Fresh meta in the empty env.
+freshMeta0 :: Ty -> IO S.Tm
 freshMeta0 a = do
   m <- ES.newMeta a
   pure $ S.InsertedMeta m S.LEmpty
+
+-- | Fresh meta in an extended env
+freshMeta1 :: LvlArg => S.LocalsArg => EnvArg => S.Ty -> Ty -> IO Closure
+freshMeta1 bind a = do
+  let ?lvl = ?lvl + 1; ?locals = S.LBind ?locals nx bind
+  let closed = eval0 $ S.closeTy $ quote a
+  m <- ES.newMeta closed
+  pure $ Cl \x -> evalIn ?lvl (EDef ?env x) (S.InsertedMeta m ?locals)
 
 catchUE :: IO a -> IO a -> IO a
 catchUE act handle = act `catch` \(_ :: UnifyEx) -> handle
@@ -52,7 +60,6 @@ catchUE act handle = act `catch` \(_ :: UnifyEx) -> handle
 ----------------------------------------------------------------------------------------------------
 
 type AllowPruning = Bool
-type AllowPruningArg = (?allowPruning :: AllowPruning)
 
 -- TODO: use mutable array instead
 data PartialSub = PSub {
@@ -346,7 +353,7 @@ metaExpansion' a sp = do
   a <- forceSet a
   case (a, sp) of
     (a, RSId) -> do
-      freshMeta (gjoin a)
+      freshMeta a
     (Pi x i a b, RSApp t _ sp) -> do
       let qa = quote a
       bind x a qa \var -> S.Lam x i qa <$!> go (b $$ var) sp
@@ -355,15 +362,15 @@ metaExpansion' a sp = do
       bind x a qa \var -> S.Lam x i qa <$!> go (El (b $$ var)) sp
     (Sg _ x a b, RSProj1 sp) -> do
       fst <- go a sp
-      S.Pair fst <$!> freshMeta (gjoin (b $$~ eval fst))
+      S.Pair fst <$!> freshMeta (b $$~ eval fst)
     (Sg _ x a b, RSProj2 sp) -> do
-      fst <- freshMeta (gjoin a)
+      fst <- freshMeta a
       S.Pair fst <$!> go (b $$~ eval fst) sp
     (El (Sg _ x a b), RSProj1 sp) -> do
       fst <- go (El a) sp
-      S.Pair fst <$!> freshMeta (gjoin (El (b $$~ eval fst)))
+      S.Pair fst <$!> freshMeta (El (b $$~ eval fst))
     (El (Sg _ x a b), RSProj2 sp) -> do
-      fst <- freshMeta (gjoin (El a))
+      fst <- freshMeta (El a)
       S.Pair fst <$!> go (El (b $$~ eval fst)) sp
     (a, RSProjField _  _  0 sp) ->
       go a (RSProj1 sp)
@@ -554,13 +561,12 @@ fromPrTy0 = let ?lvl = 0 in fromPrTy
 prune :: PartialSub -> MetaVar -> Spine -> IO (MetaVar, Spine)
 prune psub m sp = do
   unless (psub^.allowPruning) (throwIO PruningNotAllowed)
-  debug ["try expand", show m, show sp]
   (m, sp) <- etaExpandMeta m sp
   psp     <- mkPruneSp psub (reverseSpine sp)
   a       <- ES.unsolvedMetaType m
   pra     <- pure $! prTy0 psp a
   qpra    <- partialQuote0 pra
-  sol     <- fromPrTy0 psp a . eval0 <$!> freshMeta0 (gjoin pra)
+  sol     <- fromPrTy0 psp a . eval0 <$!> freshMeta0 pra
   qsol    <- partialQuote0 sol
   ES.solve m qsol sol
   case spine0 sol sp of
@@ -795,11 +801,11 @@ solveTopSp psub ls a sp rhs rhsty = do
     (Sg _ x a b, RSProj1 t) -> do
       fst <- go psub ls a t
       let ~vfst = eval fst
-      snd <- freshMeta (gjoin (b $$~ vfst))
+      snd <- freshMeta (b $$~ vfst)
       pure $ S.Pair fst snd
 
     (Sg _ x a b, RSProj2 t) -> do
-      fst <- freshMeta (gjoin a)
+      fst <- freshMeta a
       let ~vfst = eval fst
       snd <- go psub ls (b $$~ vfst) t
       pure $ S.Pair fst snd
@@ -807,11 +813,11 @@ solveTopSp psub ls a sp rhs rhsty = do
     (El (Sg _ x a b), RSProj1 t) -> do
       fst <- go psub ls (El a) t
       let ~vfst = eval fst
-      snd <- freshMeta (gjoin (El (b $$~ vfst)))
+      snd <- freshMeta (El (b $$~ vfst))
       pure $ S.Pair fst snd
 
     (El (Sg _ x a b), RSProj2 t) -> do
-      fst <- freshMeta (gjoin (El a))
+      fst <- freshMeta (El a)
       let ~vfst = eval fst
       snd <- go psub ls (El (b $$~ vfst)) t
       pure $ S.Pair fst snd
@@ -921,6 +927,7 @@ solveEtaShort :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> Va
 solveEtaShort m sp rhs rhsty =
   catchUE (solve m sp rhs rhsty)
           (unifyEtaLong m sp rhs rhsty)
+
 intersect :: LvlArg => UnifyStateArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
 intersect = uf -- TODO
 
@@ -949,10 +956,10 @@ goUnifyMetaMeta m sp m' sp' ty =
 --   failure because we can't backtrack from destructive updates.
 unifyMetaMeta :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
 unifyMetaMeta m sp m' sp' ty
-  -- We try to solve older metas first, to get a bit more dependency ordering in
-  -- metacontext. That can be beneficial in meta inlining, where we might not
-  -- do dependecy-order traversal and just do chronological traversal.
-  | m < m' = goUnifyMetaMeta m  sp  m' sp' ty
+  -- We try to newer metas first, to get a bit more dependency ordering in
+  -- the metacontext. That can be beneficial in meta inlining, where we might
+  -- not do dependecy-order traversal and just simply do older-first traversal.
+  | m > m' = goUnifyMetaMeta m  sp  m' sp' ty
   | True   = goUnifyMetaMeta m' sp' m  sp  ty
 
 
@@ -967,9 +974,9 @@ unifyEq x y = when (x /= y) $ throwIO CantUnify
 ensureNProj2 :: Int -> Spine -> IO Spine
 ensureNProj2 n sp
   | n == 0 = pure sp
-  | n > 0 = case sp of
+  | n > 0  = case sp of
       SProj2 t -> ensureNProj2 (n-1) t
-      _ -> throwIO CantUnify
+      _        -> throwIO CantUnify
   | otherwise = impossible
 
 unifySp :: LvlArg => UnifyStateArg => S.NamesArg => Spine -> Spine -> IO ()
@@ -979,12 +986,8 @@ unifySp sp sp' = case (sp, sp') of
   (SProj1 t           , SProj1 t'           ) -> unifySp t t'
   (SProj2 t           , SProj2 t'           ) -> unifySp t t'
   (SProjField t _ _ n , SProjField t' _ _ n') -> unifySp t t' >> unifyEq n n'
-  (SProjField t _ _ n , SProj1 t')            -> do
-    t' <- ensureNProj2 n t'
-    unifySp t t'
-  (SProj1 t           , SProjField t' _ _ n)  -> do
-    t <- ensureNProj2 n t
-    unifySp t t'
+  (SProjField t _ _ n , SProj1 t'           ) -> do {t' <- ensureNProj2 n t'; unifySp t t'}
+  (SProj1 t           , SProjField t' _ _ n ) -> do {t  <- ensureNProj2 n t ; unifySp t t'}
   (SUntag t           , SUntag t'           ) -> unifySp t t'
   _                                           -> throwIO CantUnify
 
@@ -1234,7 +1237,6 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
     (Tag t, t')  -> go (gjoin t) (guntag (G topt' t'))
     (t, Tag t')  -> go (guntag (G topt t)) (gjoin t')
-
 
     (Tt, _) -> pure ()
     (_, Tt) -> pure ()

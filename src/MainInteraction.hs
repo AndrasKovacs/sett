@@ -117,9 +117,9 @@ renderElab = do
       goMetaBlock frz m = do
         readMeta m >>= \case
           MEUnsolved a     -> putStrLn $ show m ++ " : "
-                               ++ showTm0 (quote0 (g1 a)) ++ " unsolved"
+                               ++ showTm0 (quote0 a) ++ " unsolved"
           MESolved _ t _ a -> putStrLn $ show m ++ " : "
-                               ++ showTm0 (quote0 (g1 a)) ++ " := " ++ showTm0 t
+                               ++ showTm0 (quote0 a) ++ " := " ++ showTm0 t
         goMetaBlock frz (m + 1)
 
   let goTop :: MetaVar -> Lvl -> IO ()
@@ -154,7 +154,7 @@ loop state = do
         Loaded path  -> action path
         _            -> putStrLn "no file loaded" >> loop state
 
-      loadTopEntry :: String -> (Lvl -> S.Ty -> GTy -> Val -> IO a) -> IO a
+      loadTopEntry :: String -> (Lvl -> S.Ty -> Ty -> Val -> IO a) -> IO a
       loadTopEntry x act = whenLoaded \_ -> do
         ntbl <- RL.read topNameTable
         case NT.lookupBS (FP.packUTF8 x) ntbl of

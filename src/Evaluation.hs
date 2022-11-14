@@ -5,7 +5,7 @@ module Evaluation (
   , force, forceAll, forceMetas, eqSet, forceSet, unblock
   , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty, untagTy
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt
-  , quoteNf, quoteSpWithOpt, localVar, forceAllWithTraceEq, eqProp, quoteInWithOpt
+  , quoteNf, quoteSpWithOpt, localVar, eqProp, quoteInWithOpt
   , pattern Exfalso
   , pattern Coe
   , pattern Refl
@@ -85,8 +85,8 @@ localVar topx = go ?env topx where
 
 meta :: MetaVar -> Val
 meta x = runIO $ readMeta x >>= \case
-  MEUnsolved (G _ a)     -> pure (Flex (FHMeta x) SId a)
-  MESolved _ _ v (G _ a) -> pure (Unfold (UHSolvedMeta x) SId v a)
+  MEUnsolved a     -> pure (Flex (FHMeta x) SId a)
+  MESolved _ _ v a -> pure (Unfold (UHSolvedMeta x) SId v a)
 
 appTy :: LvlArg => Ty -> Val -> Ty
 appTy a t = runIO $ forceSet a >>= \case
@@ -271,8 +271,8 @@ coe a b p t = case (a, b) of
 coeTrans :: LvlArg => Val -> Val -> Val -> Val -> Val
 coeTrans a b p t = case t of
   Flex (FHCoe x a' _ p' t') SId _ -> coe a' b (Trans Set a' a b p' p) t'
-  t@(Unfold h sp ft _)            -> Unfold (UHCoe a b p t) SId (coeTrans a b p ft) b
   Rigid (RHCoe a' _ p' t') SId _  -> coe a' b (Trans Set a' a b p' p) t'
+  t@(Unfold h sp ft _)            -> Unfold (UHCoe a b p t) SId (coeTrans a b p ft) b
   Magic m                         -> Magic m
   t                               -> coeRefl a b p t
 
@@ -350,14 +350,14 @@ eqSet a b = case (a, b) of
   (Magic m, _) -> Magic m
   (_, Magic m) -> Magic m
 
-  (a@(Unfold _ _ fa _), _) -> UnfoldEq Set a b (eqSet fa b)
-  (a, b@(Unfold _ _ fb _)) -> UnfoldEq Set a b (eqSet a fb)
+  (a@Rigid{}, b)   -> RigidEq Set a b
+  (a, b@Rigid{})   -> RigidEq Set a b
 
   (a@(Flex h _ _), b) -> FlexEq (flexHeadMeta h) Set a b
   (a, b@(Flex h _ _)) -> FlexEq (flexHeadMeta h) Set a b
 
-  (a@Rigid{}, b)   -> RigidEq Set a b
-  (a, b@Rigid{})   -> RigidEq Set a b
+  (a@(Unfold _ _ fa _), _) -> UnfoldEq Set a b (eqSet fa b)
+  (a, b@(Unfold _ _ fb _)) -> UnfoldEq Set a b (eqSet a fb)
 
   -- canonical mismatch
   ------------------------------------------------------------
@@ -396,10 +396,10 @@ maskEnv e ls ty = case (e, ls) of
 insertedMeta :: LvlArg => EnvArg => MetaVar -> S.Locals -> Val
 insertedMeta x locals = runIO do
   readMeta x >>= \case
-    MEUnsolved (G _ a) -> do
+    MEUnsolved a -> do
       let (sp, ty) = maskEnv ?env locals a
       pure (Flex (FHMeta x) sp ty)
-    MESolved _ _ v (G _ a) -> do
+    MESolved _ _ v a -> do
       let (sp, ty) = maskEnv ?env locals a
       pure (Unfold (UHSolvedMeta x) sp (spine v sp) ty)
 
@@ -471,23 +471,24 @@ evalIn l e t = let ?lvl = l; ?env = e in eval t
 
 unblock :: MetaVar -> a -> (Val -> Ty -> IO a) -> IO a
 unblock x deflt k = readMeta x >>= \case
-  MEUnsolved{}           -> pure deflt
-  MESolved _ _ v (G _ a) -> k v a
+  MEUnsolved{}     -> pure deflt
+  MESolved _ _ v a -> k v a
 {-# inline unblock #-}
 
 ------------------------------------------------------------
 
--- | Eliminate solved flex head metas.
+-- | Eliminate solved flex head metas & canonicalize Eq.
 force :: LvlArg => Val -> IO Val
 force v = case v of
-  topv@(Flex h sp _)    -> forceFlex topv h sp
-  topv@(FlexEq x a t u) -> forceFlexEq topv x a t u
-  v                     -> pure v
+  topv@(Flex h sp _)                      -> forceFlex topv h sp
+  topv@(FlexEq x a t u)                   -> forceFlexEq topv x a t u
+  topv@(UnfoldEq a t u (TraceEq _ _ _ v)) -> pure (TraceEq a t u v) -- TODO: overhaul
+  v                                       -> pure v
 {-# inline force #-}
 
 forceFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val
 forceFlexEq topv x a t u = unblock x topv \_ _ -> do
-  a <- forceSet a
+  a <- force a
   t <- force t
   u <- force u
   force $! eq a t u
@@ -498,13 +499,16 @@ forceFlex hsp h sp = case h of
   FHMeta x ->
     unblock x hsp \v a -> pure $ Unfold (UHSolvedMeta x) sp (spine v sp) a
   FHCoe x a b p t -> unblock x hsp \_ _ -> do
-    a <- forceSet a
-    b <- forceSet b
+    a <- force a
+    b <- force b
     t <- force t
-    force $! coe a b p t
+    force $! spine (coe a b p t) sp
 {-# noinline forceFlex #-}
 
 ------------------------------------------------------------
+
+-- TODO: this loses unfoldings in the flex eq/coe cases!!!
+--       solutions are kind of tedious, so we just ignore this for now
 
 -- | Eliminate all unfoldings from the head.
 forceAll :: LvlArg => Val -> IO Val
@@ -519,23 +523,25 @@ forceAll v = case v of
 
 forceAllIn :: Lvl -> Val -> IO Val
 forceAllIn l t = let ?lvl = l in forceAll t
+{-# inline forceAllIn #-}
 
 forceAllFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
 forceAllFlex topv h sp = case h of
-  FHMeta x        -> unblock x topv \v _ -> forceAll' $! spine v sp
+  FHMeta x -> unblock x topv \v _ ->
+    forceAll' $! spine v sp
   FHCoe x a b p t -> unblock x topv \_ _ -> do
-    a <- forceSet a
-    b <- forceSet b
-    t <- force t
-    forceAll' $! coe a b p t
+    a <- forceSet' a
+    b <- forceSet' b
+    t <- forceAll' t
+    forceAll' $! coe a b p t      -- loses unfolding!
 {-# noinline forceAllFlex #-}
 
 forceAllFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val
 forceAllFlexEq topv x a t u = unblock x topv \_ _ -> do
-  a <- forceSet a
-  t <- force t
-  u <- force u
-  forceAll' $! eq a t u
+  a <- forceSet' a
+  t <- forceAll' t
+  u <- forceAll' u
+  forceAll' $! eq a t u           -- loses unfolding!
 {-# noinline forceAllFlexEq #-}
 
 forceAll' :: LvlArg => Val -> IO Val
@@ -546,59 +552,6 @@ forceAll' v = case v of
   TraceEq _ _ _ v       -> forceAll' v
   UnfoldEq _ _ _ v      -> forceAll' v
   t                     -> pure t
-
-------------------------------------------------------------
-
--- | Eliminate all unfoldings from the head but remember a TraceEq version of the result (if there's one).
-forceAllWithTraceEq :: LvlArg => Val -> IO (Val,Val)
-forceAllWithTraceEq v = case v of
-  topv@(Flex h sp _)    -> fawtFlex topv h sp
-  topv@(FlexEq x a t u) -> fawtFlexEq topv x a t u
-  Unfold _ _ v _        -> fawt' v
-  TraceEq a t u v       -> fawtTraceEq a t u v
-  UnfoldEq a t u v      -> fawtUnfoldEq a t u v
-  t                     -> pure (t,t)
-{-# inline forceAllWithTraceEq #-}
-
-fawtTraceEq :: LvlArg => Val -> Val -> Val -> Val -> IO (Val, Val)
-fawtTraceEq a t u v = do
-  v <- forceAll v
-  pure (TraceEq a t u v, v)
-{-# noinline fawtTraceEq #-}
-
-fawtFlex :: LvlArg => Val -> FlexHead -> Spine -> IO (Val,Val)
-fawtFlex topv h sp = case h of
-  FHMeta x        -> unblock x (topv,topv) \v _ -> fawt' $! spine v sp
-  FHCoe x a b p t -> unblock x (topv,topv) \_ _ -> do
-    a <- forceSet a
-    b <- forceSet b
-    t <- force t
-    fawt' $! coe a b p t
-{-# noinline fawtFlex #-}
-
-fawtFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO (Val,Val)
-fawtFlexEq topv x a t u = unblock x (topv,topv) \_ _ -> do
-  a <- forceSet a
-  t <- force t
-  u <- force u
-  fawt' $! eq a t u
-{-# noinline fawtFlexEq #-}
-
-fawt' :: LvlArg => Val -> IO (Val,Val)
-fawt' v = case v of
-  topv@(Flex h sp _)    -> fawtFlex topv h sp
-  topv@(FlexEq x a t u) -> fawtFlexEq topv x a t u
-  Unfold _ _ v _        -> fawt' v
-  TraceEq a t u v       -> fawtTraceEq a t u v
-  UnfoldEq a t u v      -> fawtUnfoldEq a t u v
-  t                     -> pure (t,t)
-{-# noinline fawt' #-}
-
-fawtUnfoldEq :: LvlArg => Val -> Val -> Val -> Val -> IO (Val, Val)
-fawtUnfoldEq a t u v = fawt' v >>= \case
-  (TraceEq _ _ _ v, fv) -> pure (TraceEq a t u v, fv)
-  res                   -> pure res
-{-# noinline fawtUnfoldEq #-}
 
 ------------------------------------------------------------
 
@@ -615,18 +568,20 @@ forceSet v = case v of
 
 forceSetFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
 forceSetFlex topv h sp = case h of
-  FHMeta x        -> unblock x topv \v _ -> forceSet' $! spine v sp
+  FHMeta x -> unblock x topv \v _ ->
+    forceSet' $! spine v sp
   FHCoe x a b p t -> unblock x topv \_ _ -> do
-    a <- forceSet a
-    b <- forceSet b
-    t <- force t
-    forceSet' $! coe a b p t
+    a <- forceSet' a
+    b <- forceSet' b
+    t <- forceAll' t
+    forceSet' $! spine (coe a b p t) sp -- loses unfolding!
 {-# noinline forceSetFlex #-}
 
 forceSet' :: LvlArg => Val -> IO Val
 forceSet' v = case v of
   topv@(Flex h sp _) -> forceSetFlex topv h sp
   Unfold _ _ v _     -> forceSet' v
+  El a               -> El <$!> forceAll' a
   t                  -> pure t
 
 ------------------------------------------------------------
@@ -642,20 +597,21 @@ forceMetas v = case v of
 
 forceMetasFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val
 forceMetasFlexEq topv x a t u = unblock x topv \_ _ -> do
-  a <- forceSet a
-  t <- force t
-  u <- force u
+  a <- forceMetas' a
+  t <- forceMetas' t
+  u <- forceMetas' u
   forceMetas' $! eq a t u
 {-# noinline forceMetasFlexEq #-}
 
 forceMetasFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
 forceMetasFlex hsp h sp = case h of
-  FHMeta x        -> unblock x hsp \v _ -> forceMetas' $! spine v sp
+  FHMeta x -> unblock x hsp \v _ ->
+    forceMetas' $! spine v sp
   FHCoe x a b p t -> unblock x hsp \_ _ -> do
-    a <- forceSet a
-    b <- forceSet b
-    t <- force t
-    forceMetas' $! coe a b p t
+    a <- forceMetas' a
+    b <- forceMetas' b
+    t <- forceMetas' t
+    forceMetas' $! spine (coe a b p t) sp
 {-# noinline forceMetasFlex #-}
 
 forceMetas' :: LvlArg => Val -> IO Val

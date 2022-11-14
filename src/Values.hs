@@ -191,15 +191,6 @@ infixr 1 ==>
 andP :: Val -> Val -> Val
 andP a b = SgP NUnused a \_ -> b
 
-gSet  = gjoin Set
-gProp = gjoin Prop
-
-gU S = gSet
-gU P = gProp
-
-gEl (G a fa) = G (El a) (El fa)
-{-# inline gEl #-}
-
 elSP :: SP -> Val -> Val
 elSP S a = a
 elSP P a = El a
@@ -209,12 +200,16 @@ elSP P a = El a
 
 -- | @g1@ is minimally computed and @g2@ is maximally computed.
 --   The two values are definitionally equal.
-data G    = G {g1 :: ~Val, g2 :: ~Val}
-type GTy  = G
+data G = G {g1 :: Val, g2 :: Val}
 
 gjoin :: Val -> G
-gjoin ~v = G v v
+gjoin v = G v v
 {-# inline gjoin #-}
+
+uSP :: SP -> Val
+uSP S = Set
+uSP P = Prop
+{-# inline uSP #-}
 
 --------------------------------------------------------------------------------
 
