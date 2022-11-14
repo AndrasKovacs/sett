@@ -515,7 +515,7 @@ infer topt = do
         pure $ Infer (S.Let (NSpan x) a t u) uty
 
     P.Tagged _ -> do
-      let ty = V.PiE na V.Set \a -> V.PiE nb (V.PiE nx a \x -> V.Set) \b -> V.PiE nx a \x -> V.Set
+      let ty = V.PiE na V.Set \a -> V.PiE nb (a ==> V.Set) \b -> V.PiE nx a \x -> V.Set
       pure $! Infer S.TaggedSym (gjoin ty)
 
     P.Exfalso _ -> do

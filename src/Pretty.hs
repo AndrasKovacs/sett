@@ -94,6 +94,7 @@ goTm prec ns t = go prec ns t where
     go (n:ns) 0 = case n of "_" -> '@':show topIx
                             n   -> snd (fresh ns (NLit n))
     go (n:ns) x = go ns (x - 1)
+    go _      _ = "@" ++ show topIx
     go _      _ = impossible
 
   go :: Int -> [String] -> Tm -> ShowS

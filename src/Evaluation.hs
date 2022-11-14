@@ -198,7 +198,7 @@ projField topt n = case topt of
 taggedSym :: Val
 taggedSym =
   LamE na Set \a ->
-  LamE nb (PiE nx a \_ -> Set) \b ->
+  LamE nb (a ==> Set) \b ->
   LamE nx a \x ->
   Tagged a (Cl \x -> b `appE` x) x
 
@@ -552,49 +552,53 @@ forceAll' v = case v of
 -- | Eliminate all unfoldings from the head but remember a TraceEq version of the result (if there's one).
 forceAllWithTraceEq :: LvlArg => Val -> IO (Val,Val)
 forceAllWithTraceEq v = case v of
-  topv@(Flex h sp _)               -> forceAllWithTraceEqFlex topv h sp
-  topv@(FlexEq x a t u)            -> forceAllWithTraceEqFlexEq topv x a t u
-  Unfold _ _ v _                   -> forceAllWithTraceEq' v
-  TraceEq a t u v                  -> forceAllWithTraceEqTrace a t u v
-
-  -- TODO: rethink UnfoldEq & TraceEq interaction
-  UnfoldEq a t u (TraceEq _ _ _ v) -> forceAllWithTraceEqTrace a t u v
-  UnfoldEq _ _ _ v                 -> forceAllWithTraceEq' v
-  t                                -> pure (t,t)
+  topv@(Flex h sp _)    -> fawtFlex topv h sp
+  topv@(FlexEq x a t u) -> fawtFlexEq topv x a t u
+  Unfold _ _ v _        -> fawt' v
+  TraceEq a t u v       -> fawtTraceEq a t u v
+  UnfoldEq a t u v      -> fawtUnfoldEq a t u v
+  t                     -> pure (t,t)
 {-# inline forceAllWithTraceEq #-}
 
-forceAllWithTraceEqTrace :: LvlArg => Val -> Val -> Val -> Val -> IO (Val, Val)
-forceAllWithTraceEqTrace a t u v = do
+fawtTraceEq :: LvlArg => Val -> Val -> Val -> Val -> IO (Val, Val)
+fawtTraceEq a t u v = do
   v <- forceAll v
   pure (TraceEq a t u v, v)
-{-# noinline forceAllWithTraceEqTrace #-}
+{-# noinline fawtTraceEq #-}
 
-forceAllWithTraceEqFlex :: LvlArg => Val -> FlexHead -> Spine -> IO (Val,Val)
-forceAllWithTraceEqFlex topv h sp = case h of
-  FHMeta x        -> unblock x (topv,topv) \v _ -> forceAllWithTraceEq' $! spine v sp
+fawtFlex :: LvlArg => Val -> FlexHead -> Spine -> IO (Val,Val)
+fawtFlex topv h sp = case h of
+  FHMeta x        -> unblock x (topv,topv) \v _ -> fawt' $! spine v sp
   FHCoe x a b p t -> unblock x (topv,topv) \_ _ -> do
     a <- forceSet a
     b <- forceSet b
     t <- force t
-    forceAllWithTraceEq' $! coe a b p t
-{-# noinline forceAllWithTraceEqFlex #-}
+    fawt' $! coe a b p t
+{-# noinline fawtFlex #-}
 
-forceAllWithTraceEqFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO (Val,Val)
-forceAllWithTraceEqFlexEq topv x a t u = unblock x (topv,topv) \_ _ -> do
+fawtFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO (Val,Val)
+fawtFlexEq topv x a t u = unblock x (topv,topv) \_ _ -> do
   a <- forceSet a
   t <- force t
   u <- force u
-  forceAllWithTraceEq' $! eq a t u
-{-# noinline forceAllWithTraceEqFlexEq #-}
+  fawt' $! eq a t u
+{-# noinline fawtFlexEq #-}
 
-forceAllWithTraceEq' :: LvlArg => Val -> IO (Val,Val)
-forceAllWithTraceEq' v = case v of
-  topv@(Flex h sp _)    -> forceAllWithTraceEqFlex topv h sp
-  topv@(FlexEq x a t u) -> forceAllWithTraceEqFlexEq topv x a t u
-  Unfold _ _ v _        -> forceAllWithTraceEq' v
-  TraceEq a t u v       -> forceAllWithTraceEqTrace a t u v
-  UnfoldEq _ _ _ v      -> forceAllWithTraceEq' v
+fawt' :: LvlArg => Val -> IO (Val,Val)
+fawt' v = case v of
+  topv@(Flex h sp _)    -> fawtFlex topv h sp
+  topv@(FlexEq x a t u) -> fawtFlexEq topv x a t u
+  Unfold _ _ v _        -> fawt' v
+  TraceEq a t u v       -> fawtTraceEq a t u v
+  UnfoldEq a t u v      -> fawtUnfoldEq a t u v
   t                     -> pure (t,t)
+{-# noinline fawt' #-}
+
+fawtUnfoldEq :: LvlArg => Val -> Val -> Val -> Val -> IO (Val, Val)
+fawtUnfoldEq a t u v = fawt' v >>= \case
+  (TraceEq _ _ _ v, fv) -> pure (TraceEq a t u v, fv)
+  res                   -> pure res
+{-# noinline fawtUnfoldEq #-}
 
 ------------------------------------------------------------
 

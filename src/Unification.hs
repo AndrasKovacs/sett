@@ -704,13 +704,14 @@ merge topt topu = do
     _ -> impossible
 
 updatePSub :: Lvl -> Val -> PartialSub -> IO PartialSub
-updatePSub (Lvl x) t psub = case IM.lookup x (psub^.sub) of
-  Nothing -> do
-    pure $! (psub & sub %~ IM.insert x t)
-  Just t' -> do
-    let ?lvl = psub^.dom
-    merged <- evalInDom psub <$!> merge t t'
-    pure $! (psub & sub %~ IM.insert x merged)
+updatePSub (Lvl x) t psub = do
+  case IM.lookup x (psub^.sub) of
+    Nothing -> do
+      pure $! (psub & sub %~ IM.insert x t)
+    Just t' -> do
+      let ?lvl = psub^.dom
+      merged <- evalInDom psub <$!> merge t t'
+      pure $! (psub & sub %~ IM.insert x merged)
 
 invertVal :: Lvl -> PartialSub -> Lvl -> Val -> Spine -> IO PartialSub
 invertVal solvable psub param t rhsSp = do
@@ -723,7 +724,8 @@ invertVal solvable psub param t rhsSp = do
 
     Pair t u -> do
       psub <- invertVal solvable psub param t (SProj1 rhsSp)
-      invertVal solvable psub param u (SProj2 rhsSp)
+      res <- invertVal solvable psub param u (SProj2 rhsSp)
+      pure res
 
     Lam x i a t -> do
       let var  = Var param a
@@ -744,7 +746,7 @@ invertVal solvable psub param t rhsSp = do
 
         -- general case
         _ -> do
-          let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param mempty True
+          let psub' = PSub (psub^.domVars) Nothing (psub^.dom) param (psub^.sub) True
           sol <- solveNestedSp (psub^.cod) psub' xty (reverseSpine sp) (psub^.dom - 1, rhsSp) rhsTy
           res <- updatePSub x (evalInDom psub sol) psub
           pure res
@@ -919,7 +921,6 @@ solveEtaShort :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> Va
 solveEtaShort m sp rhs rhsty =
   catchUE (solve m sp rhs rhsty)
           (unifyEtaLong m sp rhs rhsty)
-
 intersect :: LvlArg => UnifyStateArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
 intersect = uf -- TODO
 
@@ -1197,7 +1198,6 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
     (FlexEq _ a t u, RigidEq a' t' u')   -> goJoin a a' >> goJoin t t' >> goJoin u u'
     (FlexEq _ a t u, TraceEq a' t' u' _) -> do
-      debug ["FLEXTRACE", showTm' (quote a), showTm' (quote a')]
       goJoin a a' >> goJoin t t' >> goJoin u u' -- approx
 
     (RigidEq a t u  , FlexEq _ a' t' u') -> goJoin a a' >> goJoin t t' >> goJoin u u'

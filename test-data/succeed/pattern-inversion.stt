@@ -1,0 +1,51 @@
+
+test1 : ⊤ :=
+  let m : Set → Set := _;
+  let p : (A : Set) → m A ={Set} A := λ A. refl {Set} {A};
+  tt
+
+test2 : ⊤ :=
+  let m : Set × Set → Set := _;
+  let p : (A B : Set) → m (A, B) ={Set} A := λ A B. refl {Set} {A};
+  tt
+
+test3 : ⊤ :=
+  let m : Set × Set → Set := _;
+  let p : (A B : Set) → (m (A, B)) ={Set} B := λ A B. refl {Set} {B};
+  tt
+
+test4 : ⊤ :=
+  let m : Set → Set → Set := _;
+  let p : (A : Set) → (m A A) ={Set} Set := λ A. refl {Set} {Set};
+  tt
+
+test5 : ⊤ :=
+  let m : Set × Set → Set := _;
+  let p : (A : Set) → (m (A, A)) ={Set} Set := λ A. refl {Set} {Set};
+  tt
+
+test6 : El ⊤ :=
+  let m : (x : (A : Set) × A) → x.1 := _;
+  let p : (A : Set)(a : A) → (m (A, a) ={A} a) := λ A a. refl {A} {a};
+  tt
+
+test7 : El ⊤ :=
+  let m : (Set → Set) → Set := _;
+  let p : (A : Set → Set) → m (λ x. A x) ={Set} A Set := λ A. refl {Set}{A Set};
+  tt
+
+test8 : El ⊤ :=
+  let m : (Set → Set → Set) → Set := _;
+  let p : (A : Set → Set → Set) → m (λ x y. A y x) ={Set} A Set (Set → Set)
+    := λ A. refl {Set}{A Set (Set → Set)};
+  tt
+
+test9 : ⊤ :=
+  let m : Set → Set × Set := _;
+  let p : (A : Set) → (m A).1 ={Set} A := λ A. refl {Set} {A};
+  tt
+
+test10 : ⊤ :=
+  let m : Set → (A : Set) × (B : Set) × B := _;
+  let p : (A : Set) → (m A).2.1 ={Set} A := λ A. refl {Set} {A};
+  tt

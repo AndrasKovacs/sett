@@ -26,8 +26,7 @@ import Common
 
 --------------------------------------------------------------------------------
 
--- TODO: precisely handle parens in spans, right now parens on the right are dropped off
---       everywhere. Perhaps handle braces the same way
+-- TODO: grammar below is outdated
 
 {-
 

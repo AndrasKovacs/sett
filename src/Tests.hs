@@ -303,7 +303,24 @@ pruneProj = justElab $ unlines [
   "     Set  "
   ]
 
-
-test = justElab $ unlines [
-  "foo : Set → Set → Set → Set → Set := λ A A A A. A"
+approxUnify = justElab $ unlines [
+  "Nat : Set",
+  " := (n : Set) → (n → n) → n → n",
+  "",
+  "n10 : Nat := λ N s z. s (s (s (s (s (s z)))))",
+  "",
+  "approxConv  : n10 ={Nat} n10 := refl"
   ]
+
+invertSg = justElab $ unlines [
+  "test5 : El ⊤ :=",
+  "  let m : (x : (A : Set) × A) → x.1 := _;",
+  "  let p : (A : Set)(x : A) → El (m (A, x) ={A} x) := λ A a. refl {A} {a};",
+  "  tt  "
+  ]
+
+               a
+           m (A, x)
+
+           A -> a.1
+           x -> a.2 : A
