@@ -45,19 +45,19 @@ main = do
 
   args <- getArgs
   state <- case args of
-    [path] -> loadFile path
+    [path] -> loadFile Empty path
     _      -> pure Empty
 
   loop state
 
-loadFile :: FilePath -> IO State
-loadFile path = do
+loadFile :: State -> FilePath -> IO State
+loadFile state path = do
   reset
   (state, time) <- timed $
     Ex.try (B.readFile path) >>= \case
       Left (e :: Ex.SomeException) -> do
         putStrLn (Ex.displayException e)
-        pure $ Focused path
+        pure state
       Right bstr -> do
         let src = File path bstr
         writeElabSource (Just src)
@@ -181,9 +181,9 @@ loop state = do
   l <- getLine
   case l of
     ':':'l':' ':(dropSp -> rest) ->
-      loop =<< loadFile rest
+      loop =<< loadFile state rest
     ':':'r':_ ->
-      whenFocused \path -> loop =<< loadFile path
+      whenFocused \path -> loop =<< loadFile state path
     ':':'t':' ':(dropSp -> rest) ->
       loadTopEntry rest \_ a _ _ -> do
         putStrLn $ showTm0 a

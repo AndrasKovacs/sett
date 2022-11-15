@@ -19,8 +19,8 @@ import qualified Presyntax as P
 type OccursCache = RF.Ref MetaVar
 
 data MetaEntry
-  = MEUnsolved {-# unpack #-} Ty                     -- ^ Type
-  | MESolved OccursCache S.Tm Val {-# unpack #-} Ty  -- ^ Occurs check cache, term solution, value, type
+  = MEUnsolved Ty                     -- ^ Type
+  | MESolved OccursCache S.Tm Val Ty  -- ^ Occurs check cache, term solution, value, type
 
 type MetaCxt = ADL.Array MetaEntry
 

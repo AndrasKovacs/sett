@@ -319,8 +319,33 @@ invertSg = justElab $ unlines [
   "  tt  "
   ]
 
-           --     a
-           -- m (A, x)
 
-           -- A -> a.1
-           -- x -> a.2 : A
+unf = justElab $ unlines [
+  "Pointed : Set := (type : Set) × (point : type) × ⊤",
+  "Pointed2 : Set := Pointed",
+  "",
+  "PointedId : (P : Pointed) → P ={Pointed2} P",
+  "  := λ p. refl"
+  ]
+
+test = justElab $ unlines [
+  "id : {A : Set} → A → A",
+  " := λ x. x",
+  "",
+  "comp : {A B C : Set} → (B → C) → (A → B) → A → C",
+  " := λ f g x. f (g x)",
+  "",
+  "Iso : Set → Set → Set",
+  " := λ A B. (to    : A → B)",
+  "         * (from  : B → A)",
+  "         * (efrom : comp {B}{A}{_} to from = id)",
+  "         * Top",
+  "",
+  "foo : (A : Set) → Iso A A ={Set} Iso A _",
+  "  := λ A. refl {Set}"
+  ]
+
+
+-- unify | comp {A} {A} {?0 A A to from} to from @0 ={?0 A A to from} id {?1 A A to from} @0
+--       | comp {?2 A} {A} {?0 A (?2 A) to from} to from @0 ={?0 A (?2 A) to from} id {?1 A (?2 A) to from} @0
+--       | USRigid 0 END

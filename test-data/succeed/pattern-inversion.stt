@@ -124,7 +124,8 @@ test14 : ⊤ :=
   let m : acType := _;
   let p : {A : Set}{B : A → Set}{C : (a : A) → B a → Set}
         → (g : (f : (a : A) → B a) × ((a : A) → C a (f a)))
-        → m (ca {A}{B}{C} g) = g
+        → m (ca {A}{B}{C} g) = g  -- explicit C arg needed because of lack of postponing on non-linear
+                                  -- pattern problem
         := λ g. refl;
-  +
+
   tt

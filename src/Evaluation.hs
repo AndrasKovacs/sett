@@ -287,16 +287,16 @@ coeRefl a b p t = case runConv (conv a b) of
 -- Equality type
 --------------------------------------------------------------------------------
 
-eq :: LvlArg => Val -> Val -> Val -> Val
-eq a t u = case a of
-  Set  -> eqSet t u
+geq :: LvlArg => G -> G -> G -> Val
+geq (G topa ftopa) (G t ft) (G u fu) = case ftopa of
+  Set  -> geqSet (G t ft) (G u fu)
   Prop -> eqProp t u
-  El a -> markEq (El a) t u Top
+  El a -> markEq topa t u Top
 
-  topA@(Pi x i a b) -> markEq topA t u $!
+  Pi x i a b -> markEq topa t u $!
     PiE x a \x -> eq (b $$ x) (app t x i) (app u x i)
 
-  topA@(Sg _ x a b) ->
+  Sg _ x a b ->
     let t1  = proj1 t
         u1  = proj1 u
         t2  = proj2 t
@@ -304,7 +304,7 @@ eq a t u = case a of
         bu1 = b $$ u1
         bt1 = b $$ t1
 
-    in markEq topA t u $!
+    in markEq topa t u $!
        SgP np (eq a t1 u1) \p ->
           eq bu1
             (coe bt1 bu1
@@ -312,18 +312,15 @@ eq a t u = case a of
                  t2)
               u2
 
-  a@Rigid{}            -> RigidEq a t u
-  a@(Flex h sp _)      -> FlexEq (flexHeadMeta h) a t u
-  a@(Unfold h sp fa _) -> UnfoldEq a t u (eq fa t u)
-  Magic m              -> Magic m
-  a                    -> impossible
+  Rigid{}          -> RigidEq topa t u
+                   -- NOTE: FlexEq must have at least 1 Flex component
+  Flex h _ _       -> FlexEq (flexHeadMeta h) ftopa t u
+  Unfold h sp fa _ -> UnfoldEq topa t u (geq (G topa fa) (G t ft) (G u fu))
+  Magic m          -> Magic m
+  a                -> impossible
 
-eqProp :: Val -> Val -> Val
-eqProp a b = markEq Prop a b $! andP (El a ==> b) (El b ==> a)
-{-# inline eqProp #-}
-
-eqSet :: LvlArg => Val -> Val -> Val
-eqSet a b = case (a, b) of
+geqSet :: LvlArg => G -> G -> Val
+geqSet (G topa ftopa) (G topb ftopb) = case (ftopa, ftopb) of
 
   -- canonical
   ------------------------------------------------------------
@@ -331,17 +328,17 @@ eqSet a b = case (a, b) of
   (Prop, Prop) -> markEq Set  Prop Prop Top
   (El a, El b) -> eqProp a b
 
-  (topA@(Pi x i a b), topB@(Pi x' i' a' b'))
-    | i /= i' -> markEq Set topA topB Bot
+  (Pi x i a b, Pi x' i' a' b')
+    | i /= i' -> markEq Set topa topb Bot
     | True    ->
       let name = pick x x'
-      in markEq Set topA topB $!
+      in markEq Set topa topb $!
         SgP np (eqSet a a') \p ->
         PiE name a \x -> eqSet (b $$ x) (b' $$~ coe a a' p x)
 
-  (topA@(Sg _ x a b), topB@(Sg _ x' a' b')) ->
+  (Sg _ x a b, Sg _ x' a' b') ->
       let name = pick x x'
-      in markEq Set topA topB $!
+      in markEq Set topa topb $!
         SgP np (eqSet a a') \p ->
         PiE name a \x -> eqSet (b $$ x) (b' $$~ coe a a' p x)
 
@@ -350,18 +347,31 @@ eqSet a b = case (a, b) of
   (Magic m, _) -> Magic m
   (_, Magic m) -> Magic m
 
-  (a@Rigid{}, b)   -> RigidEq Set a b
-  (a, b@Rigid{})   -> RigidEq Set a b
+  (Rigid{}, _)   -> RigidEq Set topa topb
+  (_, Rigid{})   -> RigidEq Set topa topb
 
-  (a@(Flex h _ _), b) -> FlexEq (flexHeadMeta h) Set a b
-  (a, b@(Flex h _ _)) -> FlexEq (flexHeadMeta h) Set a b
+  -- NOTE: FlexEq must have at least 1 flex component.
+  (Flex h _ _, b) -> FlexEq (flexHeadMeta h) Set ftopa topb
+  (a, Flex h _ _) -> FlexEq (flexHeadMeta h) Set topa ftopb
 
-  (a@(Unfold _ _ fa _), _) -> UnfoldEq Set a b (eqSet fa b)
-  (a, b@(Unfold _ _ fb _)) -> UnfoldEq Set a b (eqSet a fb)
+  (Unfold _ _ fa _, _) -> UnfoldEq Set topa topb (geqSet (G topa fa) (G topb ftopb))
+  (_, Unfold _ _ fb _) -> UnfoldEq Set topa topb (geqSet (G topa ftopa) (G topb fb))
 
   -- canonical mismatch
   ------------------------------------------------------------
-  (a, b) -> markEq Set a b Bot
+  (_, _) -> markEq Set topa topb Bot
+
+eqProp :: Val -> Val -> Val
+eqProp a b = markEq Prop a b $! andP (El a ==> b) (El b ==> a)
+{-# inline eqProp #-}
+
+eq :: LvlArg => Val -> Val -> Val -> Val
+eq a t u = geq (gjoin a) (gjoin t) (gjoin u)
+{-# inline eq #-}
+
+eqSet :: LvlArg => Val -> Val -> Val
+eqSet a b = geqSet (gjoin a) (gjoin b)
+{-# inline eqSet #-}
 
 
 --------------------------------------------------------------------------------
@@ -477,13 +487,12 @@ unblock x deflt k = readMeta x >>= \case
 
 ------------------------------------------------------------
 
--- | Eliminate solved flex head metas & canonicalize Eq.
+-- | Eliminate solved flex heads.
 force :: LvlArg => Val -> IO Val
 force v = case v of
-  topv@(Flex h sp _)                      -> forceFlex topv h sp
-  topv@(FlexEq x a t u)                   -> forceFlexEq topv x a t u
-  topv@(UnfoldEq a t u (TraceEq _ _ _ v)) -> pure (TraceEq a t u v) -- TODO: overhaul
-  v                                       -> pure v
+  topv@(Flex h sp _)    -> forceFlex topv h sp
+  topv@(FlexEq x a t u) -> forceFlexEq topv x a t u
+  v                     -> pure v
 {-# inline force #-}
 
 forceFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val
@@ -507,8 +516,8 @@ forceFlex hsp h sp = case h of
 
 ------------------------------------------------------------
 
--- TODO: this loses unfoldings in the flex eq/coe cases!!!
---       solutions are kind of tedious, so we just ignore this for now
+-- TODO: this loses unfoldings in the flex coe cases!!!
+
 
 -- | Eliminate all unfoldings from the head.
 forceAll :: LvlArg => Val -> IO Val
@@ -538,10 +547,10 @@ forceAllFlex topv h sp = case h of
 
 forceAllFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val
 forceAllFlexEq topv x a t u = unblock x topv \_ _ -> do
-  a <- forceSet' a
-  t <- forceAll' t
-  u <- forceAll' u
-  forceAll' $! eq a t u           -- loses unfolding!
+  fa <- forceSet' a
+  ft <- forceAll' t
+  fu <- forceAll' u
+  forceAll' $! geq (G a fa) (G t ft) (G u fu)
 {-# noinline forceAllFlexEq #-}
 
 forceAll' :: LvlArg => Val -> IO Val

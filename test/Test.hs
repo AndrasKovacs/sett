@@ -25,6 +25,8 @@ dropPrefix _      ys              = ys
 
 main :: IO ()
 main = do
+  hSetBuffering stdout NoBuffering
+
   inTerminal <- hIsTerminalDevice stdout
   let withColor color str
         = if inTerminal
@@ -41,14 +43,18 @@ main = do
   disableDebug
 
   succeedFails <- flip filterM succeedFiles \path -> do
+    let path' = dropDir path
+    putStr (path' ++ " ")
     catch
-      (do {testElab path; putStrLn (dropDir path ++ " " ++ passStr); pure False})
-      (\(e :: SomeException) -> do {putStrLn (dropDir path ++ " " ++ failStr); pure True})
+      (do {testElab path; putStrLn passStr; pure False})
+      (\(e :: SomeException) -> do {putStrLn failStr; pure True})
 
   failFails <- flip filterM failFiles \path -> do
+    let path' = dropDir path
+    putStr (path' ++ " ")
     catch
-      (do {testElab path; putStrLn (dropDir path ++ " " ++ failStr); pure True})
-      (\(e :: SomeException) -> do {putStrLn (dropDir path ++ " " ++ passStr); pure False})
+      (do {testElab path; putStrLn failStr; pure True})
+      (\(e :: SomeException) -> do {putStrLn passStr; pure False})
 
   case (succeedFails, failFails) of
     ([], []) -> pure ()

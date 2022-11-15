@@ -324,8 +324,7 @@ infer topt = do
 
     topt@(P.Eq t Nothing u) -> do
       Infer t tty <- insertApps $ infer t
-      Infer u uty <- insertApps $ infer u
-      unify topt tty uty
+      u <- check u tty
       let a = quote tty
       pure $ Infer (S.Eq a t u) V.Prop
 

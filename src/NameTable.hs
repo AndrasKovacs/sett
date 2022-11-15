@@ -11,8 +11,8 @@ import qualified Syntax    as S
 import qualified Values    as V
 
 data Entry
-  = Top Lvl S.Ty {-# unpack #-} V.Ty ~V.Val -- ^ Level, type, type val, value
-  | Local Lvl {-# unpack #-} V.Ty           -- ^ Level, type val
+  = Top Lvl S.Ty V.Ty ~V.Val -- ^ Level, type, type val, value
+  | Local Lvl V.Ty           -- ^ Level, type val
 
 type NameTable    = HM.HashMap B.ByteString Entry
 type NameTableArg = (?nameTable :: NameTable)
