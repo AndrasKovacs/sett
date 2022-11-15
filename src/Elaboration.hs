@@ -36,7 +36,7 @@ unify t l r = do
   Unif.unify (G l l) (G r r) `catch` \case
     (e :: UnifyEx) -> elabError t (UnifyError l r e)
 
-data Infer = Infer Tm {-# unpack #-} V.Ty
+data Infer = Infer Tm V.Ty
 
 -- Insertion
 --------------------------------------------------------------------------------

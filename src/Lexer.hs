@@ -56,7 +56,7 @@ prettyError src (Error pos e)  =
       ls     = FP.lines bstr
       (l, c) = head $ posLineCols bstr [rawPos pos]
       line   = if 0 <= l && l < length ls then ls !! l else ""
-      linum  = show l
+      linum  = show (l+1)
       lpad   = map (const ' ') linum
 
       expected (Lit s) = "expected " ++ s

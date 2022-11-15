@@ -49,3 +49,82 @@ test10 : ⊤ :=
   let m : Set → (A : Set) × (B : Set) × B := _;
   let p : (A : Set) → (m A).2.1 ={Set} A := λ A. refl {Set} {A};
   tt
+
+test11 : ⊤ :=
+  let m : (⊥ → Set) → ⊥ → ⊥ → Set := _;
+  let p : (f : ⊥ → Set)(x : ⊥) → m f x x ={Set} f x := λ f x. refl {Set}{f x};
+  tt
+
+test12 : ⊤ :=
+  let m : (⊥ → Set) → ⊥ → Set := _;
+  let p : (f : ⊥ → ⊥ → Set)(y : ⊥) → m (λ x. f x x) y ={Set} (f y y) := λ f y. refl {Set}{f y y};
+  tt
+
+------------------------------------------------------------
+
+acType : Set :=
+     {A : Set}{B : A → Set}{C : (a : A) → B a → Set}
+   → ((a : A) → (b : B a) × C a b)
+   → ((f : (a : A) → B a) × ((a : A) → C a (f a)))
+
+ac : acType
+  := λ f. (λ a. (f a).1, λ a. (f a).2)
+
+caType : Set :=
+     {A : Set}{B : A → Set}{C : (a : A) → B a → Set}
+   → ((f : (a : A) → B a) × ((a : A) → C a (f a)))
+   → ((a : A) → (b : B a) × C a b)
+
+ca : caType
+  := λ fg a. (fg.1 a, fg.2 a)
+
+curryType : Set :=
+    {A : Set}{B : A → Set}{C : (a : A) → B a → Set}
+  → ((ab : (a : A) × B a) → C ab.1 ab.2)
+  → (a : A)(b : B a) → C a b
+
+curry : curryType
+  := λ f a b. f (a, b)
+
+uncurryType : Set :=
+    {A : Set}{B : A → Set}{C : (a : A) → B a → Set}
+  → ((a : A)(b : B a) → C a b)
+  → ((ab : (a : A) × B a) → C ab.1 ab.2)
+
+uncurry : uncurryType
+  := λ f ab. f ab.1 ab.2
+
+flipType :=
+    {A B : Set}{C : A → B → Set}
+  → ((a : A)(b : B) → C a b)
+  → ((b : B)(a : A) → C a b)
+
+flip : flipType
+  := λ f b a. f a b
+
+swap : {A B : Set} → A × B → B × A
+  := λ ab. (ab.2, ab.1)
+
+erase : {A : Prop} → A × A → A
+  := λ x. x.1
+
+dup : {A : Prop} → A → A × A
+  := λ a. (a, a)
+
+------------------------------------------------------------
+
+test13 : ⊤ :=
+  let m : flipType
+        := _;
+  let p : {A B}{C : A → B → Set}(f : (a:A)(b:B) → C a b) → m (flip f) = f
+        := λ f. refl;
+  tt
+
+test14 : ⊤ :=
+  let m : acType := _;
+  let p : {A : Set}{B : A → Set}{C : (a : A) → B a → Set}
+        → (g : (f : (a : A) → B a) × ((a : A) → C a (f a)))
+        → m (ca {A}{B}{C} g) = g
+        := λ g. refl;
+  +
+  tt
