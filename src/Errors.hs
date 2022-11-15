@@ -14,6 +14,7 @@ import qualified FlatParse.Stateful as FP
 import qualified Data.ByteString.Char8 as B
 
 import Evaluation
+import Unification (UnifyEx(..))
 
 data Error
   = UnifyError Val Val UnifyEx
@@ -37,17 +38,19 @@ instance Show ErrorInCxt where
     let ?locals = ls
         ?lvl = l in
     let showVal v = showTm (quoteWithOpt UnfoldMetas v)
-        showValNf v = showTm (quoteWithOpt UnfoldEverything v)
+        -- showValNf v = showTm (quoteWithOpt UnfoldEverything v)
         msg = case err of
           UnifyError t u ex ->
             "Can't unify inferred type\n\n  " ++ showVal t ++ "\n\nwith expected type\n\n  "
                                 ++ showVal u ++ "\n" ++
-            "\nNormal forms of sides: \n\n  " ++ showValNf t ++ "\n\nand\n\n  "
-                                ++ showValNf u ++ "\n\n" ++
-            show ex
-            -- case ex of
-            --   CantSolveFrozenMeta m -> "\nCan't solve frozen metavariable " ++ show m ++ "\n"
-            --   _ -> ""
+            -- "\nNormal forms of sides: \n\n  " ++ showValNf t ++ "\n\nand\n\n  "
+            --                     ++ showValNf u ++ "\n\n" ++
+            case ex of
+              CantSolveFrozenMeta m -> "\nCan't solve frozen metavariable " ++ show m ++ "\n"
+              CantUnifySides l r ->
+                "\nMore specifically, can't unify \n\n  " ++ showVal l ++ "\n\nwith\n\n  "
+                 ++ showVal r ++ "\n"
+              ex -> "\n" ++ show ex
           NameNotInScope x ->
             "Name not in scope: " ++ "\"" ++ show x ++ "\""
           NoSuchField x ->

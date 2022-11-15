@@ -37,7 +37,14 @@ NOTE
 
 
 TODO
- - use approximate unfoldings including TraceEq, use ConvState
+ - use approximate unfoldings in conversion
+
+
+ - unfolding preservation in semantic eq/coe
+   - right now eq preserves unfoldings except when we return a flex case
+   TODO: store G instead of Val in FlexEq
+         use G-s in semantic coe as well, store G-s in FHCoe
+
 -}
 
 --------------------------------------------------------------------------------

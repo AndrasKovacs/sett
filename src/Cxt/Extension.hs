@@ -39,13 +39,13 @@ define x a ga t ~vt k =
 {-# inline define #-}
 
 -- | Add a bound variable which does not exist in the source.
-insertBinder :: InCxt (S.Ty -> V.Ty -> InCxt (Val -> a) -> a)
-insertBinder a va k =
+insertBinder :: InCxt (Name -> S.Ty -> V.Ty -> InCxt (Val -> a) -> a)
+insertBinder x a va k =
   let v          = V.Var ?lvl va
   in
   let ?lvl       = ?lvl + 1
       ?env       = V.EDef ?env v
-      ?locals    = S.LBind ?locals NUnused a
+      ?locals    = S.LBind ?locals x a
   in forceCxt (k v)
 {-# inline insertBinder #-}
 

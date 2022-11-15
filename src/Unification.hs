@@ -1,5 +1,5 @@
 
-module Unification (freshMeta, freshMeta0, freshMeta1, unify, PartialSub(..)) where
+module Unification (freshMeta, freshMeta0, freshMeta1, unify, PartialSub(..), UnifyEx(..)) where
 
 import Common
 
@@ -13,11 +13,23 @@ import Lens.Micro.Platform
 import Values
 import Evaluation
 import qualified ElabState as ES
--- import Errors
 import qualified Syntax as S
 import Pretty
 
 ----------------------------------------------------------------------------------------------------
+
+data UnifyEx
+  = CantUnify
+  | CantUnifySides Val Val
+  | CantSolveFrozenMeta MetaVar
+  | CantSolveMetaInNonRigidState
+  | CantPartialSubst
+  | CantPartialQuote
+  | CantInvertSpine
+  | CantPruneSpine
+  | PruningNotAllowed
+  deriving (Show)
+instance Exception UnifyEx
 
 -- | Bump the `Lvl` and get a fresh variable.
 newVar :: Ty -> Name -> (LvlArg => S.NamesArg => Val -> a) -> LvlArg => S.NamesArg => a
@@ -883,7 +895,7 @@ solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
     _ -> impossible
 
 -- | Solve (?x sp ?= rhs : A).
-solve :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+solve :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solve x sp rhs rhsty = do
 
   debug ["SOLVE", showTm' (quote (Flex (FHMeta x) sp rhsty)), showTm' (quote rhs)]
@@ -901,8 +913,10 @@ solve x sp rhs rhsty = do
 
         a <- ES.unsolvedMetaType x
         -- debug ["solve", showTm' (quote (Flex (FHMeta x) sp rhsty)), showTm' (quote rhs)]
-        sol <- solveTopSp (PSub ENil (Just x) 0 ?lvl mempty True)
-                          S.LEmpty a (reverseSpine sp) rhs rhsty
+        sol <- catchUE
+           (solveTopSp (PSub ENil (Just x) 0 ?lvl mempty True) S.LEmpty a (reverseSpine sp) rhs rhsty)
+           cantUnify
+
         ES.solve x sol (eval0 sol)
 
       goIrrelevant = do
@@ -923,15 +937,15 @@ solve x sp rhs rhsty = do
     RIrr       -> goIrrelevant
     RMagic{}   -> impossible
 
-solveEtaShort :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+solveEtaShort :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solveEtaShort m sp rhs rhsty =
   catchUE (solve m sp rhs rhsty)
           (unifyEtaLong m sp rhs rhsty)
 
-intersect :: LvlArg => UnifyStateArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
+intersect :: LvlArg => UnifyStateArg => LhsArg => RhsArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
 intersect = uf -- TODO
 
-unifyEtaLong :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> Val -> Ty -> IO ()
+unifyEtaLong :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 unifyEtaLong m sp rhs rhsty = forceAll rhs >>= \case
   Lam x i a t -> do
     newVar a x \v -> unifyEtaLong m (SApp sp v i) (t $$ v) (appTy rhsty v)
@@ -944,17 +958,19 @@ unifyEtaLong m sp rhs rhsty = forceAll rhs >>= \case
   rhs ->
     solve m sp rhs rhsty
 
-goUnifyMetaMeta :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
+goUnifyMetaMeta :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg =>
+                   MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
 goUnifyMetaMeta m sp m' sp' ty =
   catch
     (solve m sp (Flex (FHMeta m') sp' ty) ty)
     (\case
         CantInvertSpine -> solve m' sp' (Flex (FHMeta m) sp ty) ty
-        e               -> throwIO e)
+        e               -> cantUnify)
 
 -- | Try to unify when the sides are headed by different metas. We only retry in case of inversion
 --   failure because we can't backtrack from destructive updates.
-unifyMetaMeta :: LvlArg => UnifyStateArg => S.NamesArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
+unifyMetaMeta :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg =>
+                 MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
 unifyMetaMeta m sp m' sp' ty
   -- We try to newer metas first, to get a bit more dependency ordering in
   -- the metacontext. That can be beneficial in meta inlining, where we might
@@ -967,19 +983,30 @@ unifyMetaMeta m sp m' sp' ty
 -- Unification
 ----------------------------------------------------------------------------------------------------
 
-unifyEq :: Eq a => a -> a -> IO ()
-unifyEq x y = when (x /= y) $ throwIO CantUnify
+-- Implcit args used for local error throwing.
+type LhsArg = (?lhs :: Val)
+type RhsArg = (?rhs :: Val)
+
+cantUnify :: UnifyStateArg => LhsArg => RhsArg => IO a
+cantUnify = case ?unifyState of
+  USFlex{} -> throwIO CantUnify
+  USFull{} -> throwIO CantUnify
+  _        -> throwIO (CantUnifySides ?lhs ?rhs)
+{-# inline cantUnify #-}
+
+unifyEq :: Eq a => UnifyStateArg => LhsArg => RhsArg => a -> a -> IO ()
+unifyEq x y = when (x /= y) $ cantUnify
 {-# inline unifyEq #-}
 
-ensureNProj2 :: Int -> Spine -> IO Spine
+ensureNProj2 :: UnifyStateArg => LhsArg => RhsArg => Int -> Spine -> IO Spine
 ensureNProj2 n sp
   | n == 0 = pure sp
   | n > 0  = case sp of
       SProj2 t -> ensureNProj2 (n-1) t
-      _        -> throwIO CantUnify
+      _        -> cantUnify
   | otherwise = impossible
 
-unifySp :: LvlArg => UnifyStateArg => S.NamesArg => Spine -> Spine -> IO ()
+unifySp :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg => Spine -> Spine -> IO ()
 unifySp sp sp' = case (sp, sp') of
   (SId                , SId                 ) -> pure ()
   (SApp t u i         , SApp t' u' i'       ) -> unifySp t t' >> unify (gjoin u) (gjoin u')
@@ -989,7 +1016,7 @@ unifySp sp sp' = case (sp, sp') of
   (SProjField t _ _ n , SProj1 t'           ) -> do {t' <- ensureNProj2 n t'; unifySp t t'}
   (SProj1 t           , SProjField t' _ _ n ) -> do {t  <- ensureNProj2 n t ; unifySp t t'}
   (SUntag t           , SUntag t'           ) -> unifySp t t'
-  _                                           -> throwIO CantUnify
+  _                                           -> cantUnify
 
 unify :: LvlArg => UnifyStateArg => S.NamesArg => G -> G -> IO ()
 unify (G topt ftopt) (G topt' ftopt') = do
@@ -1002,7 +1029,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
       goJoin t t' = go (gjoin t) (gjoin t')
       {-# inline goJoin #-}
 
-      goSp :: LvlArg => UnifyStateArg => S.NamesArg => Spine -> Spine -> IO ()
+      goSp :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg => Spine -> Spine -> IO ()
       goSp = unifySp
       {-# inline goSp #-}
 
@@ -1037,7 +1064,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
         RIrr       -> irr act
       {-# inline withRelevance #-}
 
-      goRH :: UnifyStateArg => RigidHead -> RigidHead -> Spine -> Spine -> IO ()
+      goRH :: UnifyStateArg => LhsArg => RhsArg => RigidHead -> RigidHead -> Spine -> Spine -> IO ()
       goRH h h' sp sp' = do
         case (h, h') of
           (RHLocalVar x _ _ , RHLocalVar x' _ _ ) -> unifyEq x x'
@@ -1063,10 +1090,10 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
             goJoin (coe a a' (Trans Set a b a' p (Sym Set a' b p')) t) t'
 
-          _ -> throwIO CantUnify
+          _ -> cantUnify
         goSp sp sp'
 
-      goFH :: UnifyStateArg => FlexHead -> Spine -> FlexHead -> Spine -> Ty -> IO ()
+      goFH :: UnifyStateArg => LhsArg => RhsArg => FlexHead -> Spine -> FlexHead -> Spine -> Ty -> IO ()
       goFH h sp h' sp' a = case (h, h') of
         (FHCoe _ a b p t, FHCoe _ a' b' p' t') -> case (sp, sp') of
           (SId, SId) ->
@@ -1113,6 +1140,9 @@ unify (G topt ftopt) (G topt' ftopt') = do
         USFull -> forceAll t
         _      -> force t
       {-# inline forceUS #-}
+
+  let ?lhs = topt
+      ?rhs = topt'
 
   ftopt  <- forceUS ftopt
   ftopt' <- forceUS ftopt'
@@ -1245,4 +1275,4 @@ unify (G topt ftopt) (G topt' ftopt') = do
 
     (Magic m, _) -> impossible
     (_, Magic m) -> impossible
-    _            -> throwIO CantUnify
+    _            -> cantUnify

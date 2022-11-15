@@ -355,18 +355,6 @@ data ConvState
                 --   compute all unfoldings.
   deriving (Eq, Show)
 
-data UnifyEx
-  = CantUnify
-  | CantSolveFrozenMeta MetaVar
-  | CantSolveMetaInNonRigidState
-  | CantPartialSubst
-  | CantPartialQuote
-  | CantInvertSpine
-  | CantPruneSpine
-  | PruningNotAllowed
-  deriving (Eq, Show)
-instance Exception UnifyEx
-
 -- Timing
 --------------------------------------------------------------------------------
 

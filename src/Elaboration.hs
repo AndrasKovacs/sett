@@ -11,7 +11,7 @@ import Errors
 import Evaluation
 import Pretty
 import Syntax
-import Unification (freshMeta)
+import Unification (freshMeta, UnifyEx(..))
 import Values
 
 import qualified NameTable as NT
@@ -159,7 +159,7 @@ checkEl topt topa = case topt of
       -- insert implicit lambda
       (t, V.Pi x Impl a b) -> do
         let qa = quote a
-        insertBinder qa a \var ->
+        insertBinder x qa a \var ->
           S.Lam x Impl qa <$!> (checkEl t $! (b $$ var))
 
       (P.Pair t u, V.Sg _ x a b) -> do
@@ -241,7 +241,7 @@ check topt topa = do
         -- insert implicit lambda
         (t, V.Pi x Impl a b) -> do
           let qa = quote a
-          insertBinder qa a \var ->
+          insertBinder x qa a \var ->
             S.Lam x Impl qa <$!> check t (b $$ var)
 
         (P.Pair t u, V.Sg sp x a b) -> do

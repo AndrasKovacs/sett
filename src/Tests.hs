@@ -341,11 +341,18 @@ test = justElab $ unlines [
   "         * (efrom : comp {B}{A}{_} to from = id)",
   "         * Top",
   "",
-  "foo : (A : Set) → Iso A A ={Set} Iso A _",
-  "  := λ A. refl {Set}"
+  "foo : (A B : Set) → Iso A A ={Set} Iso A B",
+  "  := λ A B. refl {Set}"
   ]
 
 
 -- unify | comp {A} {A} {?0 A A to from} to from @0 ={?0 A A to from} id {?1 A A to from} @0
 --       | comp {?2 A} {A} {?0 A (?2 A) to from} to from @0 ={?0 A (?2 A) to from} id {?1 A (?2 A) to from} @0
 --       | USRigid 0 END
+
+nonlinear = justElab $ unlines [
+  "test : Top",
+  "  := let m : Set -> Set -> Set := _;",
+  "     let p : (A : Set) -> m A A ={Set} A := \\A. refl{Set}{A};",
+  "     Set"
+  ]
