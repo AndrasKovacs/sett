@@ -262,7 +262,7 @@ ensureSP :: InCxt (P.Tm -> V.Ty -> IO SP)
 ensureSP topt a = forceAll a >>= \case
   V.Set  -> pure S
   V.Prop -> pure P
-  Flex{} -> elabError topt AmbiguousUniverse
+  Flex{} -> elabError topt AmbiguousUniverse -- TODO: postpone
   _      -> elabError topt ExpectedSetProp
 
 infer :: InCxt (P.Tm -> IO Infer)
@@ -367,8 +367,6 @@ infer topt = do
         fa ->
           elabError topt $ ExpectedFun a     -- TODO: postpone
 
-
-    -- TODO: infer with known SetProp, postpone here!!
     P.Lam _ x inf ma t -> do
       i <- case inf of
         P.AIImpl _        -> pure Impl
@@ -379,14 +377,28 @@ infer topt = do
         Just a  -> check a V.Set
       let ~va = eval a
       Infer t b <- bind x a va \_ -> infer t
-      let bcl = closeVal b
       let name = bindToName x
-      pure $ Infer (S.Lam name i a t) (V.Pi name i va bcl)
+      forceAll b >>= \case
+        V.Flex{} ->
+          elabError topt AmbiguousUniverse -- TODO: postpone
+        V.El b   -> do
+          let bcl = closeVal b
+          pure $ Infer (S.Lam name i a t) (V.El (V.Pi name i va bcl))
+        _ -> do
+          let bcl = closeVal b
+          pure $ Infer (S.Lam name i a t) (V.Pi name i va bcl)
 
-
-    -- TODO: infer simple product type, postpone if ambiguous S/P
-    P.Pair{} ->
-      elabError topt $ GenericError "can't infer type for pair"
+    -- Infer simple product type
+    P.Pair t u -> do
+      Infer t a <- insertApps $ infer t
+      Infer u b <- insertApps $ infer u
+      fa        <- forceAll a
+      fb        <- forceAll b
+      case (fa, fb) of
+        (Flex{}  , _       ) -> elabError topt AmbiguousUniverse
+        (_       , Flex{}  ) -> elabError topt AmbiguousUniverse
+        (V.El a' , V.El b' ) -> pure $! Infer (S.Pair t u) (V.El (andP a' b'))
+        _                    -> pure $! Infer (S.Pair t u) (prod a b)
 
     P.Proj1 topt _ -> do
       Infer t tty <- infer topt

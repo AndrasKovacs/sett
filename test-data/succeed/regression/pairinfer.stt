@@ -1,0 +1,4 @@
+
+test1 : _ := (tt, tt)
+typeof : {A : Set} → A → Set := λ {A} x. A
+test : typeof test1 = El (⊤ × ⊤) := refl

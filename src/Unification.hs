@@ -266,6 +266,14 @@ psubst psub topt = do
         pure $! k a t
       {-# inline goBind #-}
 
+      goBindSP :: SP -> Val -> Closure -> (S.Tm -> S.Tm -> S.Tm) -> IO S.Tm
+      goBindSP sp a t k = do
+        (!a, ~va) <- psubst' psub a
+        let va' = elSP sp va
+        t <- psubst (lift psub va') (appClIn (?lvl + 1) t (Var ?lvl va'))
+        pure $! k a t
+      {-# inline goBindSP #-}
+
       goUnfolding unf act =
         catch @UnifyEx act (\_ -> go unf)
 
@@ -325,7 +333,7 @@ psubst psub topt = do
     Set                -> pure S.Set
     Pi x i a b         -> goBind a b (S.Pi x i)
     Lam x i a t        -> goBind a t (S.Lam x i)
-    Sg sp x a b        -> goBind (elSP sp a) b (S.Sg sp x)
+    Sg sp x a b        -> goBindSP sp a b (S.Sg sp x)
     Pair t u           -> S.Pair <$!> go t <*!> go u
     El a               -> S.El <$!> go a
     Prop               -> pure S.Prop
@@ -789,8 +797,10 @@ solveTopSp psub ls a sp rhs rhsty = do
   case (a, sp) of
 
     (a, RSId) -> do
-      _ <- psubst psub rhsty -- TODO optimize: somehow check for nonlinearity
-      psubst psub rhs
+      resty <- psubst psub rhsty -- TODO optimize: somehow check for nonlinearity
+      res <- psubst psub rhs
+      debug ["PSUBRES", showTm0 (quoteIn (psub^.cod) rhs), showTm0 resty, showTm0 res]
+      pure res
 
     (Pi x i a b, RSApp u _ t) -> do
       let var   = Var' ?lvl a True
@@ -916,6 +926,8 @@ solve x sp rhs rhsty = do
         sol <- catchUE
            (solveTopSp (PSub ENil (Just x) 0 ?lvl mempty True) S.LEmpty a (reverseSpine sp) rhs rhsty)
            cantUnify
+
+        debug ["SOLUTION", showTm' sol]
 
         ES.solve x sol (eval0 sol)
 

@@ -104,7 +104,6 @@ justElab src = do
   reset
   (src, top) <- parseString src
   writeElabSource (Just src)
-  debug ["START ELAB"]
   ntbl <- elab top
   renderElab
 

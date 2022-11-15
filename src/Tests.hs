@@ -345,14 +345,20 @@ test = justElab $ unlines [
   "  := λ A B. refl {Set}"
   ]
 
-
--- unify | comp {A} {A} {?0 A A to from} to from @0 ={?0 A A to from} id {?1 A A to from} @0
---       | comp {?2 A} {A} {?0 A (?2 A) to from} to from @0 ={?0 A (?2 A) to from} id {?1 A (?2 A) to from} @0
---       | USRigid 0 END
-
 nonlinear = justElab $ unlines [
   "test : Top",
   "  := let m : Set -> Set -> Set := _;",
   "     let p : (A : Set) -> m A A ={Set} A := \\A. refl{Set}{A};",
   "     Set"
+  ]
+
+laminfer = justElab $ unlines [
+  "test1 := λ (f : Set → Set) x y. f x → f y",
+  "test2 := λ (P : Prop) (x : P). x"
+  ]
+
+pairinfer = justElab $ unlines [
+  "test1 : _ := (tt, tt)",
+  "typeof : {A : Set} → A → Set := λ {A} x. A",
+  "test : typeof test1 = El (⊤ × ⊤) := refl"
   ]

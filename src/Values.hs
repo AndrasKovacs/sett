@@ -191,6 +191,9 @@ infixr 1 ==>
 andP :: Val -> Val -> Val
 andP a b = SgP NUnused a \_ -> b
 
+prod :: Val -> Val -> Val
+prod a b = SgS NUnused a \_ -> b
+
 elSP :: SP -> Val -> Val
 elSP S a = a
 elSP P a = El a
