@@ -131,8 +131,8 @@ goTm prec ns t = go prec ns t where
 
     ProjField t x _ -> par p projp $ go projp ns (removeUnpack t) . ('.':) . (show x++)
 
-    Proj1 t -> par p projp $ go projp ns t . (".1"++)
-    Proj2 t -> par p projp $ go projp ns t . (".2"++)
+    Proj1 t -> par p projp $ go projp ns (removeUnpack t) . (".1"++)
+    Proj2 t -> par p projp $ go projp ns (removeUnpack t) . (".2"++)
 
     Pi NUnused Expl a b  -> par p pip $ go sigmap ns a . (" → "++) . go pip ("_":ns) b
     Pi (fresh ns -> (n,x)) i a b ->

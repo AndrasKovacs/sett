@@ -1,4 +1,10 @@
 
+Def : {A : Set} (x : A) → Set
+  := \{A} x. Newtype {(A : Set) * A} (\_. ⊤) (A,x)
+
+get : {A : Set} {x : A} → Def x → A
+  := \{A} {x} _. x
+
 NewtypeEq := Newtype {(A : Set) * (x : A) * (y : A) * Top} (\p. p.x = p.y)
 
 Id : {A : Set} -> A -> A -> Set
@@ -59,7 +65,13 @@ LocalRepData : {C : Cat} {P : Psh C} → DepPsh P → Set
   × (pair : {x px y} (f : C.Hom y x) → Q.ob (P.subst px f) → C.Hom y (ext x px))
   × (p : {x px} → C.Hom (ext x px) x)
   × (q : {x px} → Q.ob (P.subst px (p {x} {px})))
-  × (pairpq : {x px} → Id (pair (p {x} {px}) q) C.id)
+  × (pi1 : Def {{x px y} → C.Hom y (ext x px) → C.Hom y x}
+               (\f. C.comp p f))
+  × (pi2 : Def {{x px y} → (f : C.Hom y (ext x px)) → Q.ob (P.subst px (get pi1 f))}
+               (\f. icoe (iap Q.ob (isym P.comp)) (Q.subst q f)))
+  × (eq1 : {x px y} (f : C.Hom y (ext x px)) → Id (pair (get pi1 f) (get pi2 f)) f)
+  × (eq2 : {x px y f qy} → Id {(f : C.Hom y x) × Q.ob (P.subst px f)}
+                              (get pi1 (pair {x} {px} {y} f qy), get pi2 (pair {x} {px} {y} f qy)) (f, qy))
   × ⊤
 
 LocalRep : {C : Cat} {P : Psh C} → DepPsh P → Set
