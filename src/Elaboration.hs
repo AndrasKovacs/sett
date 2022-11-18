@@ -249,6 +249,12 @@ check topt topa = do
           u <- check u (b $$~ eval t)
           pure $ S.Pair t u
 
+        (P.Pack _ t, V.Newtype a b x) -> do
+          S.Pack (S.Newtype (quote a) (quote b) (quote x)) <$!> check t (appE b x)
+
+        (P.Pair t u, V.Newtype a b x) -> do
+          S.Pack (S.Newtype (quote a) (quote b) (quote x)) <$!> check (P.Pair t u) (appE b x)
+
         (topt, _) -> do
           Infer t tty <- insertApps $ infer topt
           subtype topt t (eval t) tty topa
@@ -405,6 +411,11 @@ infer topt = do
       forceSet tty >>= \case
         V.Sg _ x a b        -> pure $! Infer (Proj1 t) a
         V.El (V.Sg _ x a b) -> pure $! Infer (Proj1 t) (V.El a)
+        V.Newtype a b x -> do            -- TODO: cache (b x) in Newtype!
+          forceSet (appE b x) >>= \case
+            V.Sg _ x a b        -> pure $! Infer (Proj1 (Unpack t)) a
+            V.El (V.Sg _ x a b) -> pure $! Infer (Proj1 (Unpack t)) (V.El a)
+            _                   -> elabError topt $! ExpectedSg tty
 
         -- fty@Flex{} -> do                       -- universe ambiguity! TODO: postpone
         --   a <- freshMeta V.Set
@@ -422,6 +433,11 @@ infer topt = do
       forceSet tty >>= \case
         V.Sg _ x a b        -> pure $! Infer (Proj2 t) (b $$~ proj1 (eval t))
         V.El (V.Sg _ x a b) -> pure $! Infer (Proj2 t) (V.El (b $$~ proj1 (eval t)))
+        V.Newtype a b x     -> do
+          forceSet (appE b x) >>= \case
+            V.Sg _ x a b        -> pure $! Infer (Proj2 (Unpack t)) (b $$~ proj1 (eval t))
+            V.El (V.Sg _ x a b) -> pure $! Infer (Proj2 (Unpack t)) (V.El (b $$~ proj1 (eval t)))
+            _                   -> elabError topt $! ExpectedSg tty
 
         -- fty@Flex{} -> do                      -- universe ambiguity! TODO: postpone
         --   a <- freshMeta V.Set
@@ -438,6 +454,7 @@ infer topt = do
       let fieldName = NSpan fieldSpan
       Infer t tty <- infer topt
       let ~vt = eval t
+
       let go a ix = forceSet a >>= \case
             V.Sg _ x' a b | fieldName == x' -> do
               pure (ix, a)
@@ -449,8 +466,14 @@ infer topt = do
               go (V.El (b $$~ projField vt ix)) (ix + 1)
             _ ->
               elabError topt $ NoSuchField fieldSpan  -- TODO: postpone
-      (ix, b) <- go tty 0
-      pure $! Infer (S.ProjField t fieldName ix) b
+
+      forceSet tty >>= \case
+        V.Newtype a b x -> do
+          (ix, b) <- go (appE b x) 0
+          pure $! Infer (S.ProjField (S.Unpack t) fieldName ix) b
+        tty -> do
+          (ix, b) <- go tty 0
+          pure $! Infer (S.ProjField t fieldName ix) b
 
     P.Let _ x ma t u -> do
 

@@ -152,7 +152,7 @@ data Val
   | Sg SP Name Ty Closure
   | Pair Val Val
 
-  | Newtype Val Val Val
+  | Newtype Val Val Val  -- Newtype a b x,   TODO: cache (b x) here!
   | Pack ~Ty Val -- type of the result (some "Newtype A B x")
 
   | Prop
