@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.34.4.
+-- This file has been generated from package.yaml by hpack version 0.35.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -29,6 +29,7 @@ data-files:
     ./succeed/CatCat.stt
     ./succeed/church-compute.stt
     ./succeed/coe-computation.stt
+    ./succeed/CwF.stt
     ./succeed/eq-computation.stt
     ./succeed/implicit-basics.stt
     ./succeed/iso.stt
@@ -129,11 +130,11 @@ library
     , template-haskell
     , time
     , unordered-containers
+  default-language: Haskell2010
   if flag(dump)
     ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
   if flag(llvm)
     ghc-options: -fllvm
-  default-language: Haskell2010
 
 executable sett
   main-is: Main.hs
@@ -171,11 +172,11 @@ executable sett
   build-depends:
       base >=4.7 && <5
     , sett
+  default-language: Haskell2010
   if flag(dump)
     ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
   if flag(llvm)
     ghc-options: -fllvm
-  default-language: Haskell2010
 
 test-suite units
   type: exitcode-stdio-1.0
@@ -218,8 +219,8 @@ test-suite units
     , dir-traverse
     , filepath
     , sett
+  default-language: Haskell2010
   if flag(dump)
     ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
   if flag(llvm)
     ghc-options: -fllvm
-  default-language: Haskell2010
