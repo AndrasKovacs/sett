@@ -21,3 +21,6 @@ reflPointed : (P : Pointed) -> Id P P
 funext : {A : Set} {B : A -> Set} (f g : (a : A) -> B a)
        -> ((a : A) -> Id (f a) (g a)) -> Id f g
   := \f g h. pack (\a. (h a).unpack)
+
+coeid : {A : Set} {B : Set} -> Id A B -> A -> B
+  := \p x. coe p.unpack x
