@@ -718,15 +718,16 @@ setRelevance a = do
   let go         = setRelevance; {-# inline go #-}
       goBind a b = newVar a \v -> setRelevance (b $$ v); {-# inline goBind #-}
   case runIO (forceSet a) of
-    Set          -> RRel
-    Prop         -> RRel
-    El _         -> RIrr
-    Pi _ _ a b   -> goBind a b
-    Sg _ _ a b   -> sgRelevance (go a) (goBind a b)
-    Rigid{}      -> RRel
-    Flex h sp _  -> RBlockOn (flexHeadMeta h)
-    Magic m      -> RMagic m
-    _            -> impossible
+    Set           -> RRel
+    Prop          -> RRel
+    El _          -> RIrr
+    Pi _ _ a b    -> goBind a b
+    Sg _ _ a b    -> sgRelevance (go a) (goBind a b)
+    Rigid{}       -> RRel
+    Flex h sp _   -> RBlockOn (flexHeadMeta h)
+    Magic m       -> RMagic m
+    Newtype a b x -> go (appE b x)
+    _             -> impossible
 
 
 -- Conversion
