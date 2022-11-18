@@ -17,3 +17,7 @@ Pointed : Set := (A : Set) * A
 
 reflPointed : (P : Pointed) -> Id P P
   := \_. irefl
+
+funext : {A : Set} {B : A -> Set} (f g : (a : A) -> B a)
+       -> ((a : A) -> Id (f a) (g a)) -> Id f g
+  := \f g h. pack (\a. (h a).unpack)
