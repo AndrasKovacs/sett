@@ -24,19 +24,19 @@ Id : {C : Cat} → Functor C C
   := (λ x. x, λ f. f, refl, λ _ _. refl, tt)
 
 Comp : {C D E : Cat} → Functor D E → Functor C D → Functor C E
-  := λ F G. pack (
+  := λ F G. (
     λ x. F.Ob (G.Ob x)
   , λ f. F.Hom (G.Hom f)
   , trans (ap F.Hom G.id) F.id
   , λ f g. trans (ap F.Hom (G.comp f g)) (F.comp (G.Hom f) (G.Hom g))
   , tt)
 
--- Idl : {C D}{F : Functor C D} → Comp C C D F (Id C) = F
---   := refl
+Idl : {C D}{F : Functor C D} → Comp F Id = F
+  := refl
 
--- Idr : {C D}{F : Functor C D} → Comp C D D (Id D) F = F
---   := refl
+Idr : {C D}{F : Functor C D} → Comp Id F = F
+  := refl
 
--- Ass : {C1 C2 C3 C4}{F : Functor C3 C4}{G : Functor C2 C3}{H : Functor C1 C2}
---       → Comp C1 C3 C4 F (Comp C1 C2 C3 G H) = Comp C1 C2 C4 (Comp C2 C3 C4 F G) H
---   := refl
+Ass : {C1 C2 C3 C4}{F : Functor C3 C4}{G : Functor C2 C3}{H : Functor C1 C2}
+      → Comp F (Comp G H) = Comp (Comp F G) H
+  := refl
