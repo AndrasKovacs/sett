@@ -97,6 +97,10 @@ goTm prec ns t = go prec ns t where
     go _      _ = "@" ++ show topIx
     -- go _      _ = impossible
 
+  removeUnpack :: Tm -> Tm
+  removeUnpack (Unpack t) = t
+  removeUnpack t = t
+
   go :: Int -> [String] -> Tm -> ShowS
   go p ns = \case
 
@@ -125,7 +129,7 @@ goTm prec ns t = go prec ns t where
 
     Pair t u -> par p pairp $ go letp ns t . (", "++) . go pairp ns u
 
-    ProjField t x _ -> par p projp $ go projp ns t . ('.':) . (show x++)
+    ProjField t x _ -> par p projp $ go projp ns (removeUnpack t) . ('.':) . (show x++)
 
     Proj1 t -> par p projp $ go projp ns t . (".1"++)
     Proj2 t -> par p projp $ go projp ns t . (".2"++)

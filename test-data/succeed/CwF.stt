@@ -1,0 +1,94 @@
+
+NewtypeEq := Newtype {(A : Set) * (x : A) * (y : A) * Top} (\p. p.x = p.y)
+
+Id : {A : Set} -> A -> A -> Set
+  := \{A} x y. NewtypeEq (A,x,y,tt)
+
+irefl : {A : Set} {x : A} -> Id x x
+  := pack refl
+
+isym : {A : Set} {x y : A} -> Id x y -> Id y x
+  := \p. pack (sym p.unpack)
+
+itrans : {A : Set} {x y z : A} -> Id x y -> Id y z -> Id x z
+  := \p q. pack (trans p.unpack q.unpack)
+
+iap : {A : Set} {B : Set} (f : A → B) {x y : A} → Id x y → Id (f x) (f y)
+  := \f p. pack (ap f p.unpack)
+
+icoe : {A : Set} {B : Set} -> Id A B -> A -> B
+  := \p x. coe p.unpack x
+
+Cat : Set
+  := (Ob    : Set)
+   × (Hom   : Ob → Ob → Set)
+   × (id    : {x} → Hom x x)
+   × (comp  : {x y z} → Hom y z → Hom x y → Hom x z)
+   × (idl   : {x y} (f : Hom x y) → Id (comp id f) f)
+   × (idr   : {x y} (f : Hom x y) → Id (comp f id) f)
+   × (assoc : {x y z w} (f : Hom z w) (g : Hom y z) (h : Hom x y) → Id (comp f (comp g h)) (comp (comp f g) h))
+   × ⊤
+
+PshData : Cat → Set
+  := λ C.
+    (ob    : C.Ob → Set)
+  × (subst : {x y} → ob y → C.Hom x y → ob x)
+  × (id    : {x} {ox : ob x} → Id (subst ox C.id) ox)
+  × (comp  : {x y z} {f : C.Hom y z} {g: C.Hom x y} {oz : ob z}
+           → Id (subst oz (C.comp f g)) (subst (subst oz f) g))
+  × ⊤
+
+Psh : Cat → Set
+  := Newtype PshData
+
+DepPshData : {C : Cat} → Psh C → Set
+  := λ {C} P.
+    (ob    : {x} → P.ob x → Set)
+  × (subst : {x y py} → ob {y} py → (f : C.Hom x y) → ob (P.subst py f))
+  × (id    : {x px} {ox : ob {x} px} → Id (subst ox C.id) (icoe (iap ob (isym P.id)) ox))
+  × (comp  : {x y z} {f : C.Hom y z} {g: C.Hom x y} {pz} {oz : ob {z} pz}
+           → Id (subst oz (C.comp f g)) (icoe (iap ob (isym P.comp)) (subst (subst oz f) g)))
+  × ⊤
+
+DepPsh : {C : Cat} → Psh C → Set
+  := λ {C} P. Newtype {(C : Cat) × Psh C} (λ p. DepPshData p.2) (C, P)
+
+LocalRepData : {C : Cat} {P : Psh C} → DepPsh P → Set
+  := λ {C} {P} Q.
+    (ext : (x : C.Ob) → P.ob x → C.Ob)
+  × (pair : {x px y} (f : C.Hom y x) → Q.ob (P.subst px f) → C.Hom y (ext x px))
+  × (p : {x px} → C.Hom (ext x px) x)
+  × (q : {x px} → Q.ob (P.subst px (p {x} {px})))
+  × (pairpq : {x px} → Id (pair (p {x} {px}) q) C.id)
+  × ⊤
+
+LocalRep : {C : Cat} {P : Psh C} → DepPsh P → Set
+  := λ {C} {P} Q. Newtype {(C : Cat) × (P : Psh C) × DepPsh P} (λ p. LocalRepData p.2.2) (C,P,Q)
+
+lift : {C} {P} {Q} (E : LocalRep {C} {P} Q) → {x y py} (f : C.Hom x y) → C.Hom (E.ext x (P.subst py f)) (E.ext y py)
+  := λ {C} {P} {Q} E {x} {y} {py} f. E.pair (C.comp f E.p) (icoe (iap Q.ob (isym P.comp)) (E.q {x} {P.subst py f}))
+
+TerminalData : (C : Cat) → Set
+  := λ C.
+    (terminal : C.Ob)
+  × (terminalexists : {x} → C.Hom x terminal)
+  × (terminalunique : {x} {f g : C.Hom x terminal} → Id f g)
+  × ⊤
+
+Terminal : Cat → Set
+  := Newtype TerminalData
+
+CwF : Set
+  := (C : Cat)
+   × (Ty : Psh C)
+   × (Tm : DepPsh Ty)
+   × (TmExt : LocalRep Tm)
+   × (T : Terminal C)
+   × ⊤
+
+PiType : (C : CwF) → Set
+  := λ C.
+    (Pi : {x : C.C.Ob} (A : C.Ty.ob x) (B : C.Ty.ob (C.TmExt.ext x A)) → C.Ty.ob x)
+  × (Pisubst : {x y} {f : C.C.Hom x y} {Ay} {By}
+             → Id (C.Ty.subst (Pi {y} Ay By) f) (Pi {x} (C.Ty.subst Ay f) (C.Ty.subst By _)))
+  × ⊤
