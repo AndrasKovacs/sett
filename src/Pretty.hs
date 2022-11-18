@@ -157,9 +157,9 @@ goTm prec ns t = go prec ns t where
       par p letp $ ("let "++) . (x++) . (" : "++) . go letp ns a
       . (" := "++) . go letp ns t . ("; "++) . go letp (n:ns) u
 
-    TaggedSym  -> ("Tagged"++)
-    Tag t      -> par p projp $ go projp ns t . (".tag"++)
-    Untag t    -> par p projp $ go projp ns t . (".untag"++)
+    NewtypeSym -> ("Newtype"++)
+    Pack _ t   -> par p appp $ ("pack "++) . go projp ns t
+    Unpack t   -> par p projp $ go projp ns t . (".untag"++)
 
     Set        -> ("Set"++)
     Prop       -> ("Prop"++)

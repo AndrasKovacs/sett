@@ -1,11 +1,11 @@
 
 module Evaluation (
-    app, appE, appI, proj1, proj2, gproj1, gproj2, projField, untag, guntag
+    app, appE, appI, proj1, proj2, gproj1, gproj2, projField, unpack, gunpack
   , eval, quote, eval0, quote0, nf, nf0, spine, spine0, spineIn, coe, eq
   , force, forceAll, forceMetas, eqSet, forceSet, unblock
-  , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty, untagTy
+  , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty, unpackTy
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt
-  , quoteNf, quoteSpWithOpt, localVar, eqProp, quoteInWithOpt
+  , quoteNf, quoteSpWithOpt, localVar, eqProp, quoteInWithOpt, pack
   , pattern Exfalso
   , pattern Coe
   , pattern Refl
@@ -110,6 +110,15 @@ app t u i = case t of
   Magic m          -> Magic m
   _                -> impossible
 
+lazyApp :: LvlArg => Val -> Val -> Icit -> Val
+lazyApp t ~u i = case t of
+  Lam x i a t      -> t $$~ u
+  Rigid h sp a     -> Rigid h (SApp sp u i) (appTy a u)
+  Flex h sp a      -> Flex h (SApp sp u i) (appTy a u)
+  Unfold h sp t a  -> Unfold h (SApp sp u i) (app t u i) (appTy a u)
+  Magic m          -> Magic m
+  _                -> impossible
+
 appIn :: Lvl -> Val -> Val -> Icit -> Val
 appIn l = let ?lvl = l in app
 
@@ -141,10 +150,6 @@ gproj1 (G t ft) = G (proj1 t) (proj1 ft)
 gproj2 :: LvlArg => G -> G
 gproj2 (G t ft) = G (proj2 t) (proj2 ft)
 {-# inline gproj2 #-}
-
-guntag :: LvlArg => G -> G
-guntag (G t ft) = G (untag t) (untag ft)
-{-# inline guntag #-}
 
 -- | Args: type which is a sigma, value for the first projection, returns type of the
 --   second projection.
@@ -199,29 +204,41 @@ projField topt n = case topt of
   Magic m         -> Magic m
   _               -> impossible
 
--- Tagged types
+-- Newtype
 --------------------------------------------------------------------------------
 
-taggedSym :: Val
-taggedSym =
-  LamE na Set \a ->
+newtypeSym :: Val
+newtypeSym =
+  LamI na Set \a ->
   LamE nb (a ==> Set) \b ->
   LamE nx a \x ->
-  Tagged a (Cl \x -> b `appE` x) x
+  Newtype a b x
 
-untagTy :: LvlArg => Ty -> Ty
-untagTy a = runIO $ forceSet a >>= \case
-  Tagged _ _ b    -> pure b
-  a               -> impossible
+unpackTy :: LvlArg => Ty -> Ty
+unpackTy a = runIO $ forceSet a >>= \case
+  Newtype _ b x -> pure $! appE b x
+  _             -> impossible
 
-untag :: LvlArg => Val -> Val
-untag t = case t of
-  Pair t u        -> t
-  Rigid h sp a    -> Rigid  h (SUntag sp) (untagTy a)
-  Flex h sp a     -> Flex   h (SUntag sp) (untagTy a)
-  Unfold h sp t a -> Unfold h (SUntag sp) (untag t) (untagTy a)
+unpack :: LvlArg => Val -> Val
+unpack = \case
+  Pack _ t        -> t
+  Rigid h sp a    -> Rigid  h (SUnpack sp) (unpackTy a)
+  Flex h sp a     -> Flex   h (SUnpack sp) (unpackTy a)
+  Unfold h sp t a -> Unfold h (SUnpack sp) (unpack t) (unpackTy a)
   Magic m         -> Magic m
   _               -> impossible
+
+pack :: Val -> Val -> Val
+pack ~a = \case
+  Rigid  h (SUnpack sp) _   -> Rigid h sp a
+  Flex   h (SUnpack sp) _   -> Flex h sp a
+  Unfold h (SUnpack sp) t _ -> Unfold h sp (pack a t) a
+  Magic m                   -> Magic m
+  v                         -> Pack a v
+
+gunpack :: LvlArg => G -> G
+gunpack (G t ft) = G (unpack t) (unpack ft)
+{-# inline gunpack #-}
 
 -- Coercion
 --------------------------------------------------------------------------------
@@ -253,6 +270,31 @@ coe a b p t = case (a, b) of
 
   (Set,  Set )   -> t
   (Prop, Prop)   -> t
+
+  (topa@(Newtype a b x), topb@(Newtype a' b' x')) ->
+    let aeq    = proj1 p
+        p2     = proj2 p
+        beq    = proj1 p2
+        xeq    = proj2 p2
+        bx     = appE b x
+        b'x'   = appE b' x'
+        coex   = coe a a' aeq x
+        b'coex = appE b' coex in
+    pack topb $!
+      coe bx b'x'
+          (Trans Set bx b'coex b'x'
+             (appE beq x)
+             (Ap a' Set b' coex x' xeq))
+          (unpack t)
+
+  -- aeq : a = a'
+  -- beq : ∀ x. b x = b' (coe aeq x)
+  -- xeq : coe aeq x = x'
+  -- goal : b x = b' x'
+
+  -- beq x     : b x = b' (coe aeq x)
+  -- ap b' xeq : b' (coe aeq x) = b' x'
+  -- trans (beq x) (ap b' xeq) : b x = b' x'
 
   -- non-canonical
   ------------------------------------------------------------
@@ -319,6 +361,8 @@ geq (G topa ftopa) (G t ft) (G u fu) = case ftopa of
                  t2)
               u2
 
+  Newtype a b x    -> geq (gjoin (appE b x)) (gunpack (G t ft)) (gunpack (G u fu))
+
   Rigid{}          -> RigidEq topa t u
                    -- NOTE: FlexEq must have at least 1 Flex component
   Flex h _ _       -> FlexEq (flexHeadMeta h) ftopa t u
@@ -348,6 +392,12 @@ geqSet (G topa ftopa) (G topb ftopb) = case (ftopa, ftopb) of
       in markEq Set topa topb $!
         SgP np (eqSet a a') \p ->
         PiE name a \x -> eqSet (b $$ x) (b' $$~ coe a a' p x)
+
+  (Newtype a b x, Newtype a' b' x') ->
+    markEq Set topa topb $!
+      SgP np (eqSet a a') \p ->
+      SgP nq (PiE nx a \x -> eqSet (appE b x) (lazyApp b' (coe a a' p x) Expl)) \q ->
+      eq a' (coe a a' p x) x'
 
   -- non-canonical
   ------------------------------------------------------------
@@ -392,7 +442,7 @@ spine v sp =
     SProj1 t           -> proj1 (go t)
     SProj2 t           -> proj2 (go t)
     SProjField t _ _ n -> projField (go t) n
-    SUntag t           -> untag (go t)
+    SUnpack t          -> unpack (go t)
 
 spineIn :: Lvl -> Val -> Spine -> Val
 spineIn l v sp = let ?lvl = l in spine v sp
@@ -461,9 +511,9 @@ eval t =
     S.InsertedMeta m ls -> insertedMeta m ls
     S.Meta x            -> meta x
     S.Let x a t u       -> let ?env = EDef ?env (eval t) in eval u
-    S.TaggedSym         -> taggedSym
-    S.Tag t             -> Tag (go t)
-    S.Untag t           -> untag (go t)
+    S.NewtypeSym        -> newtypeSym
+    S.Pack a t          -> pack (go a) (go t)
+    S.Unpack t          -> unpack (go t)
     S.Set               -> Set
     S.Prop              -> Prop
     S.Top               -> Top
@@ -712,13 +762,9 @@ convSp sp sp' = do
     (SProj1 t           , SProj1 t'           ) -> goSp t t'
     (SProj2 t           , SProj2 t'           ) -> goSp t t'
     (SProjField t _ _ n , SProjField t' _ _ n') -> goSp t t' >> convEq n n'
-    (SProjField t _ _ n , SProj1 t')            -> do
-      t' <- ensureNProj2 n t'
-      convSp t t'
-    (SProj1 t           , SProjField t' _ _ n)  -> do
-      t <- ensureNProj2 n t
-      convSp t t'
-    (SUntag t           , SUntag t')            -> goSp t t'
+    (SProjField t _ _ n , SProj1 t'           ) -> do {t' <- ensureNProj2 n t'; convSp t t'}
+    (SProj1 t           , SProjField t' _ _ n ) -> do {t <- ensureNProj2 n t; convSp t t'}
+    (SUnpack t          , SUnpack t'          ) -> goSp t t'
     _                                           -> throwIO Diff
 
 -- | Magical rigid coe conversion.
@@ -770,9 +816,9 @@ conv t u = do
       go a a'
       goBind (elSP sp a) b b'
 
-    (Tagged a b x, Tagged a' b' x') -> do
+    (Newtype a b x, Newtype a' b' x') -> do
       go a a'
-      goBind a b b'
+      go b b'
       go x x'
 
     (El a, El a' ) -> go a a'
@@ -791,17 +837,15 @@ conv t u = do
     (RigidEq a t u , RigidEq a' t' u') -> go a a' >> go t t' >> go u u'
     (Lam _ _ _ t   , Lam _ _ a t'    ) -> goBind a t t'
     (Pair t u      , Pair t' u'      ) -> go t t' >> go u u'
-    (Tag t         , Tag t')           -> go t t'
+    (Pack _ t      , Pack _ t'       ) -> go t t'
 
-    -- eta
+    -- syntax-directed eta
     --------------------------------------------------------------------------------
 
     (Lam _ i a t , t'           ) -> goBind a t (Cl \u -> app t' u i)
     (t           , Lam _ i a t' ) -> goBind a (Cl \u -> app t u i) t'
     (Pair t u    , t'           ) -> go t (proj1 t') >> go u (proj2 t')
     (t           , Pair t' u'   ) -> go (proj1 t) t' >> go (proj2 t) u'
-    (Tag t       , t'           ) -> go t (untag t')
-    (t           , Tag t'       ) -> go t (untag t')
 
     ------------------------------------------------------------
 
@@ -855,7 +899,7 @@ quoteSpWithOpt opt hd sp = let
     SProj1 t            -> S.Proj1 (goSp t)
     SProj2 t            -> S.Proj2 (goSp t)
     SProjField t tv x n -> S.ProjField (goSp t) (projFieldName tv x n) n
-    SUntag t            -> S.Untag (goSp t)
+    SUnpack t           -> S.Unpack (goSp t)
 
 quoteWithOpt :: LvlArg => UnfoldOpt -> Val -> S.Tm
 quoteWithOpt opt t = let
@@ -898,8 +942,8 @@ quoteWithOpt opt t = let
     Set                -> S.Set
     El a               -> S.El (go a)
     Prop               -> S.Prop
-    Tagged a b x       -> S.Tagged (go a) (goBind a b) (go x)
-    Tag y              -> S.Tag (go y)
+    Newtype a b x      -> S.Newtype (go a) (go b) (go x)
+    Pack a t           -> S.Pack (go a) (go t)
     Top                -> S.Top
     Tt                 -> S.Tt
     Bot                -> S.Bot

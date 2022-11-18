@@ -470,9 +470,18 @@ infer topt = do
         Infer u uty <- infer u
         pure $ Infer (S.Let (NSpan x) a t u) uty
 
-    P.Tagged _ -> do
-      let ty = V.PiE na V.Set \a -> V.PiE nb (a ==> V.Set) \b -> V.PiE nx a \x -> V.Set
-      pure $! Infer S.TaggedSym ty
+    P.Newtype _ -> do
+      let ty = V.PiI na V.Set \a -> V.PiE nb (a ==> V.Set) \b -> V.PiE nx a \x -> V.Set
+      pure $! Infer S.NewtypeSym ty
+
+    P.Pack _ t -> do
+      elabError topt $ GenericError "Can't infer type for packed value"
+
+    P.Unpack t _ -> do
+      Infer t a <- infer t
+      forceAll a >>= \case
+        V.Newtype a b x -> pure $! Infer (S.Unpack t) (appE b x)
+        _               -> elabError topt $ GenericError "Can't infer type for packed value" -- TODO:postpone
 
     P.Exfalso _ -> do
       let ty = V.PiI na V.Set \a -> V.El V.Bot ==> a

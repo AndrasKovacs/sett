@@ -128,7 +128,7 @@ atom =
   branch $(kw "trans")   (pure . Trans)        $
   branch $(kw "sym")     (pure . Sym)          $
   branch $(kw "El")      (pure . El)           $
-  branch $(kw "Tagged")  (pure . Tagged)       $
+  branch $(kw "Newtype") (pure . Newtype)      $
   empty
 
 parens :: Span -> Parser Tm
@@ -148,12 +148,14 @@ goProj :: Tm -> Parser Tm
 goProj t =
   branch $(sym ".")
     (\_ ->
-       branch $(sym "₁") (\(Span _ p) -> goProj (Proj1 t p)) $
-       branch $(sym "1") (\(Span _ p) -> goProj (Proj1 t p)) $
-       branch $(sym "₂") (\(Span _ p) -> goProj (Proj2 t p)) $
-       branch $(sym "2") (\(Span _ p) -> goProj (Proj2 t p)) $
-       (ident `pcut` Lit "a field projection: \".₁\", \".1\", \".₂\", \".2\" or field name projection")
-       >>= \x -> goProj (ProjField t x))
+       branch $(sym "₁")      (\(Span _ p) -> goProj (Proj1 t p)) $
+       branch $(sym "1")      (\(Span _ p) -> goProj (Proj1 t p)) $
+       branch $(sym "₂")      (\(Span _ p) -> goProj (Proj2 t p)) $
+       branch $(sym "2")      (\(Span _ p) -> goProj (Proj2 t p)) $
+       branch $(kw  "unpack") (\(Span _ p) -> goProj (Unpack t p)) $
+       (ident `pcut`
+          Lit "a field projection: \".₁\", \".1\", \".₂\", \".2\" or field name projection")
+          >>= \x -> goProj (ProjField t x))
     (pure t)
 
 proj' :: Parser Tm
@@ -183,7 +185,10 @@ goApp t = branch braceL
      (pure t))
 
 app' :: Parser Tm
-app' = (goApp =<< proj') `cut` appErr
+app' =
+  (branch $(kw "pack") (\x -> Pack x <$> proj')
+           (goApp =<< proj'))
+  `cut` appErr
 
 eq' :: Parser Tm
 eq' = (do

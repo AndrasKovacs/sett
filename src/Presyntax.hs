@@ -31,7 +31,9 @@ data Tm
   | Proj1 Tm Pos
   | Proj2 Tm Pos
 
-  | Tagged Span
+  | Newtype Span
+  | Pack Span Tm
+  | Unpack Tm Pos
 
   | Set  Span
   | Prop Span
@@ -67,7 +69,9 @@ span t = Span (left t) (right t) where
     Proj2 t _          -> left t
     ProjField t _      -> left t
     Lam l _ _ _ _      -> l
-    Tagged (Span l _)  -> l
+    Newtype (Span l _) -> l
+    Pack (Span l _) _  -> l
+    Unpack t _         -> left t
     Set (Span l _)     -> l
     Prop (Span l _)    -> l
     Top     (Span l _) -> l
@@ -98,7 +102,9 @@ span t = Span (left t) (right t) where
     App _ _ (AINamedImpl _ r) -> r
     App _ u _                 -> right u
     Lam _ _ _ _ t             -> right t
-    Tagged (Span _ r)         -> r
+    Newtype (Span _ r)        -> r
+    Pack _ t                  -> right t
+    Unpack _ r                -> r
     Set (Span _ r)            -> r
     Prop (Span _ r)           -> r
     Top     (Span _ r)        -> r
