@@ -90,5 +90,5 @@ PiType : (C : CwF) → Set
   := λ C.
     (Pi : {x : C.C.Ob} (A : C.Ty.ob x) (B : C.Ty.ob (C.TmExt.ext x A)) → C.Ty.ob x)
   × (Pisubst : {x y} {f : C.C.Hom x y} {Ay} {By}
-             → Id (C.Ty.subst (Pi {y} Ay By) f) (Pi {x} (C.Ty.subst Ay f) (C.Ty.subst By _)))
+             → Id (C.Ty.subst (Pi {y} Ay By) f) (Pi {x} (C.Ty.subst Ay f) (C.Ty.subst By (lift C.TmExt f))))
   × ⊤
