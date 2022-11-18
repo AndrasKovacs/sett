@@ -69,7 +69,7 @@ LocalRepData : {C : Cat} {P : Psh C} → DepPsh P → Set
                (\f. C.comp p f))
   × (pi2 : Def {{x px y} → (f : C.Hom y (ext x px)) → Q.ob (P.subst px (get pi1 f))}
                (\f. icoe (iap Q.ob (isym P.comp)) (Q.subst q f)))
-  × (eq1 : {x px y} (f : C.Hom y (ext x px)) → Id (pair (get pi1 f) (get pi2 f)) f)
+  × (eq1 : {x px y} {f : C.Hom y (ext x px)} → Id (pair (get pi1 f) (get pi2 f)) f)
   × (eq2 : {x px y f qy} → Id {(f : C.Hom y x) × Q.ob (P.subst px f)}
                               (get pi1 (pair {x} {px} {y} f qy), get pi2 (pair {x} {px} {y} f qy)) (f, qy))
   × ⊤
@@ -104,3 +104,58 @@ PiType : (C : CwF) → Set
   × (Pisubst : {x y} {f : C.C.Hom x y} {Ay} {By}
              → Id (C.Ty.subst (Pi {y} Ay By) f) (Pi {x} (C.Ty.subst Ay f) (C.Ty.subst By (lift C.TmExt f))))
   × ⊤
+
+Universe : Set
+  := (Ty : Set)
+   × (Tm : Ty → Set)
+   × (Pi : (A : Ty) → (Tm A → Ty) → Ty)
+   × ⊤
+
+SetCat : Cat
+  := ( Set
+     , λ A B. A → B
+     , λ x. x
+     , λ f g x. f (g x)
+     , λ _. irefl
+     , λ _. irefl
+     , λ _ _ _. irefl
+     , tt)
+
+SetTerminal : Terminal SetCat
+  := ( ⊤
+     , λ _. tt
+     , irefl
+     , tt)
+
+SetTy : Psh SetCat
+  := ( λ A. A → Set
+     , λ B f a. B (f a)
+     , irefl
+     , irefl
+     , tt)
+
+SetTm : DepPsh SetTy
+  := ( λ B. (a : _) → B a
+     , λ B f a. B (f a)
+     , irefl
+     , irefl
+     , tt)
+
+SetTmExt : LocalRep SetTm
+  := ( λ A B. (a : A) × B a
+     , λ a b. λ x. (a x , b x)
+     , λ x. x.1
+     , λ x. x.2
+     , _ -- pack tt is slow
+     , _ -- pack tt is very slow
+     , irefl
+     , irefl
+     , tt)
+
+SetModel : CwF
+  := ( SetCat
+     , SetTy
+     , SetTm
+     , SetTmExt
+     , SetTerminal
+     , tt)

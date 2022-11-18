@@ -73,7 +73,7 @@ data Tm
   | Sg SP Name Ty Ty
 
   | NewtypeSym
-  | Pack Ty Tm  -- annotation: type of the result (some Newtype A B x)
+  | Pack ~Ty Tm  -- annotation: type of the result (some Newtype A B x)
   | Unpack Tm
 
   | HidePostulate Lvl ~(Hide V.Ty)

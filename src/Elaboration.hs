@@ -249,11 +249,12 @@ check topt topa = do
           u <- check u (b $$~ eval t)
           pure $ S.Pair t u
 
-        (P.Pack _ t, V.Newtype a b x) -> do
-          S.Pack (quote topa) <$!> check t (appE b x)
+        (P.Pack _ t, V.Newtype a b x bx) -> do
+          debug' [showTm (quote topa)]
+          S.Pack (quote topa) <$!> check t bx
 
-        (P.Pair t u, V.Newtype a b x) -> do
-          S.Pack (quote topa) <$!> check topt (appE b x)
+        (P.Pair t u, V.Newtype a b x bx) -> do
+          S.Pack (quote topa) <$!> check topt bx
 
         (topt, _) -> do
           Infer t tty <- insertApps $ infer topt
@@ -411,8 +412,8 @@ infer topt = do
       forceSet tty >>= \case
         V.Sg _ x a b        -> pure $! Infer (Proj1 t) a
         V.El (V.Sg _ x a b) -> pure $! Infer (Proj1 t) (V.El a)
-        V.Newtype a b x -> do            -- TODO: cache (b x) in Newtype!
-          forceSet (appE b x) >>= \case
+        V.Newtype _ _ _ bx  -> do
+          forceSet bx >>= \case
             V.Sg _ x a b        -> pure $! Infer (Proj1 (Unpack t)) a
             V.El (V.Sg _ x a b) -> pure $! Infer (Proj1 (Unpack t)) (V.El a)
             _                   -> elabError topt $! ExpectedSg tty
@@ -433,8 +434,8 @@ infer topt = do
       forceSet tty >>= \case
         V.Sg _ x a b        -> pure $! Infer (Proj2 t) (b $$~ proj1 (eval t))
         V.El (V.Sg _ x a b) -> pure $! Infer (Proj2 t) (V.El (b $$~ proj1 (eval t)))
-        V.Newtype a b x     -> do
-          forceSet (appE b x) >>= \case
+        V.Newtype _ _ _ bx  -> do
+          forceSet bx >>= \case
             V.Sg _ x a b        -> pure $! Infer (Proj2 (Unpack t)) (b $$~ proj1 (eval t))
             V.El (V.Sg _ x a b) -> pure $! Infer (Proj2 (Unpack t)) (V.El (b $$~ proj1 (eval t)))
             _                   -> elabError topt $! ExpectedSg tty
@@ -467,9 +468,9 @@ infer topt = do
               elabError topt $ NoSuchField fieldSpan  -- TODO: postpone
 
       forceSet tty >>= \case
-        V.Newtype a b x -> do
+        V.Newtype _ _ _ bx -> do
           let ~vt = unpack (eval t)
-          (ix, b) <- go vt (appE b x) 0
+          (ix, b) <- go vt bx 0
           pure $! Infer (S.ProjField (S.Unpack t) fieldName ix) b
         tty -> do
           let ~vt = eval t
@@ -504,7 +505,7 @@ infer topt = do
     P.Unpack t _ -> do
       Infer t a <- infer t
       forceAll a >>= \case
-        V.Newtype a b x -> pure $! Infer (S.Unpack t) (appE b x)
+        V.Newtype _ _ _ bx -> pure $! Infer (S.Unpack t) bx
         _               -> elabError topt $ GenericError "Can't infer type for packed value" -- TODO:postpone
 
     P.Exfalso _ -> do

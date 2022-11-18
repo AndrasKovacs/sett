@@ -337,7 +337,7 @@ psubst psub topt = do
     Pair t u           -> S.Pair <$!> go t <*!> go u
     El a               -> S.El <$!> go a
     Prop               -> pure S.Prop
-    Newtype a b x      -> S.Newtype <$!> go a <*!> go b <*!> go x
+    Newtype a b x _    -> S.Newtype <$!> go a <*!> go b <*!> go x
     Pack a t           -> S.Pack <$!> go a <*!> go t
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
@@ -399,8 +399,8 @@ metaExpansion' a sp = do
     (a, RSProjField tv ta n sp) ->
       go a (RSProj2 (RSProjField VUndefined VUndefined (n - 1) sp))
 
-    (Newtype a b x, RSUnpack sp) -> do
-      S.Pack (S.Newtype (quote a) (quote b) (quote x)) <$!> go (appE b x) sp
+    (Newtype a b x bx, RSUnpack sp) -> do
+      S.Pack (S.Newtype (quote a) (quote b) (quote x)) <$!> go bx sp
 
     _ ->
       impossible
@@ -510,8 +510,8 @@ prArgTy p a = case (p, runIO (forceAll a)) of
   (PLam p     , Pi x i a b     ) -> Pi x i a $ Cl \x -> prArgTy p (b $$~ x)
   (PPair p1 p2, Sg _ x a b     ) -> Sg S x (prArgTy p1 a) $ Cl \x ->
                                     prArgTy p2 (b $$~ fromPrArg p1 a x)
-  (PPack p    , Newtype a b x  ) -> prArgTy p (appE b x) -- pruning must get rid of newtypes,
-                                                         -- we can't invent a pruned parametrization!
+  (PPack p    , Newtype a b x bx) -> prArgTy p bx -- pruning must get rid of newtypes,
+                                                  -- we can't invent a pruned parametrization!
   (_          , VUndefined     ) -> VUndefined
   _                              -> impossible
 
@@ -535,7 +535,7 @@ toPrArg p a t = case (p, runIO (forceAll a)) of
   (PLam p     , Pi x i a b     ) -> Lam x i a $ Cl \x -> toPrArg p (b $$ x) (app t x i)
   (PPair p1 p2, Sg _ x a b     ) -> let t1 = proj1 t; t2 = proj2 t in
                                     Pair (toPrArg p1 a t1) (toPrArg p2 (b $$ t1) t2)
-  (PPack p    , Newtype a b x  ) -> toPrArg p (appE b x) (unpack t)
+  (PPack p    , Newtype a b x bx) -> toPrArg p bx (unpack t)
   (_          , VUndefined     ) -> VUndefined
   _                              -> impossible
 
@@ -559,7 +559,7 @@ fromPrArg p a t = case (p, runIO (forceAll a)) of
   (PLam p     , Pi x i a b          ) -> Lam x i a $ Cl \x -> fromPrArg p (b $$~ x) (app t x i)
   (PPair p1 p2, Sg _ x a b          ) -> let t1 = proj1 t; t2 = proj2 t; fst = fromPrArg p1 a t1 in
                                          Pair fst (fromPrArg p2 (b $$ fst) t2)
-  (PPack p    , topa@(Newtype _ b x)) -> pack a $ fromPrArg p (appE b x) t
+  (PPack p    , topa@(Newtype _ b x bx)) -> pack a $ fromPrArg p bx t
   (_          , VUndefined          ) -> VUndefined
   _                                   -> impossible
 
@@ -669,7 +669,7 @@ partialQuote t = do
     Pi x i a b         -> S.Pi x i <$!> go a <*!> goBind a x b
     Set                -> pure S.Set
     Prop               -> pure S.Prop
-    Newtype a b x      -> S.Newtype <$!> go a <*> go b <*> go x
+    Newtype a b x _    -> S.Newtype <$!> go a <*> go b <*> go x
     Pack a t           -> S.Pack <$!> go a <*!> go t
     Top                -> pure S.Top
     Tt                 -> pure S.Tt
@@ -850,9 +850,9 @@ solveTopSp psub ls a sp rhs rhsty = do
       psub  <- invertVal 0 psub (psub^.cod) u SId
       S.Lam x i qa <$!> go psub ls (El (b $$ var)) t
 
-    (Newtype a b x, RSUnpack t) -> do
+    (Newtype a b x bx, RSUnpack t) -> do
       let q = S.Newtype (quote a) (quote b) (quote x)
-      S.Pack q <$!> go psub ls (appE b x) t
+      S.Pack q <$!> go psub ls bx t
 
     (Sg _ x a b, RSProj1 t) -> do
       fst <- go psub ls a t
@@ -918,9 +918,9 @@ solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
       psub <- invertVal solvable psub (psub^.cod) u SId
       S.Lam x i qa <$!> go psub (El (b $$ u)) t
 
-    (Newtype a b x, RSUnpack t) -> do
-      qa <- psubst psub (Newtype a b x)
-      S.Pack qa <$!> go psub (appE b x) t
+    (Newtype a b x bx, RSUnpack t) -> do
+      qa <- psubst psub (Newtype a b x bx)
+      S.Pack qa <$!> go psub bx t
 
     (Sg _ x a b, RSProj1 t) ->
       S.Pair <$!> go psub a t <*!> pure (S.Magic Undefined)
@@ -1206,15 +1206,15 @@ unify (G topt ftopt) (G topt' ftopt') = do
     -- matching sides
     ------------------------------------------------------------
 
-    (Pi x i a b  , Pi x' i' a' b' ) -> unifyEq i i' >> goJoin a a' >> goBind a x b b'
-    (Sg sp x a b , Sg _ x' a' b'  ) -> goJoin a a' >> goBind (elSP sp a) x b b'
-    (El a        , El a'          ) -> goJoin a a'
-    (Set         , Set            ) -> pure ()
-    (Prop        , Prop           ) -> pure ()
-    (Newtype a b x, Newtype a' b' x') -> goJoin a a' >> goJoin b b' >> goJoin x x'
-    (Top         , Top            ) -> pure ()
-    (Bot         , Bot            ) -> pure ()
-    (Tt          , Tt             ) -> pure ()
+    (Pi x i a b  , Pi x' i' a' b' )       -> unifyEq i i' >> goJoin a a' >> goBind a x b b'
+    (Sg sp x a b , Sg _ x' a' b'  )       -> goJoin a a' >> goBind (elSP sp a) x b b'
+    (El a        , El a'          )       -> goJoin a a'
+    (Set         , Set            )       -> pure ()
+    (Prop        , Prop           )       -> pure ()
+    (Newtype a b x _, Newtype a' b' x' _) -> goJoin a a' >> goJoin b b' >> goJoin x x'
+    (Top         , Top            )       -> pure ()
+    (Bot         , Bot            )       -> pure ()
+    (Tt          , Tt             )       -> pure ()
 
     (Rigid h sp a   , Rigid h' sp' _   ) -> withRelevance a (goRH h h' sp sp')
     (Lam x i a t    , Lam _ _ _ t'     ) -> goBind a x t t'

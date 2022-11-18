@@ -212,12 +212,12 @@ newtypeSym =
   LamI na Set \a ->
   LamE nb (a ==> Set) \b ->
   LamE nx a \x ->
-  Newtype a b x
+  Newtype a b x (b `appE` x)
 
 unpackTy :: LvlArg => Ty -> Ty
 unpackTy a = runIO $ forceSet a >>= \case
-  Newtype _ b x -> pure $! appE b x
-  _             -> impossible
+  Newtype _ _ _ bx -> pure $! bx
+  _                -> impossible
 
 unpack :: LvlArg => Val -> Val
 unpack = \case
@@ -271,13 +271,11 @@ coe a b p t = case (a, b) of
   (Set,  Set )   -> t
   (Prop, Prop)   -> t
 
-  (topa@(Newtype a b x), topb@(Newtype a' b' x')) ->
+  (topa@(Newtype a b x bx), topb@(Newtype a' b' x' b'x')) ->
     let aeq    = proj1 p
         p2     = proj2 p
         beq    = proj1 p2
         xeq    = proj2 p2
-        bx     = appE b x
-        b'x'   = appE b' x'
         coex   = coe a a' aeq x
         b'coex = appE b' coex in
     pack topb $!
@@ -361,7 +359,7 @@ geq (G topa ftopa) (G t ft) (G u fu) = case ftopa of
                  t2)
               u2
 
-  Newtype a b x    -> geq (gjoin (appE b x)) (gunpack (G t ft)) (gunpack (G u fu))
+  Newtype a b x bx -> geq (gjoin bx) (gunpack (G t ft)) (gunpack (G u fu))
 
   Rigid{}          -> RigidEq topa t u
                    -- NOTE: FlexEq must have at least 1 Flex component
@@ -393,10 +391,10 @@ geqSet (G topa ftopa) (G topb ftopb) = case (ftopa, ftopb) of
         SgP np (eqSet a a') \p ->
         PiE name a \x -> eqSet (b $$ x) (b' $$~ coe a a' p x)
 
-  (Newtype a b x, Newtype a' b' x') ->
+  (Newtype a b x bx, Newtype a' b' x' _) ->
     markEq Set topa topb $!
       SgP np (eqSet a a') \p ->
-      SgP nq (PiE nx a \x -> eqSet (appE b x) (lazyApp b' (coe a a' p x) Expl)) \q ->
+      SgP nq (PiE nx a \x -> eqSet bx (lazyApp b' (coe a a' p x) Expl)) \q ->
       eq a' (coe a a' p x) x'
 
   -- non-canonical
@@ -718,16 +716,16 @@ setRelevance a = do
   let go         = setRelevance; {-# inline go #-}
       goBind a b = newVar a \v -> setRelevance (b $$ v); {-# inline goBind #-}
   case runIO (forceSet a) of
-    Set           -> RRel
-    Prop          -> RRel
-    El _          -> RIrr
-    Pi _ _ a b    -> goBind a b
-    Sg _ _ a b    -> sgRelevance (go a) (goBind a b)
-    Rigid{}       -> RRel
-    Flex h sp _   -> RBlockOn (flexHeadMeta h)
-    Magic m       -> RMagic m
-    Newtype a b x -> go (appE b x)
-    _             -> impossible
+    Set              -> RRel
+    Prop             -> RRel
+    El _             -> RIrr
+    Pi _ _ a b       -> goBind a b
+    Sg _ _ a b       -> sgRelevance (go a) (goBind a b)
+    Rigid{}          -> RRel
+    Flex h sp _      -> RBlockOn (flexHeadMeta h)
+    Magic m          -> RMagic m
+    Newtype _ _ _ bx -> go bx
+    _                -> impossible
 
 
 -- Conversion
@@ -817,7 +815,7 @@ conv t u = do
       go a a'
       goBind (elSP sp a) b b'
 
-    (Newtype a b x, Newtype a' b' x') -> do
+    (Newtype a b x _, Newtype a' b' x' _) -> do
       go a a'
       go b b'
       go x x'
@@ -943,7 +941,7 @@ quoteWithOpt opt t = let
     Set                -> S.Set
     El a               -> S.El (go a)
     Prop               -> S.Prop
-    Newtype a b x      -> S.Newtype (go a) (go b) (go x)
+    Newtype a b x _    -> S.Newtype (go a) (go b) (go x)
     Pack a t           -> S.Pack (go a) (go t)
     Top                -> S.Top
     Tt                 -> S.Tt
