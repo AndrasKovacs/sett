@@ -12,6 +12,7 @@ import NameTable
 import qualified Values as V
 import qualified Syntax as S
 import qualified Presyntax as P
+import Optimize
 
 -- Metacontext
 --------------------------------------------------------------------------------
@@ -19,8 +20,8 @@ import qualified Presyntax as P
 type OccursCache = RF.Ref MetaVar
 
 data MetaEntry
-  = MEUnsolved Ty                     -- ^ Type
-  | MESolved OccursCache S.Tm Val Ty  -- ^ Occurs check cache, term solution, value, type
+  = MEUnsolved Ty                          -- ^ Type
+  | MESolved OccursCache S.Tm Val Ty Bool  -- ^ Occurs check cache, term solution, value, type, inlinable
 
 type MetaCxt = ADL.Array MetaEntry
 
@@ -49,7 +50,7 @@ solve x t tv = do
     MESolved{} -> impossible
     MEUnsolved a -> do
       cache <- RF.new (-1)
-      ADL.write metaCxt (coerce x) (MESolved cache t tv a)
+      ADL.write metaCxt (coerce x) (MESolved cache t tv a (isInlinable t))
 
 -- | Trim the size of the metacontext to `Lvl`.
 resetMetaCxt :: MetaVar -> IO ()
@@ -65,8 +66,8 @@ unsolvedMetaType x = readMeta x >>= \case
 
 metaType :: MetaVar -> IO V.Ty
 metaType x = readMeta x >>= \case
-  MEUnsolved a     -> pure a
-  MESolved _ _ _ a -> pure a
+  MEUnsolved a       -> pure a
+  MESolved _ _ _ a _ -> pure a
 
 countSolvedMetas :: IO Int
 countSolvedMetas = do

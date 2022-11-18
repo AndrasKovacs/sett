@@ -113,16 +113,17 @@ forceWithPSub psub topt = do
       FHMeta m ->
         if Just m == psub^.occ then
           pure $ Magic MetaOccurs
-        else unblock m topt \v _ ->
-          go $! spine v sp
+        else unblock m topt \v a -> \case
+          True  -> go $! spine v sp
+          False -> pure $ Unfold (UHSolvedMeta m) sp (spine v sp) a
 
-      FHCoe x a b p t -> unblock x topt \_ _ -> do
+      FHCoe x a b p t -> unblock x topt \_ _ _ -> do
         a <- go a
         b <- go b
         t <- go t
         go $! coe a b p t
 
-    FlexEq x a t u -> unblock x topt \_ _ -> do
+    FlexEq x a t u -> unblock x topt \_ _ _ -> do
       a <- go a
       t <- go t
       u <- go u
@@ -134,8 +135,6 @@ forceWithPSub psub topt = do
       else case IM.lookup x (psub^.sub) of
         Nothing -> pure $ Magic Undefined
         Just v  -> go $! spine v sp
-
-    -- Unfold UHSolvedMeta{} _ v _ -> go v
 
     t ->
       pure t
@@ -153,16 +152,16 @@ forceAllWithPSub psub topt = do
       FHMeta m ->
         if Just m == psub^.occ then
           pure $ Magic MetaOccurs
-        else unblock m topt \v _ ->
+        else unblock m topt \v _ _ ->
           go $! spine v sp
 
-      FHCoe x a b p t -> unblock x topt \_ _ -> do
+      FHCoe x a b p t -> unblock x topt \_ _ _ -> do
         a <- go a
         b <- go b
         t <- go t
         go $! coe a b p t
 
-    FlexEq x a t u -> unblock x topt \_ _ -> do
+    FlexEq x a t u -> unblock x topt \_ _ _ -> do
       a <- go a
       t <- go t
       u <- go u
@@ -190,7 +189,7 @@ approxOccursInMeta' occ m = ES.isFrozen m >>= \case
   _    -> ES.readMeta m >>= \case
     ES.MEUnsolved{} -> do
       when (occ == m) (throwIO ApproxOccursEx)
-    ES.MESolved cache t tv a -> do
+    ES.MESolved cache t tv a _ -> do
       cached <- RF.read cache
       when (cached /= occ) do
         approxOccurs occ t

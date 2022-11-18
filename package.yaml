@@ -115,7 +115,7 @@ executable:
 data-dir:
   test-data
 data-files:
-  - ./**/*
+  - ./**/*.stt
 
 tests:
   units:

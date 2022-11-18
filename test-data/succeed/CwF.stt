@@ -150,13 +150,13 @@ SetTmExt : LocalRep SetTm
      , pack tt
      , pack tt
      , irefl
-     , _
+     , irefl
      , tt)
 
--- SetModel : CwF
---   := ( SetCat
---      , SetTy
---      , SetTm
---      , SetTmExt
---      , SetTerminal
---      , tt)
+SetModel : CwF
+  := ( SetCat
+     , SetTy
+     , SetTm
+     , SetTmExt
+     , SetTerminal
+     , tt)

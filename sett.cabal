@@ -44,6 +44,7 @@ data-files:
     ./succeed/regression/eqprod.stt
     ./succeed/regression/pairinfer.stt
     ./succeed/sigma.stt
+    ./succeed/STTStdModel.stt
     ./succeed/top.stt
 data-dir:       test-data
 
@@ -79,6 +80,7 @@ library
       Lexer
       MainInteraction
       NameTable
+      Optimize
       Parser
       Presyntax
       Pretty

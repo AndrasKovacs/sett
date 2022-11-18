@@ -92,8 +92,9 @@ localVar topx = go ?env topx where
 
 meta :: MetaVar -> Val
 meta x = runIO $ readMeta x >>= \case
-  MEUnsolved a     -> pure (Flex (FHMeta x) SId a)
-  MESolved _ _ v a -> pure (Unfold (UHSolvedMeta x) SId v a)
+  MEUnsolved a          -> pure (Flex (FHMeta x) SId a)
+  MESolved _ _ v a True -> pure v
+  MESolved _ _ v a _    -> pure (Unfold (UHSolvedMeta x) SId v a)
 
 appTy :: LvlArg => Ty -> Val -> Ty
 appTy a t = runIO $ forceSet a >>= \case
@@ -458,15 +459,26 @@ maskEnv e ls ty = case (e, ls) of
                                       (sp, ty) -> (SApp sp v Expl, appTy ty v)
   _                              -> impossible
 
+maskEnv' :: LvlArg => Env -> S.Locals -> Ty -> Spine
+maskEnv' e ls ty = case (e, ls) of
+  (ENil,     S.LEmpty          ) -> SId
+  (EDef e _, S.LDefine ls _ _ _) -> maskEnv' e ls ty
+  (EDef e v, S.LBind ls _ _    ) -> case maskEnv' e ls ty of
+                                      sp -> SApp sp v Expl
+  _                              -> impossible
+
 insertedMeta :: LvlArg => EnvArg => MetaVar -> S.Locals -> Val
 insertedMeta x locals = runIO do
   readMeta x >>= \case
     MEUnsolved a -> do
       let (sp, ty) = maskEnv ?env locals a
       pure (Flex (FHMeta x) sp ty)
-    MESolved _ _ v a -> do
+    MESolved _ _ v a True -> do
+      pure $! spine v $! maskEnv' ?env locals a
+    MESolved _ _ v a False -> do
       let (sp, ty) = maskEnv ?env locals a
       pure (Unfold (UHSolvedMeta x) sp (spine v sp) ty)
+
 
 eqSym, coeSym, symSym, apSym, transSym, reflSym, exfalsoSym :: Val
 eqSym      = LamI na Set \a -> LamE nx a \x -> LamE ny a \y -> eq a x y
@@ -534,10 +546,10 @@ evalIn l e t = let ?lvl = l; ?env = e in eval t
 -- Forcing
 --------------------------------------------------------------------------------
 
-unblock :: MetaVar -> a -> (Val -> Ty -> IO a) -> IO a
+unblock :: MetaVar -> a -> (Val -> Ty -> Bool -> IO a) -> IO a
 unblock x deflt k = readMeta x >>= \case
-  MEUnsolved{}     -> pure deflt
-  MESolved _ _ v a -> k v a
+  MEUnsolved{}         -> pure deflt
+  MESolved _ _ v a inl -> k v a inl
 {-# inline unblock #-}
 
 ------------------------------------------------------------
@@ -551,7 +563,7 @@ force v = case v of
 {-# inline force #-}
 
 forceFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val
-forceFlexEq topv x a t u = unblock x topv \_ _ -> do
+forceFlexEq topv x a t u = unblock x topv \_ _ _ -> do
   a <- force a
   t <- force t
   u <- force u
@@ -560,9 +572,10 @@ forceFlexEq topv x a t u = unblock x topv \_ _ -> do
 
 forceFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
 forceFlex hsp h sp = case h of
-  FHMeta x ->
-    unblock x hsp \v a -> pure $ Unfold (UHSolvedMeta x) sp (spine v sp) a
-  FHCoe x a b p t -> unblock x hsp \_ _ -> do
+  FHMeta x -> unblock x hsp \v a -> \case
+      True  -> force $! spine v sp
+      False -> pure $ Unfold (UHSolvedMeta x) sp (spine v sp) a
+  FHCoe x a b p t -> unblock x hsp \_ _ _ -> do
     a <- force a
     b <- force b
     t <- force t
@@ -591,9 +604,9 @@ forceAllIn l t = let ?lvl = l in forceAll t
 
 forceAllFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
 forceAllFlex topv h sp = case h of
-  FHMeta x -> unblock x topv \v _ ->
+  FHMeta x -> unblock x topv \v _ _ ->
     forceAll' $! spine v sp
-  FHCoe x a b p t -> unblock x topv \_ _ -> do
+  FHCoe x a b p t -> unblock x topv \_ _ _ -> do
     a <- forceSet' a
     b <- forceSet' b
     t <- forceAll' t
@@ -601,7 +614,7 @@ forceAllFlex topv h sp = case h of
 {-# noinline forceAllFlex #-}
 
 forceAllFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val
-forceAllFlexEq topv x a t u = unblock x topv \_ _ -> do
+forceAllFlexEq topv x a t u = unblock x topv \_ _ _ -> do
   fa <- forceSet' a
   ft <- forceAll' t
   fu <- forceAll' u
@@ -632,9 +645,9 @@ forceSet v = case v of
 
 forceSetFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
 forceSetFlex topv h sp = case h of
-  FHMeta x -> unblock x topv \v _ ->
+  FHMeta x -> unblock x topv \v _ _ ->
     forceSet' $! spine v sp
-  FHCoe x a b p t -> unblock x topv \_ _ -> do
+  FHCoe x a b p t -> unblock x topv \_ _ _ -> do
     a <- forceSet' a
     b <- forceSet' b
     t <- forceAll' t
@@ -660,7 +673,7 @@ forceMetas v = case v of
 {-# inline forceMetas #-}
 
 forceMetasFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val
-forceMetasFlexEq topv x a t u = unblock x topv \_ _ -> do
+forceMetasFlexEq topv x a t u = unblock x topv \_ _ _ -> do
   a <- forceMetas' a
   t <- forceMetas' t
   u <- forceMetas' u
@@ -669,9 +682,9 @@ forceMetasFlexEq topv x a t u = unblock x topv \_ _ -> do
 
 forceMetasFlex :: LvlArg => Val -> FlexHead -> Spine -> IO Val
 forceMetasFlex hsp h sp = case h of
-  FHMeta x -> unblock x hsp \v _ ->
+  FHMeta x -> unblock x hsp \v _ _ ->
     forceMetas' $! spine v sp
-  FHCoe x a b p t -> unblock x hsp \_ _ -> do
+  FHCoe x a b p t -> unblock x hsp \_ _ _ -> do
     a <- forceMetas' a
     b <- forceMetas' b
     t <- forceMetas' t

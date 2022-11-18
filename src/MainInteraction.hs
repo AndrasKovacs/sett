@@ -117,9 +117,9 @@ renderElab = do
   let goMetaBlock frz m | m == frz = pure ()
       goMetaBlock frz m = do
         readMeta m >>= \case
-          MEUnsolved a     -> putStrLn $ show m ++ " : "
+          MEUnsolved a       -> putStrLn $ show m ++ " : "
                                ++ showTm0 (quote0 a) ++ " unsolved"
-          MESolved _ t _ a -> putStrLn $ show m ++ " : "
+          MESolved _ t _ a _ -> putStrLn $ show m ++ " : "
                                ++ showTm0 (quote0 a) ++ " := " ++ showTm0 t
         goMetaBlock frz (m + 1)
 
