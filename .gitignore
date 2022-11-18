@@ -1,5 +1,4 @@
 *#
-*.cabal
 *.chi
 *.chs.h
 *.dump-cmm
