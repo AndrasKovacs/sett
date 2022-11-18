@@ -328,22 +328,22 @@ unf = justElab $ unlines [
   "  := λ p. refl"
   ]
 
-test = justElab $ unlines [
-  "id : {A : Set} → A → A",
-  " := λ x. x",
-  "",
-  "comp : {A B C : Set} → (B → C) → (A → B) → A → C",
-  " := λ f g x. f (g x)",
-  "",
-  "Iso : Set → Set → Set",
-  " := λ A B. (to    : A → B)",
-  "         * (from  : B → A)",
-  "         * (efrom : comp {B}{A}{_} to from = id)",
-  "         * Top",
-  "",
-  "foo : (A B : Set) → Iso A A ={Set} Iso A B",
-  "  := λ A B. refl {Set}"
-  ]
+-- test = justElab $ unlines [
+--   "id : {A : Set} → A → A",
+--   " := λ x. x",
+--   "",
+--   "comp : {A B C : Set} → (B → C) → (A → B) → A → C",
+--   " := λ f g x. f (g x)",
+--   "",
+--   "Iso : Set → Set → Set",
+--   " := λ A B. (to    : A → B)",
+--   "         * (from  : B → A)",
+--   "         * (efrom : comp {B}{A}{_} to from = id)",
+--   "         * Top",
+--   "",
+--   "foo : (A B : Set) → Iso A A ={Set} Iso A B",
+--   "  := λ A B. refl {Set}"
+--   ]
 
 nonlinear = justElab $ unlines [
   "test : Top",
@@ -361,4 +361,26 @@ pairinfer = justElab $ unlines [
   "test1 : _ := (tt, tt)",
   "typeof : {A : Set} → A → Set := λ {A} x. A",
   "test : typeof test1 = El (⊤ × ⊤) := refl"
+  ]
+
+test = justElab $ unlines [
+  "Cat : Set",
+  "  := (Ob    : Set)",
+  "   × (Hom   : Ob → Ob → Set)",
+  "   × ⊤",
+  "",
+  "FunctorData : Cat → Cat → Set",
+  "  := λ C D.",
+  "     (Ob   : C.Ob → D.Ob)",
+  "   × (Hom  : {x y} → C.Hom x y → D.Hom (Ob x) (Ob y))",
+  "   × ⊤",
+  "",
+  "Functor : Cat → Cat → Set",
+  "  := λ C D. Newtype {Cat × Cat} (λ p. FunctorData p.1 p.2) (C, D)",
+  "",
+  "Comp : {C D E : Cat} → Functor D E → Functor C D → Functor C E",
+  "  := λ F G. pack (",
+  "    λ x. F.Ob (G.Ob x)",
+  "  , λ f. F.Hom (G.Hom f)",
+  "  , tt)"
   ]

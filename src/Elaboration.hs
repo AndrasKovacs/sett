@@ -453,26 +453,27 @@ infer topt = do
     P.ProjField topt fieldSpan -> do
       let fieldName = NSpan fieldSpan
       Infer t tty <- infer topt
-      let ~vt = eval t
 
-      let go a ix = forceSet a >>= \case
+      let go ~vt a ix = forceSet a >>= \case
             V.Sg _ x' a b | fieldName == x' -> do
               pure (ix, a)
             V.Sg _ x' a b -> do
-              go (b $$~ projField vt ix) (ix + 1)
+              go vt (b $$~ projField vt ix) (ix + 1)
             V.El (V.Sg _ x' a b) | fieldName == x' -> do
               pure (ix, V.El a)
             V.El (V.Sg _ x' a b) -> do
-              go (V.El (b $$~ projField vt ix)) (ix + 1)
+              go vt (V.El (b $$~ projField vt ix)) (ix + 1)
             _ ->
               elabError topt $ NoSuchField fieldSpan  -- TODO: postpone
 
       forceSet tty >>= \case
         V.Newtype a b x -> do
-          (ix, b) <- go (appE b x) 0
+          let ~vt = unpack (eval t)
+          (ix, b) <- go vt (appE b x) 0
           pure $! Infer (S.ProjField (S.Unpack t) fieldName ix) b
         tty -> do
-          (ix, b) <- go tty 0
+          let ~vt = eval t
+          (ix, b) <- go vt tty 0
           pure $! Infer (S.ProjField t fieldName ix) b
 
     P.Let _ x ma t u -> do
