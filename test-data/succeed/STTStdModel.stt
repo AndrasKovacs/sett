@@ -1,0 +1,144 @@
+
+Con : Set
+ := Set
+
+Sub : Con → Con → Set
+ := λ Γ Δ. Γ → Δ
+
+Ty : Con → Set
+ := λ Γ. Γ → Set
+
+Tm : (Γ : Con) → Ty Γ → Set
+ := λ Γ A. (γ : Γ) → A γ
+
+nil : Con
+ := ⊤
+
+ext : (Γ : Con) → Ty Γ → Con
+ := λ Γ A. (γ : Γ) × A γ
+
+id : {Γ} → Sub Γ Γ
+ := λ γ. γ
+
+comp : {Γ Δ Σ} → Sub Δ Σ → Sub Γ Δ → Sub Γ Σ
+ := λ σ δ x. σ (δ x)
+
+idl : {Γ Δ}{σ : Sub Γ Δ} → comp id σ = σ
+ := refl
+
+idr : {Γ Δ}{σ : Sub Γ Δ} → comp σ id = σ
+ := refl
+
+ass : {Γ Δ Σ Ξ}{σ : Sub Σ Ξ}{δ : Sub Δ Σ}{ν : Sub Γ Δ}
+      → comp (comp σ δ) ν = comp σ (comp δ ν)
+ := refl
+
+eps : {Γ} → Sub Γ nil
+ := λ _. tt
+
+eps'η : {Γ}{σ : Sub Γ nil} → σ = eps
+ := refl
+
+TyS : {Γ Δ} → Ty Δ → Sub Γ Δ → Ty Γ
+ := λ A σ γ. A (σ γ)
+
+TyS'id : {Γ A} → TyS A (id {Γ}) = A
+ := refl
+
+TyS'comp : {Γ Δ Σ}{σ : Sub Δ Σ}{δ : Sub Γ Δ}{A} → TyS (TyS A σ) δ = TyS A (comp σ δ)
+ := refl
+
+TmS : {Γ Δ A} → Tm Δ A → (σ : Sub Γ Δ) → Tm Γ (TyS A σ)
+ := λ t σ γ. t (σ γ)
+
+p : {Γ A} → Sub (ext Γ A) Γ
+ := λ x. x.1
+
+q : {Γ A} → Tm (ext Γ A) (TyS A p)
+ := λ x. x.2
+
+extS : {Γ Δ A} → (σ : Sub Γ Δ) → Tm Γ (TyS A σ) → Sub Γ (ext Δ A)
+ := λ σ t γ. (σ γ, t γ)
+
+p'β : {Γ Δ A σ t} → comp p (extS {Γ}{Δ}{A} σ t) = σ
+ := refl
+
+q'β : {Γ Δ A σ t} → TmS q (extS {Γ}{Δ}{A} σ t) = t
+ := refl
+
+pq'η : {Γ A} → extS (p {Γ}{A}) q = id
+ := refl
+
+--------------------------------------------------------------------------------
+
+SET : {Γ} → Ty Γ
+  := λ _. Set
+
+Russell : {Γ} → Tm Γ SET = Ty Γ
+  := refl
+
+SETS : {Γ Δ σ} → TyS {Γ}{Δ} SET σ = SET
+  := refl
+
+PROP : {Γ} → Ty Γ
+  := λ _. Prop
+
+EL : {Γ} → Tm Γ PROP → Ty Γ
+  := λ t γ. El (t γ)
+
+Irrelevance : {Γ A}{t u : Tm Γ (EL A)} → t = u
+  := refl
+
+--------------------------------------------------------------------------------
+
+Eq : {Γ}(A : Ty Γ) → Tm Γ A → Tm Γ A → Tm Γ PROP
+  := λ A t u γ. t γ = u γ
+
+Refl : {Γ A t} → Tm Γ (EL (Eq {Γ} A t t))
+  := λ _. refl
+
+Trans : {Γ A}{t u v : Tm Γ A}
+        → Tm Γ (EL (Eq A t u)) → Tm Γ (EL (Eq A u v)) → Tm Γ (EL (Eq A t v))
+  := λ p q γ. trans (p γ) (q γ)
+
+Sym : {Γ A}{t u : Tm Γ A}
+        → Tm Γ (EL (Eq A t u)) → Tm Γ (EL (Eq A u t))
+  := λ p γ. sym (p γ)
+
+Coe : {Γ}(A B : Tm Γ SET) → Tm Γ (EL (Eq SET A B)) → Tm Γ A → Tm Γ B
+  := λ A B p t γ. coe (p γ) (t γ)
+
+CoeRefl : {Γ A t} → Coe A A (Refl {Γ}{SET}{A}) t = t
+  := refl
+
+CoeTrans : {Γ A B C}{p : Tm Γ (EL (Eq SET A B))}
+                    {q : Tm Γ (EL (Eq SET B C))}
+                    {t : Tm Γ A}
+           → Coe A C (Trans p q) t = Coe B C q (Coe A B p t)
+  := refl
+
+--------------------------------------------------------------------------------
+
+Pi : {Γ}(A : Ty Γ) → Ty (ext Γ A) → Ty Γ
+  := λ A B γ. (α : A γ) → B (γ, α)
+
+app : {Γ A B} → Tm Γ (Pi A B) → Tm (ext Γ A) B
+  := λ t x. t x.1 x.2
+
+lam : {Γ A B} → Tm (ext Γ A) B → Tm Γ (Pi A B)
+  := λ t γ α. t (γ, α)
+
+Piβ : {Γ A B t} → app (lam {Γ}{A}{B} t) = t
+  := refl
+
+Piη : {Γ A B t} → lam (app {Γ}{A}{B} t) = t
+  := refl
+
+Fun : {Γ} → Ty Γ → Ty Γ → Ty Γ
+  := λ A B. Pi A (TyS B p)
+
+--------------------------------------------------------------------------------
+
+Ap : {Γ A B}(f : Tm Γ (Fun A B))(t u : Tm Γ A)(p : Tm Γ (EL (Eq A t u)))
+     → Tm Γ (EL (Eq B (TmS (app f) (extS id t)) (TmS (app f) (extS id u))))
+  := λ f t u p γ. ap (f γ) (p γ)
