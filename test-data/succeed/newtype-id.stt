@@ -1,17 +1,17 @@
 
-TaggedEq := Tagged ((A : Set) * A * A) (\p. p.2.1 = p.2.2)
+NewtypeEq := Newtype {(A : Set) * (x : A) * (y : A) * Top} (\p. p.x = p.y)
 
 Id : {A : Set} -> A -> A -> Set
-  := \{A} x y. TaggedEq (A,x,y)
+  := \{A} x y. NewtypeEq (A,x,y,tt)
 
 projId : {A : Set} {x y} -> Id {A} x y -> x = y
-  := \p. p .untag
+  := \p. p .unpack
 
 irefl : {A : Set} {x : A} -> Id x x
-  := \{A} {x}. refl .tag
+  := \{A} {x}. pack refl
 
 idtrans : {A : Set} {x y z : A} -> Id x y -> Id y z -> Id x z
-  := \p q. (trans p.untag q.untag).tag
+   := \p q. pack (trans p.unpack q.unpack)
 
 Pointed : Set := (A : Set) * A
 

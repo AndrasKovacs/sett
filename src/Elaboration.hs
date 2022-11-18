@@ -249,6 +249,11 @@ check topt topa = do
           u <- check u (b $$~ eval t)
           pure $ S.Pair t u
 
+        (P.Pack _ t, V.Newtype a b x) -> do
+          let bx = b `appE` x
+          t <- check t bx
+          pure $ S.Pack (quote topa) t
+
         (topt, _) -> do
           Infer t tty <- insertApps $ infer topt
           subtype topt t (eval t) tty topa

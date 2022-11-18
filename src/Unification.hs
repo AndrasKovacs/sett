@@ -1211,7 +1211,7 @@ unify (G topt ftopt) (G topt' ftopt') = do
     (El a        , El a'          ) -> goJoin a a'
     (Set         , Set            ) -> pure ()
     (Prop        , Prop           ) -> pure ()
-    -- (Newtype a x b, Newtype a' x' b') -> goJoin a a' >> goJoin x x' >> goJoin b b'
+    (Newtype a b x, Newtype a' b' x') -> goJoin a a' >> goJoin b b' >> goJoin x x'
     (Top         , Top            ) -> pure ()
     (Bot         , Bot            ) -> pure ()
     (Tt          , Tt             ) -> pure ()
