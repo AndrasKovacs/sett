@@ -5,7 +5,7 @@ module Evaluation (
   , force, forceAll, forceMetas, eqSet, forceSet, unblock
   , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty, unpackTy
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt
-  , quoteNf, quoteSpWithOpt, localVar, eqProp, quoteInWithOpt, pack
+  , quoteNf, quoteSpWithOpt, localVar, eqProp, quoteInWithOpt
   , pattern Exfalso
   , pattern Coe
   , pattern Refl
@@ -221,20 +221,20 @@ unpackTy a = runIO $ forceSet a >>= \case
 
 unpack :: LvlArg => Val -> Val
 unpack = \case
-  Pack _ t        -> t
+  Pack t          -> t
   Rigid h sp a    -> Rigid  h (SUnpack sp) (unpackTy a)
   Flex h sp a     -> Flex   h (SUnpack sp) (unpackTy a)
   Unfold h sp t a -> Unfold h (SUnpack sp) (unpack t) (unpackTy a)
   Magic m         -> Magic m
   _               -> impossible
 
-pack :: Val -> Val -> Val
-pack ~a = \case
-  Rigid  h (SUnpack sp) _   -> Rigid h sp a
-  Flex   h (SUnpack sp) _   -> Flex h sp a
-  Unfold h (SUnpack sp) t _ -> Unfold h sp (pack a t) a
-  Magic m                   -> Magic m
-  v                         -> Pack a v
+-- pack :: Val -> Val -> Val
+-- pack ~a = \case
+--   Rigid  h (SUnpack sp) _   -> Rigid h sp a
+--   Flex   h (SUnpack sp) _   -> Flex h sp a
+--   Unfold h (SUnpack sp) t _ -> Unfold h sp (pack a t) a
+--   Magic m                   -> Magic m
+--   v                         -> Pack a v
 
 gunpack :: LvlArg => G -> G
 gunpack (G t ft) = G (unpack t) (unpack ft)
@@ -278,7 +278,7 @@ coe a b p t = case (a, b) of
         xeq    = proj2 p2
         coex   = coe a a' aeq x
         b'coex = appE b' coex in
-    pack topb $!
+    Pack $!
       coe bx b'x'
           (Trans Set bx b'coex b'x'
              (appE beq x)
@@ -510,7 +510,7 @@ eval t =
     S.Meta x            -> meta x
     S.Let x a t u       -> let ?env = EDef ?env (eval t) in eval u
     S.NewtypeSym        -> newtypeSym
-    S.Pack a t          -> pack (go a) (go t)
+    S.Pack t            -> Pack (go t)
     S.Unpack t          -> unpack (go t)
     S.Set               -> Set
     S.Prop              -> Prop
@@ -836,7 +836,7 @@ conv t u = do
     (RigidEq a t u , RigidEq a' t' u') -> go a a' >> go t t' >> go u u'
     (Lam _ _ _ t   , Lam _ _ a t'    ) -> goBind a t t'
     (Pair t u      , Pair t' u'      ) -> go t t' >> go u u'
-    (Pack _ t      , Pack _ t'       ) -> go t t'
+    (Pack t        , Pack t'         ) -> go t t'
 
     -- syntax-directed eta
     --------------------------------------------------------------------------------
@@ -845,6 +845,8 @@ conv t u = do
     (t           , Lam _ i a t' ) -> goBind a (Cl \u -> app t u i) t'
     (Pair t u    , t'           ) -> go t (proj1 t') >> go u (proj2 t')
     (t           , Pair t' u'   ) -> go (proj1 t) t' >> go (proj2 t) u'
+    (Pack t      , t'           ) -> go t (unpack t')
+    (t           , Pack t'      ) -> go (unpack t) t'
 
     ------------------------------------------------------------
 
@@ -942,7 +944,7 @@ quoteWithOpt opt t = let
     El a               -> S.El (go a)
     Prop               -> S.Prop
     Newtype a b x _    -> S.Newtype (go a) (go b) (go x)
-    Pack a t           -> S.Pack (go a) (go t)
+    Pack t             -> S.Pack (go t)
     Top                -> S.Top
     Tt                 -> S.Tt
     Bot                -> S.Bot

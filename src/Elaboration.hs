@@ -250,11 +250,10 @@ check topt topa = do
           pure $ S.Pair t u
 
         (P.Pack _ t, V.Newtype a b x bx) -> do
-          debug' [showTm (quote topa)]
-          S.Pack (quote topa) <$!> check t bx
+          S.Pack <$!> check t bx
 
         (P.Pair t u, V.Newtype a b x bx) -> do
-          S.Pack (quote topa) <$!> check topt bx
+          S.Pack <$!> check topt bx
 
         (topt, _) -> do
           Infer t tty <- insertApps $ infer topt
@@ -506,7 +505,7 @@ infer topt = do
       Infer t a <- infer t
       forceAll a >>= \case
         V.Newtype _ _ _ bx -> pure $! Infer (S.Unpack t) bx
-        _               -> elabError topt $ GenericError "Can't infer type for packed value" -- TODO:postpone
+        _                  -> elabError topt $ GenericError "Can't infer type for packed value" -- TODO:postpone
 
     P.Exfalso _ -> do
       let ty = V.PiI na V.Set \a -> V.El V.Bot ==> a

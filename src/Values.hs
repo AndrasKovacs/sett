@@ -77,12 +77,6 @@ hasProjection = \case
   SProjField{} -> True
   SUnpack{}    -> True
 
-computeProjField :: Spine -> Int -> Spine
-computeProjField t n
-  | n > 0  = SProj1 (computeProjField t (n-1))
-  | n == 0 = SProj2 t
-  | otherwise = impossible
-
 --------------------------------------------------------------------------------
 
 -- | A closure abstract over the `Int#` which marks the next fresh variable.
@@ -153,7 +147,7 @@ data Val
   | Pair Val Val
 
   | Newtype Ty Val Val Ty  -- Newtype a b x,   TODO: cache (b x) here!
-  | Pack ~Ty Val -- type of the result (some "Newtype A B x")
+  | Pack Val               -- type of the result (some "Newtype A B x")
 
   | Prop
   | Top

@@ -7,6 +7,7 @@ module Common (
   , coerce
   ) where
 
+#define DEBUG
 
 import Control.Exception
 import Control.Monad
@@ -14,10 +15,13 @@ import Data.Bits
 import Data.Flat
 import Data.List
 import Data.Time.Clock
-import Debug.Trace
 import GHC.Exts
-import GHC.Stack
 import IO
+
+#ifdef DEBUG
+import Debug.Trace
+import GHC.Stack
+#endif
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
@@ -41,7 +45,6 @@ disableDebug = RL.write debugToggle False
 readDebugToggle :: IO Bool
 readDebugToggle = RL.read debugToggle
 
-#define DEBUG
 #ifdef DEBUG
 type Dbg = HasCallStack
 

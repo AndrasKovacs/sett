@@ -71,7 +71,8 @@ LocalRepData : {C : Cat} {P : Psh C} → DepPsh P → Set
                (\f. icoe (iap Q.ob (isym P.comp)) (Q.subst q f)))
   × (eq1 : {x px y} {f : C.Hom y (ext x px)} → Id (pair (get pi1 f) (get pi2 f)) f)
   × (eq2 : {x px y f qy} → Id {(f : C.Hom y x) × Q.ob (P.subst px f)}
-                              (get pi1 (pair {x} {px} {y} f qy), get pi2 (pair {x} {px} {y} f qy)) (f, qy))
+                              (get pi1 (pair {x} {px} {y} f qy), get pi2 (pair {x} {px} {y} f qy))
+                              (f, qy))
   × ⊤
 
 LocalRep : {C : Cat} {P : Psh C} → DepPsh P → Set
@@ -146,16 +147,16 @@ SetTmExt : LocalRep SetTm
      , λ a b. λ x. (a x , b x)
      , λ x. x.1
      , λ x. x.2
-     , _ -- pack tt is slow
-     , _ -- pack tt is very slow
+     , pack tt
+     , pack tt
      , irefl
-     , irefl
+     , _
      , tt)
 
-SetModel : CwF
-  := ( SetCat
-     , SetTy
-     , SetTm
-     , SetTmExt
-     , SetTerminal
-     , tt)
+-- SetModel : CwF
+--   := ( SetCat
+--      , SetTy
+--      , SetTm
+--      , SetTmExt
+--      , SetTerminal
+--      , tt)
