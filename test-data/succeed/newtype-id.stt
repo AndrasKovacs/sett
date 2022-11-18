@@ -1,0 +1,23 @@
+
+NewtypeEq := Newtype {(A : Set) * (x : A) * (y : A) * Top} (\p. p.x = p.y)
+
+Id : {A : Set} -> A -> A -> Set
+  := \{A} x y. NewtypeEq (A,x,y,tt)
+
+projId : {A : Set} {x y} -> Id {A} x y -> x = y
+  := \p. p .unpack
+
+irefl : {A : Set} {x : A} -> Id x x
+  := \{A} {x}. pack refl
+
+idtrans : {A : Set} {x y z : A} -> Id x y -> Id y z -> Id x z
+   := \p q. pack (trans p.unpack q.unpack)
+
+Pointed : Set := (A : Set) * A
+
+reflPointed : (P : Pointed) -> Id P P
+  := \_. irefl
+
+funext : {A : Set} {B : A -> Set} (f g : (a : A) -> B a)
+       -> ((a : A) -> Id (f a) (g a)) -> Id f g
+  := \f g h. pack (\a. (h a).unpack)

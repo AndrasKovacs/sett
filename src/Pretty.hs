@@ -159,7 +159,7 @@ goTm prec ns t = go prec ns t where
 
     NewtypeSym -> ("Newtype"++)
     Pack _ t   -> par p appp $ ("pack "++) . go projp ns t
-    Unpack t   -> par p projp $ go projp ns t . (".untag"++)
+    Unpack t   -> par p projp $ go projp ns t . (".unpack"++)
 
     Set        -> ("Set"++)
     Prop       -> ("Prop"++)

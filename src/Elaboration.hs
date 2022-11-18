@@ -250,10 +250,9 @@ check topt topa = do
           pure $ S.Pair t u
 
         (P.Pack _ t, V.Newtype a b x) -> do
-          S.Pack (S.Newtype (quote a) (quote b) (quote x)) <$!> check t (appE b x)
-
-        (P.Pair t u, V.Newtype a b x) -> do
-          S.Pack (S.Newtype (quote a) (quote b) (quote x)) <$!> check (P.Pair t u) (appE b x)
+          let bx = b `appE` x
+          t <- check t bx
+          pure $! S.Pack (quote topa) t
 
         (topt, _) -> do
           Infer t tty <- insertApps $ infer topt
