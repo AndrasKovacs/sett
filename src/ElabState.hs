@@ -68,6 +68,12 @@ metaType x = readMeta x >>= \case
   MEUnsolved a     -> pure a
   MESolved _ _ _ a -> pure a
 
+countSolvedMetas :: IO Int
+countSolvedMetas = do
+  ADL.foldl' (\acc -> \case
+                 MEUnsolved{} -> acc
+                 MESolved{} -> acc+1) 0 metaCxt
+
 -- Top-level elaboration context
 --------------------------------------------------------------------------------
 

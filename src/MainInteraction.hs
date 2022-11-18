@@ -77,10 +77,12 @@ loadFile state path = do
                 pure $ Focused path
               (Right ntbl, time) -> do
                 RL.write topNameTable ntbl
-                metas   <- nextMeta
+                metas <- coerce <$!> nextMeta :: IO Int
+                solvedMetas <- countSolvedMetas
                 topsize <- topSize
                 putStrLn (path ++ " elaborated in " ++ show time)
-                putStrLn ("created " ++ show (coerce metas :: Int) ++ " metavariables")
+                putStrLn ("created " ++ show metas ++ " metavariables" ++
+                          (if solvedMetas == metas then ", all solved" else ", " ++ show (metas - solvedMetas) ++ " unsolved"))
                 putStrLn ("loaded " ++ show topsize ++ " definitions")
                 pure $ Loaded path
   putStrLn ("total load time: " ++ show time)
