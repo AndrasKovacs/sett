@@ -24,7 +24,7 @@ Id : {C : Cat} → Functor C C
   := (λ x. x, λ f. f, refl, λ _ _. refl, tt)
 
 Comp : {C D E : Cat} → Functor D E → Functor C D → Functor C E
-  := λ F G. pack (
+  := λ F G. (
     λ x. F.Ob (G.Ob x)
   , λ f. F.Hom (G.Hom f)
   , trans (ap F.Hom G.id) F.id
