@@ -250,7 +250,6 @@ check topt topa = do
           pure $ S.Pair t u
 
         (P.Pack _ t, V.Newtype a b x bx) -> do
-          debug' [showTm (quote topa)]
           S.Pack (quote topa) <$!> check t bx
 
         (P.Pair t u, V.Newtype a b x bx) -> do
