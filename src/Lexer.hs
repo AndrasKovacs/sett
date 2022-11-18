@@ -288,7 +288,7 @@ anyKw = $(switch [| case _ of
   "exfalso" -> eof
   "pack"    -> eof
   "unpack"  -> eof
-  "newtype" -> eof |])
+  "Newtype" -> eof |])
 
 scanIdent :: Parser ()
 scanIdent = identStartChar >> many_ inlineIdentChar
