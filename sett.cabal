@@ -1,0 +1,225 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.34.4.
+--
+-- see: https://github.com/sol/hpack
+
+name:           sett
+version:        0.0.1.0
+synopsis:       Implementation of a setoid type theory
+description:    Description TODO
+category:       Language
+homepage:       https://github.com/AndrasKovacs/setoidtt#readme
+bug-reports:    https://github.com/AndrasKovacs/setoidtt/issues
+author:         András Kovács
+maintainer:     puttamalac@gmail.com
+copyright:      2022 András Kovács
+license:        MIT
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+data-files:
+    ./bug/iso.stt
+    ./fail/fail.stt
+    ./fail/prune-nonlinear.stt
+    ./fail/unify-nested-nonlinear.stt
+    ./fail/unify-nonlinear.stt
+    ./succeed/bottom.stt
+    ./succeed/CatCat.stt
+    ./succeed/church-compute.stt
+    ./succeed/coe-computation.stt
+    ./succeed/eq-computation.stt
+    ./succeed/implicit-basics.stt
+    ./succeed/iso.stt
+    ./succeed/nested-unification.stt
+    ./succeed/newtype-id.stt
+    ./succeed/NewtypeCat.stt
+    ./succeed/nounfold.stt
+    ./succeed/pattern-inversion.stt
+    ./succeed/pruning.stt
+    ./succeed/PshCat.stt
+    ./succeed/regression/coeprod.stt
+    ./succeed/regression/eqprod.stt
+    ./succeed/regression/pairinfer.stt
+    ./succeed/sigma.stt
+    ./succeed/top.stt
+data-dir:       test-data
+
+source-repository head
+  type: git
+  location: https://github.com/AndrasKovacs/setoidtt
+
+flag debug
+  description: turn on debug info printing
+  manual: True
+  default: False
+
+flag dump
+  description: dump core, stg and cmm to files
+  manual: True
+  default: False
+
+flag llvm
+  description: use llvm for building
+  manual: True
+  default: False
+
+library
+  exposed-modules:
+      Common
+      Cxt
+      Cxt.Extension
+      Cxt.Types
+      Elaboration
+      ElabState
+      Errors
+      Evaluation
+      Lexer
+      MainInteraction
+      NameTable
+      Parser
+      Presyntax
+      Pretty
+      Syntax
+      Tests
+      Unification
+      Values
+  other-modules:
+      Paths_sett
+  hs-source-dirs:
+      src
+  default-extensions:
+      AllowAmbiguousTypes
+      BangPatterns
+      BlockArguments
+      CPP
+      ConstraintKinds
+      DataKinds
+      DerivingVia
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      ImplicitParams
+      KindSignatures
+      LambdaCase
+      MagicHash
+      MonoLocalBinds
+      MultiParamTypeClasses
+      PatternSynonyms
+      PartialTypeSignatures
+      RankNTypes
+      ScopedTypeVariables
+      Strict
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      ViewPatterns
+  ghc-options: -O -fdicts-strict -fmax-worker-args=15 -Wall -Wno-name-shadowing -Wno-missing-signatures -Wno-unused-do-bind -Wno-unused-matches -Wno-missing-pattern-synonym-signatures -fmax-relevant-binds=3 -fmax-valid-hole-fits=0 -fplugin StrictImplParams
+  build-depends:
+      base >=4.7 && <5
+    , bytestring
+    , containers
+    , dynamic-array
+    , flatparse
+    , ghc-prim
+    , microlens-platform
+    , primdata
+    , strict-impl-params
+    , template-haskell
+    , time
+    , unordered-containers
+  if flag(dump)
+    ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
+  if flag(llvm)
+    ghc-options: -fllvm
+  default-language: Haskell2010
+
+executable sett
+  main-is: Main.hs
+  other-modules:
+      Paths_sett
+  hs-source-dirs:
+      exe
+  default-extensions:
+      AllowAmbiguousTypes
+      BangPatterns
+      BlockArguments
+      CPP
+      ConstraintKinds
+      DataKinds
+      DerivingVia
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      ImplicitParams
+      KindSignatures
+      LambdaCase
+      MagicHash
+      MonoLocalBinds
+      MultiParamTypeClasses
+      PatternSynonyms
+      PartialTypeSignatures
+      RankNTypes
+      ScopedTypeVariables
+      Strict
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      ViewPatterns
+  ghc-options: -O -rtsopts -threaded -with-rtsopts= "-A64M -N4"
+  build-depends:
+      base >=4.7 && <5
+    , sett
+  if flag(dump)
+    ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
+  if flag(llvm)
+    ghc-options: -fllvm
+  default-language: Haskell2010
+
+test-suite units
+  type: exitcode-stdio-1.0
+  main-is: Test.hs
+  other-modules:
+      Paths_sett
+  hs-source-dirs:
+      test
+  default-extensions:
+      AllowAmbiguousTypes
+      BangPatterns
+      BlockArguments
+      CPP
+      ConstraintKinds
+      DataKinds
+      DerivingVia
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      ImplicitParams
+      KindSignatures
+      LambdaCase
+      MagicHash
+      MonoLocalBinds
+      MultiParamTypeClasses
+      PatternSynonyms
+      PartialTypeSignatures
+      RankNTypes
+      ScopedTypeVariables
+      Strict
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      ViewPatterns
+  ghc-options: -O -rtsopts -threaded -with-rtsopts= "-A64M -N4"
+  build-depends:
+      ansi-terminal
+    , base >=4.7 && <5
+    , bytestring
+    , dir-traverse
+    , filepath
+    , sett
+  if flag(dump)
+    ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -dsuppress-all -dno-suppress-type-signatures -ddump-to-file
+  if flag(llvm)
+    ghc-options: -fllvm
+  default-language: Haskell2010
