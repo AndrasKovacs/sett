@@ -1,5 +1,5 @@
 
-module Optimize (inline, isInlinable) where
+module Optimize (inline, isInlinable, inlineMetaBlock) where
 
 {-|
 Inlining metas into elaboration output.
@@ -13,6 +13,11 @@ import Syntax
 import qualified Evaluation as E
 import qualified Values as V
 import qualified ElabState as ES
+
+-- import qualified Data.Array.Dynamic.L as ADL
+import qualified Data.Array.FM        as AFM
+import qualified Data.Ref.F           as RF
+-- import qualified Data.Ref.L           as RL
 
 --------------------------------------------------------------------------------
 
@@ -168,3 +173,101 @@ inline t = let
     ExfalsoSym        -> t
     ElSym             -> t
     Magic _           -> impossible
+
+
+--------------------------------------------------------------------------------
+
+type Start  = (?start :: MetaVar)
+type End    = (?end   :: MetaVar)
+type Occurs = (?occurrences :: AFM.Array Int)
+
+lookupCount :: Start => Occurs => MetaVar -> IO Int
+lookupCount x = AFM.read ?occurrences (coerce x - coerce ?start)
+
+bump :: Start => Occurs => MetaVar -> IO ()
+bump x = AFM.modify ?occurrences (coerce x - coerce ?start) (+1)
+
+count :: Start => Occurs => Tm -> IO ()
+count = \case
+  LocalVar x        -> pure ()
+  TopDef x v a      -> pure ()
+  Lam x i a t       -> count a >> count t
+  App t u i         -> count t >> count u
+  Pair t u          -> count t >> count u
+  ProjField t x n   -> count t
+  Proj1 t           -> count t
+  Proj2 t           -> count t
+  Pi x i a b        -> count a >> count b
+  Sg sp x a b       -> count a >> count b
+  NewtypeSym        -> pure ()
+  Pack t            -> count t
+  Unpack t          -> count t
+  Postulate _ _     -> pure ()
+  InsertedMeta x ls -> bump x
+  Meta x            -> bump x
+  Let x a t u       -> count a >> count t >> count u
+  Set               -> pure ()
+  Prop              -> pure ()
+  Top               -> pure ()
+  Tt                -> pure ()
+  Bot               -> pure ()
+  EqSym             -> pure ()
+  CoeSym            -> pure ()
+  ReflSym           -> pure ()
+  SymSym            -> pure ()
+  TransSym          -> pure ()
+  ApSym             -> pure ()
+  ExfalsoSym        -> pure ()
+  ElSym             -> pure ()
+  Magic _           -> impossible
+
+countAllOccurs :: Start => End => Occurs => Tm -> Ty -> IO ()
+countAllOccurs t a = do
+  let go :: Start => End => Occurs => MetaVar -> IO ()
+      go x | x < ?end = ES.readMeta x >>= \case
+        ES.MEUnsolved _ _     -> go (x + 1)
+        ES.MESolved _ t _ _ _ -> count t >> go (x + 1)
+      go x = pure ()
+
+  go ?start
+  count a
+  count t
+
+markInlines :: Start => End => Occurs => IO ()
+markInlines = do
+  let go :: Start => End => Occurs => MetaVar -> IO ()
+      go x | x < ?end = do
+        ES.readMeta x >>= \case
+          ES.MEUnsolved{} -> go (x + 1)
+          ES.MESolved c t a va inl -> do
+            lookupCount x >>= \case
+              n | n <= 1 -> ES.writeMeta x (ES.MESolved c t a va True)
+              _          -> go (x + 1)
+      go x = pure ()
+  go ?start
+
+inlineAll :: Start => End => Tm -> Ty -> IO (Tm, Ty)
+inlineAll t a = uf
+
+-- | Simplify current meta block.
+--     1. Count occurrences of metas.
+--     2. Mark irrelevant or linear metas as inline.
+--     3. Perform inlining on everything in the block.
+inlineMetaBlock :: Tm -> Ty -> IO (Tm, Ty)
+inlineMetaBlock t a = do
+  -- get extend of block
+  start <- RF.read ES.frozen
+  end   <- ES.nextMeta
+
+  let blockSize :: Int
+      blockSize = coerce end - coerce start
+
+  occurrences <- AFM.new @Int blockSize
+
+  let ?start       = start
+      ?end         = end
+      ?occurrences = occurrences
+
+  countAllOccurs t a
+  markInlines
+  inlineAll t a

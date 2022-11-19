@@ -38,6 +38,10 @@ readMeta :: MetaVar -> IO MetaEntry
 readMeta (MkMetaVar i) = ADL.read metaCxt i
 {-# inline readMeta #-}
 
+writeMeta :: MetaVar -> MetaEntry -> IO ()
+writeMeta (MkMetaVar i) e = ADL.write metaCxt i e
+{-# inline writeMeta #-}
+
 newMeta :: S.LocalsArg => Ty -> IO MetaVar
 newMeta a = do
   s <- ADL.size metaCxt
