@@ -8,6 +8,7 @@ import Control.Exception
 
 import qualified Data.IntMap as IM
 import qualified Data.Ref.F as RF
+import qualified Data.Array.Dynamic.L as ADL
 import Lens.Micro.Platform
 
 import Values
@@ -15,6 +16,7 @@ import Evaluation
 import qualified ElabState as ES
 import qualified Syntax as S
 import Pretty
+import Optimize
 
 ----------------------------------------------------------------------------------------------------
 
@@ -53,6 +55,7 @@ freshMeta a = do
 -- | Fresh meta in the empty env.
 freshMeta0 :: Ty -> IO S.Tm
 freshMeta0 a = do
+  let ?locals = S.LEmpty
   m <- ES.newMeta a
   pure $ S.InsertedMeta m S.LEmpty
 
@@ -417,7 +420,7 @@ etaExpandMeta m sp = do
   a <- ES.unsolvedMetaType m
   sol <- metaExpansion a (reverseSpine sp)
   let vsol = eval0 sol
-  ES.solve m sol vsol
+  primSolve m sol vsol
   case spineIn 0 vsol sp of
     Flex (FHMeta m) sp _ -> pure (m, sp)
     _                    -> impossible
@@ -606,7 +609,7 @@ prune psub m sp = do
   qpra    <- partialQuote0 pra
   sol     <- fromPrTy0 psp a . eval0 <$!> freshMeta0 pra
   qsol    <- partialQuote0 sol
-  ES.solve m qsol sol
+  primSolve m qsol sol
   case spine0 sol sp of
     Flex (FHMeta m) sp _ -> pure (m, sp)
     _                    -> impossible
@@ -939,6 +942,17 @@ solveNestedSp solvable psub a sp (!rhsVar, !rhsSp) rhsty = do
 
     _ -> impossible
 
+primSolve :: MetaVar -> S.Tm -> Val -> IO ()
+primSolve x t tv =
+  ADL.unsafeRead ES.metaCxt (coerce x) >>= \case
+    ES.MESolved{} ->
+      impossible
+    ES.MEUnsolved a ls -> do
+      let ?locals = ls
+      cache <- RF.new (-1)
+      let inl = isInlinable t
+      ADL.write ES.metaCxt (coerce x) (ES.MESolved cache t tv a inl)
+
 -- | Solve (?x sp ?= rhs : A).
 solve :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 solve x sp rhs rhsty = do
@@ -964,7 +978,7 @@ solve x sp rhs rhsty = do
 
         debug ["SOLUTION", show x, showTm' sol]
 
-        ES.solve x sol (eval0 sol)
+        primSolve x sol (eval0 sol)
 
       goIrrelevant = do
         metaCxtSize <- ES.nextMeta
@@ -973,7 +987,7 @@ solve x sp rhs rhsty = do
           (do a <- ES.unsolvedMetaType x
               sol <- solveTopSp (PSub ENil (Just x) 0 ?lvl mempty False)
                                 S.LEmpty a (reverseSpine sp) rhs rhsty
-              ES.solve x sol (eval0 sol))
+              primSolve x sol (eval0 sol))
 
           -- clean up eta-expansion metas if the solution failed
           (do ES.resetMetaCxt metaCxtSize)

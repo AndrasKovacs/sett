@@ -5,7 +5,7 @@ module Evaluation (
   , force, forceAll, forceMetas, eqSet, forceSet, unblock
   , projFieldName, setRelevance, Relevance(..), appTy, proj1Ty, proj2Ty, unpackTy
   , evalIn, forceAllIn, closeVal, quoteIn, quoteWithOpt, appIn, quote0WithOpt
-  , quoteNf, quoteSpWithOpt, localVar, eqProp, quoteInWithOpt
+  , quoteNf, quoteSpWithOpt, localVar, eqProp, quoteInWithOpt, maskEnv'
   , pattern Exfalso
   , pattern Coe
   , pattern Refl
@@ -92,7 +92,7 @@ localVar topx = go ?env topx where
 
 meta :: MetaVar -> Val
 meta x = runIO $ readMeta x >>= \case
-  MEUnsolved a           -> pure (Flex (FHMeta x) SId a)
+  MEUnsolved a  _        -> pure (Flex (FHMeta x) SId a)
   MESolved _ _ v a True  -> pure v
   MESolved _ _ v a False -> pure (Unfold (UHSolvedMeta x) SId v a)
 
@@ -470,7 +470,7 @@ maskEnv' e ls ty = case (e, ls) of
 insertedMeta :: LvlArg => EnvArg => MetaVar -> S.Locals -> Val
 insertedMeta x locals = runIO do
   readMeta x >>= \case
-    MEUnsolved a -> do
+    MEUnsolved a _ -> do
       let (sp, ty) = maskEnv ?env locals a
       pure (Flex (FHMeta x) sp ty)
     MESolved _ _ v a True -> do

@@ -12,7 +12,7 @@ import NameTable
 import qualified Values as V
 import qualified Syntax as S
 import qualified Presyntax as P
-import Optimize
+-- import Optimize
 
 -- Metacontext
 --------------------------------------------------------------------------------
@@ -20,8 +20,10 @@ import Optimize
 type OccursCache = RF.Ref MetaVar
 
 data MetaEntry
-  = MEUnsolved Ty                          -- ^ Type
-  | MESolved OccursCache S.Tm Val Ty Bool  -- ^ Occurs check cache, term solution, value, type, inlinable
+  -- ^ Type, locals
+  = MEUnsolved Ty S.Locals
+  -- ^ Occurs check cache, term solution, value, type, inlinable
+  | MESolved OccursCache S.Tm Val Ty Bool
 
 type MetaCxt = ADL.Array MetaEntry
 
@@ -36,23 +38,13 @@ readMeta :: MetaVar -> IO MetaEntry
 readMeta (MkMetaVar i) = ADL.read metaCxt i
 {-# inline readMeta #-}
 
-newMeta :: Ty -> IO MetaVar
+newMeta :: S.LocalsArg => Ty -> IO MetaVar
 newMeta a = do
   s <- ADL.size metaCxt
   debug ["NEW META", show s]
-  ADL.push metaCxt (MEUnsolved a)
+  ADL.push metaCxt (MEUnsolved a ?locals)
   pure (MkMetaVar s)
 {-# inline newMeta #-}
-
-solve :: MetaVar -> S.Tm -> V.Val -> IO ()
-solve x t tv = do
-  ADL.unsafeRead metaCxt (coerce x) >>= \case
-    MESolved{} -> impossible
-    MEUnsolved a -> do
-      cache <- RF.new (-1)
-      let inl = isInlinable t
-      -- debug ["REGISTER SOL", show inl]
-      ADL.write metaCxt (coerce x) (MESolved cache t tv a inl)
 
 -- | Trim the size of the metacontext to `Lvl`.
 resetMetaCxt :: MetaVar -> IO ()
@@ -63,12 +55,12 @@ resetMetaCxt size = do
 
 unsolvedMetaType :: MetaVar -> IO V.Ty
 unsolvedMetaType x = readMeta x >>= \case
-  MEUnsolved a -> pure a
-  _            -> impossible
+  MEUnsolved a _ -> pure a
+  _              -> impossible
 
 metaType :: MetaVar -> IO V.Ty
 metaType x = readMeta x >>= \case
-  MEUnsolved a       -> pure a
+  MEUnsolved a _     -> pure a
   MESolved _ _ _ a _ -> pure a
 
 countSolvedMetas :: IO Int
