@@ -50,7 +50,9 @@ solve x t tv = do
     MESolved{} -> impossible
     MEUnsolved a -> do
       cache <- RF.new (-1)
-      ADL.write metaCxt (coerce x) (MESolved cache t tv a (isInlinable t))
+      let inl = isInlinable t
+      -- debug ["REGISTER SOL", show inl]
+      ADL.write metaCxt (coerce x) (MESolved cache t tv a inl)
 
 -- | Trim the size of the metacontext to `Lvl`.
 resetMetaCxt :: MetaVar -> IO ()

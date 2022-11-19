@@ -33,6 +33,7 @@ data-files:
     ./succeed/eq-computation.stt
     ./succeed/implicit-basics.stt
     ./succeed/iso.stt
+    ./succeed/meta-asymptotics.stt
     ./succeed/nested-unification.stt
     ./succeed/newtype-id.stt
     ./succeed/NewtypeCat.stt

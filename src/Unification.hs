@@ -319,7 +319,7 @@ psubst psub topt = do
 
 
   ftopt <- forceWithPSub psub topt
-  debug ["PSUBST", showTm0 $ quoteIn (psub^.cod) topt, showTm0 $ quoteIn (psub^.cod) ftopt ]
+  -- debug ["PSUBST", showTm0 $ quoteIn (psub^.cod) topt, showTm0 $ quoteIn (psub^.cod) ftopt ]
   case ftopt of
     Rigid h sp _       -> goRigid h sp
     RigidEq a t u      -> S.Eq <$!> go a <*!> go t <*!> go u

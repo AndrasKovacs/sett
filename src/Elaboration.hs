@@ -52,13 +52,13 @@ insertApps' act = go =<< act where
       m <- freshMeta a
       go $! Infer (S.App t m Impl) (b $$ eval m)
 
-    V.El topa -> forceAll topa >>= \case
+    V.El a -> forceAll a >>= \case
       V.Pi x Impl a b -> do
         m <- freshMeta a
         let mv = eval m
         go $! Infer (S.App t m Impl) (V.El (b $$ mv))
       _ ->
-        pure $ Infer t (V.El topa)
+        pure $ Infer t topa
     _ ->
       pure $ Infer t topa
 {-# inline insertApps' #-}
@@ -328,13 +328,13 @@ infer topt = do
     P.Tt _ ->
       pure $ Infer S.Tt (V.El V.Top)
 
-    topt@(P.Eq t Nothing u) -> do
+    P.Eq t Nothing u -> do
       Infer t tty <- insertApps $ infer t
       u <- check u tty
       let a = quote tty
       pure $ Infer (S.Eq a t u) V.Prop
 
-    topt@(P.Eq t (Just a) u) -> do
+    P.Eq t (Just a) u -> do
       a <- check a V.Set
       let va = eval a
       t <- check t va
@@ -400,11 +400,25 @@ infer topt = do
       Infer u b <- insertApps $ infer u
       fa        <- forceAll a
       fb        <- forceAll b
+      -- debug ["INFERPAIR", P.showTm topt, showTm (quote a), showTm (quote b),
+      --                     showTm (quote fa), showTm (quote fb)]
       case (fa, fb) of
-        (Flex{}  , _       ) -> elabError topt AmbiguousUniverse
-        (_       , Flex{}  ) -> elabError topt AmbiguousUniverse
-        (V.El a' , V.El b' ) -> pure $! Infer (S.Pair t u) (V.El (andP a' b'))
-        _                    -> pure $! Infer (S.Pair t u) (prod a b)
+        (Flex{}  , _       ) ->
+          elabError topt AmbiguousUniverse
+
+        (_       , Flex{}  ) ->
+          elabError topt AmbiguousUniverse
+
+        -- intentionally creating extra metas to get more solution sharing
+        (V.El a' , V.El b' ) -> do
+          ma <- eval <$!> freshMeta V.Prop  -- TODO: optimize
+          mb <- eval <$!> freshMeta V.Prop
+          unify topt ma a'
+          unify topt mb b'
+          pure $! Infer (S.Pair t u) (V.El (andP ma mb))
+        _ ->
+          pure $! Infer (S.Pair t u) (prod a b)
+
 
     P.Proj1 topt _ -> do
       Infer t tty <- infer topt

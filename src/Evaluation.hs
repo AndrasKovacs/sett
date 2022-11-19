@@ -92,9 +92,9 @@ localVar topx = go ?env topx where
 
 meta :: MetaVar -> Val
 meta x = runIO $ readMeta x >>= \case
-  MEUnsolved a          -> pure (Flex (FHMeta x) SId a)
-  MESolved _ _ v a True -> pure v
-  MESolved _ _ v a _    -> pure (Unfold (UHSolvedMeta x) SId v a)
+  MEUnsolved a           -> pure (Flex (FHMeta x) SId a)
+  MESolved _ _ v a True  -> pure v
+  MESolved _ _ v a False -> pure (Unfold (UHSolvedMeta x) SId v a)
 
 appTy :: LvlArg => Ty -> Val -> Ty
 appTy a t = runIO $ forceSet a >>= \case

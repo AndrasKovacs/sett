@@ -1,6 +1,10 @@
 
 module Optimize where
 
+{-|
+Inlining metas into elaboration output.
+-}
+
 import qualified Data.IntSet as IS
 
 import Common
@@ -13,13 +17,13 @@ First approximation of inlining metas:
 -}
 
 data TmInfo = TmInfo {
-    size             :: Int
-  , locals           :: IS.IntSet
-  , onlyLinearLocals :: Bool
+    size     :: Int
+  , localSet :: IS.IntSet
+  , linear   :: Bool
   }
 
 inlineMaxSize :: Int
-inlineMaxSize = 15
+inlineMaxSize = 10
 
 tmInfo :: Tm -> TmInfo
 tmInfo = goLams where
@@ -29,8 +33,11 @@ tmInfo = goLams where
     Lam _ _ _ t -> goLams t
     t           -> go t (TmInfo 0 mempty True)
 
-  incr (TmInfo s xs lin) = TmInfo (s + 1) xs lin
-  addVar (Ix x) (TmInfo s xs lin) = TmInfo (s + 1) (IS.insert x xs) (IS.notMember x xs)
+  incr (TmInfo s xs lin) =
+    TmInfo (s + 1) xs lin
+
+  addVar (Ix x) (TmInfo s xs lin) =
+    TmInfo (s + 1) (IS.insert x xs) (IS.notMember x xs)
 
   go :: Tm -> TmInfo -> TmInfo
   go t inf = case t of
@@ -48,8 +55,8 @@ tmInfo = goLams where
     Pack t          -> go t $ incr inf
     Unpack t        -> go t $ incr inf
     Postulate _ _   -> incr inf
-    InsertedMeta{}  -> inf {onlyLinearLocals = False}
-    Meta{}          -> inf {onlyLinearLocals = False}
+    InsertedMeta{}  -> incr inf
+    Meta{}          -> incr inf
     Let _ t u v     -> go t $ go u $ go v $ incr inf
     Set             -> incr inf
     Prop            -> incr inf
@@ -68,4 +75,4 @@ tmInfo = goLams where
 
 isInlinable :: Tm -> Bool
 isInlinable t = case tmInfo t of
-  TmInfo s _ isGood -> isGood && s <= inlineMaxSize
+  TmInfo size _ lin -> lin && size <= inlineMaxSize
