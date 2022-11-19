@@ -28,6 +28,7 @@ data UnifyEx
   | CantInvertSpine
   | CantPruneSpine
   | PruningNotAllowed
+  | ApproxOccurs
   deriving (Show)
 instance Exception UnifyEx
 
@@ -179,31 +180,24 @@ forceAllWithPSub psub topt = do
     UnfoldEq _ _ _ v -> go v
     t                -> pure t
 
-data ApproxOccursEx = ApproxOccursEx
-  deriving Show
-instance Exception ApproxOccursEx
-
-approxOccursInMeta' :: MetaVar -> MetaVar -> IO ()
-approxOccursInMeta' occ m = ES.isFrozen m >>= \case
+approxOccursInMeta :: MetaVar -> MetaVar -> IO ()
+approxOccursInMeta occ m = ES.isFrozen m >>= \case
   True -> pure ()
   _    -> ES.readMeta m >>= \case
     ES.MEUnsolved{} -> do
-      when (occ == m) (throwIO ApproxOccursEx)
+      when (occ == m) $ do
+        throwIO ApproxOccurs
+
     ES.MESolved cache t tv a _ -> do
       cached <- RF.read cache
       when (cached /= occ) do
         approxOccurs occ t
         RF.write cache occ
 
-approxOccursInMeta :: MetaVar -> MetaVar -> IO Bool
-approxOccursInMeta occ m =
-  (False <$ approxOccursInMeta' occ m)
-  `catch` \(_ :: ApproxOccursEx) -> pure True
-
 approxOccurs :: MetaVar -> S.Tm -> IO ()
 approxOccurs occ t = do
   let go = approxOccurs occ; {-# inline go #-}
-      goMeta = approxOccursInMeta' occ; {-# inline goMeta #-}
+      goMeta = approxOccursInMeta occ; {-# inline goMeta #-}
 
   case t of
     S.LocalVar{}       -> pure ()
@@ -295,9 +289,11 @@ psubst psub topt = do
       goUnfold h sp = do
         h <- case h of
           UHSolvedMeta m   -> case psub^.occ of
-                                Nothing  -> pure (S.Meta m)
-                                Just occ -> do approxOccursInMeta occ m
-                                               pure (S.Meta m)
+            Nothing  -> pure (S.Meta m)
+            Just occ -> do
+              approxOccursInMeta occ m
+              pure (S.Meta m)
+
           UHTopDef x t tty -> pure (S.TopDef x t tty)
           UHCoe a b p t    -> S.Coe <$!> goFlex a <*!> goFlex b <*!> goFlex p <*!> goFlex t
         goSpFlex h sp
@@ -966,7 +962,7 @@ solve x sp rhs rhsty = do
            (solveTopSp (PSub ENil (Just x) 0 ?lvl mempty True) S.LEmpty a (reverseSpine sp) rhs rhsty)
            cantUnify
 
-        debug ["SOLUTION", showTm' sol]
+        debug ["SOLUTION", show x, showTm' sol]
 
         ES.solve x sol (eval0 sol)
 
@@ -1006,6 +1002,8 @@ unifyEtaLong m sp rhs rhsty = forceAll rhs >>= \case
   Flex (FHMeta m') sp' _ ->
     if m == m' then unifySp sp sp' -- TODO: intersect
                else unifyMetaMeta m sp m' sp' rhsty
+  Pack t -> do
+    unifyEtaLong m (SUnpack sp) t (unpackTy rhsty)
   rhs ->
     solve m sp rhs rhsty
 
@@ -1015,7 +1013,7 @@ goUnifyMetaMeta m sp m' sp' ty =
   catch
     (solve m sp (Flex (FHMeta m') sp' ty) ty)
     (\case
-        CantInvertSpine -> solve m' sp' (Flex (FHMeta m) sp ty) ty
+        CantInvertSpine -> debug ["mallac"] >> solve m' sp' (Flex (FHMeta m) sp ty) ty
         e               -> cantUnify)
 
 -- | Try to unify when the sides are headed by different metas. We only retry in case of inversion
@@ -1026,7 +1024,7 @@ unifyMetaMeta m sp m' sp' ty
   -- We try to newer metas first, to get a bit more dependency ordering in
   -- the metacontext. That can be beneficial in meta inlining, where we might
   -- not do dependecy-order traversal and just simply do older-first traversal.
-  | m > m' = goUnifyMetaMeta m  sp  m' sp' ty
+  | m' < m = goUnifyMetaMeta m  sp  m' sp' ty
   | True   = goUnifyMetaMeta m' sp' m  sp  ty
 
 

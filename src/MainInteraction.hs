@@ -1,6 +1,6 @@
 
 
-module MainInteraction (main, loadFile, justElab, testElab) where
+module MainInteraction (main, loadFile, justElab, elabFile, testElab) where
 
 import System.IO
 import System.Environment
@@ -105,6 +105,14 @@ justElab :: String -> IO ()
 justElab src = do
   reset
   (src, top) <- parseString src
+  writeElabSource (Just src)
+  ntbl <- elab top
+  renderElab
+
+elabFile :: FilePath -> IO ()
+elabFile path = do
+  reset
+  (src, top) <- parseFile path
   writeElabSource (Just src)
   ntbl <- elab top
   renderElab
