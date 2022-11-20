@@ -263,32 +263,6 @@ nounfold = justElab $ unlines [
   "  := λ p. refl  "
   ]
 
--- implicit multiple lambda binder syntax
--- local name shadowing in printing
--- disallow top shadowing
--- fewer db indices in printed syntax
--- Allow Coq-style definition parameters
--- Syntactic sugar for record construction:
---   (field1 := x, field2 := y, ..., tt)
-
--- Tagged
--- tests
--- small meta solution inlining
---
--- printing overhaul:
---   options:
---     - toggle meta type printing
---     - toggle inserted implicits printing (TODO: track inserted things)
---     - toggle all implicit printing
---     - toggle irrelevant term printing (we need type-informed printing for this!)
---     - meta zonking
---   where to put options
---     - pragma in files
---     - set from CLI
-
--- printing options affect all printing including errors
-
-
 pruneProj = justElab $ unlines [
   "UEq : (A : Set) → A → A → Set",
   "  := λ A x y. (P : A → Set) → P x → P y",
@@ -394,7 +368,12 @@ bug = justElab $ unlines [
 
   "Idl : {C D : Cat}{F : Functor(C, D)} → Comp {C}{C}{D} F (Id{C}) ={Functor(C,D)} F",
   "  := refl  "
-
-
-
   ]
+
+-- TODO: revamp newtype:
+--  call it Pack
+--  make it primop with two (A, B) params
+--  overload it for Set and Prop
+--  equality of Pack-s computes to a Pack of equality
+--    - otherwise if Eq Pack is just underlying Eq, we
+--      lose unfolding info in the current infrastructure!
