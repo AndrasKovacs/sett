@@ -5,6 +5,7 @@ import Control.Exception
 import Data.ByteString()
 
 import Common
+import Configuration
 import Cxt
 import ElabState
 import Errors

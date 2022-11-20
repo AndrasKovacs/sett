@@ -952,7 +952,7 @@ primSolve x t tv =
       let inl = isInlinable t
       ADL.write
         ES.metaCxt (coerce x)
-        (ES.MESolved (ES.Solved cache ?locals t tv (us^.ES.ty) False inl))
+        (ES.MESolved (ES.Solved cache ?locals t tv (us^.ES.ty) inl False))
 
 -- | Solve (?x sp ?= rhs : A).
 solve :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg => MetaVar -> Spine -> Val -> Ty -> IO ()

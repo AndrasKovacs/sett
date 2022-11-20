@@ -11,21 +11,11 @@ import qualified Data.Array.FM as AFM
 import qualified Data.Ref.F    as RF
 
 import Common
+import Configuration
 import Syntax
 import qualified ElabState as ES
 import qualified Evaluation as E
 import qualified Values as V
-
-import Pretty
-
--- Config
---------------------------------------------------------------------------------
-
-inlineMaxSize :: Int
-inlineMaxSize = 100
-
-simplificationPasses :: Int
-simplificationPasses = 0
 
 
 -- Compute term sizes
@@ -83,7 +73,7 @@ dropClosingLams = go ?locals where
 
 isInlinable :: LocalsArg => Tm -> Bool
 isInlinable t = case tmInfo (dropClosingLams t) of
-  TmInfo s ms -> s <= inlineMaxSize -- && ms <= 1
+  TmInfo s ms -> s <= inlineMaxSize && ms <= 1
 
 
 -- Inline the inlinable metavars.
