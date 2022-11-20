@@ -565,19 +565,12 @@ inferTop = \case
   P.Nil -> pure ?nameTable
 
   P.Define x ma t top -> initializeCxt do
-    (a, va) <- case ma of
+    a <- case ma of
+      Nothing -> freshMeta V.Set
+      Just a  -> check a V.Set
 
-      Nothing -> do
-        a <- freshMeta V.Set
-        let va = eval a
-        pure (a, va)
-      Just a -> do
-        a <- check a V.Set
-        let va = eval a
-        pure (a, va)
-
-    t      <- check t va
-    (t, a) <- inlineMetaBlock t a
+    t      <- check t (eval a)
+    (t, a) <- simplifyTopBlock (t, a)
     ~va    <- pure (eval a)
 
     frz <- freezeMetas
@@ -594,11 +587,11 @@ inferTop = \case
 
   P.Postulate x a top -> initializeCxt do
     a <- check a V.Set
+
+    (a, _) <- simplifyTopBlock (a, S.Set)
+
     let ~va = eval a
         v   = Rigid (RHPostulate ?topLvl va) SId va
-
-    (a, _) <- inlineMetaBlock a S.Set
-    ~va <- pure (eval a)
 
     frz <- freezeMetas
     pushTop (TEPostulate x a va frz)

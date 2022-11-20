@@ -128,12 +128,12 @@ renderElab = do
           MEUnsolved a _     -> putStrLn $ show m ++ " : "
                                ++ showTm0 (quote0 a) ++ " unsolved"
 
-          -- MESolved _ t _ a False -> putStrLn $ show m ++ " : "
-          --                      ++ showTm0 (quote0 a) ++ " := " ++ showTm0 t
-          -- MESolved _ t _ a _ -> pure ()
+          MESolved _ _ t _ a False -> putStrLn $ show m ++ " : "
+                               ++ showTm0 (quote0 a) ++ " := " ++ showTm0 t
+          MESolved _ _ t _ a _ -> pure ()
 
-          MESolved _ t _ a inl -> putStrLn $ show m ++ " : "
-                               ++ showTm0 (quote0 a) ++ " :=" ++ (if inl then "INLINE " else " ") ++ showTm0 t
+          -- MESolved _ t _ a inl -> putStrLn $ show m ++ " : "
+          --                      ++ showTm0 (quote0 a) ++ " :=" ++ (if inl then "INLINE " else " ") ++ showTm0 t
 
         goMetaBlock frz (m + 1)
 

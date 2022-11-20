@@ -191,7 +191,7 @@ approxOccursInMeta occ m = ES.isFrozen m >>= \case
       when (occ == m) $ do
         throwIO ApproxOccurs
 
-    ES.MESolved cache t tv a _ -> do
+    ES.MESolved cache _ t tv a _ -> do
       cached <- RF.read cache
       when (cached /= occ) do
         approxOccurs occ t
@@ -951,7 +951,7 @@ primSolve x t tv =
       let ?locals = ls
       cache <- RF.new (-1)
       let inl = isInlinable t
-      ADL.write ES.metaCxt (coerce x) (ES.MESolved cache t tv a inl)
+      ADL.write ES.metaCxt (coerce x) (ES.MESolved cache ls t tv a inl)
 
 -- | Solve (?x sp ?= rhs : A).
 solve :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg => MetaVar -> Spine -> Val -> Ty -> IO ()

@@ -364,9 +364,31 @@ pairinfer = justElab $ unlines [
   ]
 
 test = justElab $ unlines [
+  "testPair1 : ⊤",
+  "  := let x0  := (Set, Set);",
+  "     let x1  := (x0, x0);",
+  "     let x2  := (x1, x1);",
+  "     let x3  := (x2, x2);",
+  "     let x4  := (x3, x3);",
+  "     let x5  := (x4, x4);",
+  "     let x6  := (x5, x5);",
+  "     let x7  := (x6, x6);",
+  "     let x8  := (x7, x7);",
+  "     let x9  := (x8, x8);",
+  "     let x10 := (x9, x9);",
+  "     let x11 := (x10, x10);",
+  "     let x12 := (x11, x11);",
+  "     let x13 := (x12, x12);",
+  "     let x14 := (x13, x13);",
+  "     let x15 := (x14, x14);",
+  "   tt",
+  "",
   "id : {A : Set} → A → A := λ x. x",
   "",
   "testId : {A : Set} → A → A",
-  "  := id id id id id id id id id"
+  "  := id id id id id id id id id id",
+  "     id id id id id id id id id id",
+  "     id id id id id id id id id id",
+  "     id id id id id id id id id id  "
 
   ]

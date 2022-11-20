@@ -92,9 +92,9 @@ localVar topx = go ?env topx where
 
 meta :: MetaVar -> Val
 meta x = runIO $ readMeta x >>= \case
-  MEUnsolved a  _        -> pure (Flex (FHMeta x) SId a)
-  MESolved _ _ v a True  -> pure v
-  MESolved _ _ v a False -> pure (Unfold (UHSolvedMeta x) SId v a)
+  MEUnsolved a  _          -> pure (Flex (FHMeta x) SId a)
+  MESolved _ _ _ v a True  -> pure v
+  MESolved _ _ _ v a False -> pure (Unfold (UHSolvedMeta x) SId v a)
 
 appTy :: LvlArg => Ty -> Val -> Ty
 appTy a t = runIO $ forceSet a >>= \case
@@ -473,9 +473,9 @@ insertedMeta x locals = runIO do
     MEUnsolved a _ -> do
       let (sp, ty) = maskEnv ?env locals a
       pure (Flex (FHMeta x) sp ty)
-    MESolved _ _ v a True -> do
+    MESolved _ _ _ v a True -> do
       pure $! spine v $! maskEnv' ?env locals a
-    MESolved _ _ v a False -> do
+    MESolved _ _ _ v a False -> do
       let (sp, ty) = maskEnv ?env locals a
       pure (Unfold (UHSolvedMeta x) sp (spine v sp) ty)
 
@@ -548,8 +548,8 @@ evalIn l e t = let ?lvl = l; ?env = e in eval t
 
 unblock :: MetaVar -> a -> (Val -> Ty -> Bool -> IO a) -> IO a
 unblock x deflt k = readMeta x >>= \case
-  MEUnsolved{}         -> pure deflt
-  MESolved _ _ v a inl -> k v a inl
+  MEUnsolved{}           -> pure deflt
+  MESolved _ _ _ v a inl -> k v a inl
 {-# inline unblock #-}
 
 ------------------------------------------------------------

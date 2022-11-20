@@ -23,7 +23,7 @@ data MetaEntry
   -- ^ Type, locals
   = MEUnsolved Ty S.Locals
   -- ^ Occurs check cache, solution, solution value, type, isInlinable, number of uses
-  | MESolved OccursCache S.Tm Val Ty Bool
+  | MESolved OccursCache S.Locals S.Tm Val Ty Bool
 
 type MetaCxt = ADL.Array MetaEntry
 
@@ -64,8 +64,8 @@ unsolvedMetaType x = readMeta x >>= \case
 
 metaType :: MetaVar -> IO V.Ty
 metaType x = readMeta x >>= \case
-  MEUnsolved a _     -> pure a
-  MESolved _ _ _ a _ -> pure a
+  MEUnsolved a _       -> pure a
+  MESolved _ _ _ _ a _ -> pure a
 
 countSolvedMetas :: IO Int
 countSolvedMetas = do
