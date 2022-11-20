@@ -3,6 +3,7 @@
 module Common (
     module Common
   , module Control.Monad
+  , module Lens.Micro.Platform
   , catch
   , coerce
   ) where
@@ -17,6 +18,7 @@ import Data.List
 import Data.Time.Clock
 import GHC.Exts
 import IO
+import Lens.Micro.Platform
 
 #ifdef DEBUG
 import Debug.Trace

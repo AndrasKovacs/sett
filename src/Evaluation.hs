@@ -92,9 +92,11 @@ localVar topx = go ?env topx where
 
 meta :: MetaVar -> Val
 meta x = runIO $ readMeta x >>= \case
-  MEUnsolved a  _          -> pure (Flex (FHMeta x) SId a)
-  MESolved _ _ _ v a True  -> pure v
-  MESolved _ _ _ v a False -> pure (Unfold (UHSolvedMeta x) SId v a)
+  MEUnsolved us -> pure $! Flex (FHMeta x) SId (us^.ty)
+  MESolved s    -> if s^.isInlinable then
+                     pure $! s^.solutionVal
+                   else
+                     pure $! Unfold (UHSolvedMeta x) SId (s^.solutionVal) (s^.ty)
 
 appTy :: LvlArg => Ty -> Val -> Ty
 appTy a t = runIO $ forceSet a >>= \case
@@ -470,14 +472,14 @@ maskEnv' e ls ty = case (e, ls) of
 insertedMeta :: LvlArg => EnvArg => MetaVar -> S.Locals -> Val
 insertedMeta x locals = runIO do
   readMeta x >>= \case
-    MEUnsolved a _ -> do
-      let (sp, ty) = maskEnv ?env locals a
-      pure (Flex (FHMeta x) sp ty)
-    MESolved _ _ _ v a True -> do
-      pure $! spine v $! maskEnv' ?env locals a
-    MESolved _ _ _ v a False -> do
-      let (sp, ty) = maskEnv ?env locals a
-      pure (Unfold (UHSolvedMeta x) sp (spine v sp) ty)
+    MEUnsolved us -> do
+      let (sp, a) = maskEnv ?env locals (us^.ty)
+      pure (Flex (FHMeta x) sp a)
+    MESolved s | s^.isInlinable -> do
+      pure $! spine (s^.solutionVal) $! maskEnv' ?env locals (s^.ty)
+    MESolved s -> do
+      let (sp, a) = maskEnv ?env locals (s^.ty)
+      pure (Unfold (UHSolvedMeta x) sp (spine (s^.solutionVal) sp) a)
 
 
 eqSym, coeSym, symSym, apSym, transSym, reflSym, exfalsoSym :: Val
@@ -548,8 +550,8 @@ evalIn l e t = let ?lvl = l; ?env = e in eval t
 
 unblock :: MetaVar -> a -> (Val -> Ty -> Bool -> IO a) -> IO a
 unblock x deflt k = readMeta x >>= \case
-  MEUnsolved{}           -> pure deflt
-  MESolved _ _ _ v a inl -> k v a inl
+  MEUnsolved{} -> pure deflt
+  MESolved s   -> k (s^.solutionVal) (s^.ty) (s^.isInlinable)
 {-# inline unblock #-}
 
 ------------------------------------------------------------

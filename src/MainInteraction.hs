@@ -125,15 +125,21 @@ renderElab = do
   let goMetaBlock frz m | m == frz = pure ()
       goMetaBlock frz m = do
         readMeta m >>= \case
-          MEUnsolved a _     -> putStrLn $ show m ++ " : "
-                               ++ showTm0 (quote0 a) ++ " unsolved"
 
-          MESolved _ _ t _ a False -> putStrLn $ show m ++ " : "
-                               ++ showTm0 (quote0 a) ++ " := " ++ showTm0 t
-          MESolved _ _ t _ a _ -> pure ()
+          MEUnsolved us ->
+            putStrLn $ show m ++ " : "
+                       ++ showTm0 (quote0 (us^.ty)) ++ " unsolved"
 
-          -- MESolved _ t _ a inl -> putStrLn $ show m ++ " : "
-          --                      ++ showTm0 (quote0 a) ++ " :=" ++ (if inl then "INLINE " else " ") ++ showTm0 t
+          MESolved s | not (s^.isInlinable) ->
+            putStrLn $ show m ++ " : "
+                       ++ showTm0 (quote0 (s^.ty)) ++ " := " ++ showTm0 (s^.solution)
+
+          _ -> pure ()
+
+          -- MESolved s -> putStrLn $ show m ++ " : "
+          --           ++ showTm0 (quote0 (s^.ty)) ++ " :="
+          --           ++ (if s^.isInlinable then "INLINE " else " ")
+          --           ++ showTm0 (s^.solution)
 
         goMetaBlock frz (m + 1)
 

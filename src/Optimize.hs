@@ -5,21 +5,30 @@ module Optimize (isInlinable, simplifyTopBlock) where
 Inlining metas into elaboration output.
 -}
 
+import GHC.Exts hiding (inline)
+import IO
+import qualified Data.Array.FM as AFM
+import qualified Data.Ref.F    as RF
+
 import Common
 import Syntax
--- import Pretty
-
 import qualified ElabState as ES
 import qualified Evaluation as E
 import qualified Values as V
 
-import GHC.Exts hiding (inline)
-import IO
-import qualified Data.Array.FM as AFM
--- import qualified Data.Array.FI as AFI
-import qualified Data.Ref.F    as RF
--- import Debug.Trace
+import Pretty
 
+-- Config
+--------------------------------------------------------------------------------
+
+inlineMaxSize :: Int
+inlineMaxSize = 100
+
+simplificationPasses :: Int
+simplificationPasses = 0
+
+
+-- Compute term sizes
 --------------------------------------------------------------------------------
 
 data TmInfo = TmInfo Int Int -- size, number of unsolved metas
@@ -27,13 +36,8 @@ data TmInfo = TmInfo Int Int -- size, number of unsolved metas
 incr :: TmInfo -> TmInfo
 incr (TmInfo s ms) = TmInfo (s + 1) ms
 
-addMeta :: MetaVar -> TmInfo -> TmInfo
-addMeta x (TmInfo s ms) = case runIO (ES.readMeta x) of
-  ES.MEUnsolved{} -> TmInfo s (ms + 1)
-  _               -> TmInfo s ms
-
-inlineMaxSize :: Int
-inlineMaxSize = 100
+addMeta :: TmInfo -> TmInfo
+addMeta (TmInfo s ms) = TmInfo s (ms + 1)
 
 tmInfo :: Tm -> TmInfo
 tmInfo t = go t (TmInfo 0 0) where
@@ -52,8 +56,8 @@ tmInfo t = go t (TmInfo 0 0) where
     Pack t           -> go t $ incr s
     Unpack t         -> go t $ incr s
     Postulate _ _    -> incr s
-    InsertedMeta x _ -> addMeta x $ incr s
-    Meta x           -> addMeta x $ incr s
+    InsertedMeta x _ -> addMeta $ incr s
+    Meta x           -> addMeta $ incr s
     Let _ t u v      -> go t $ go u $ go v $ incr s
     Set              -> incr s
     Prop             -> incr s
@@ -79,7 +83,8 @@ dropClosingLams = go ?locals where
 
 isInlinable :: LocalsArg => Tm -> Bool
 isInlinable t = case tmInfo (dropClosingLams t) of
-  TmInfo s ms -> s <= inlineMaxSize && ms <= 1
+  TmInfo s ms -> s <= inlineMaxSize -- && ms <= 1
+
 
 -- Inline the inlinable metavars.
 --------------------------------------------------------------------------------
@@ -129,14 +134,16 @@ quote t = vtcase t E.quote id
 
 insertedMeta :: LvlArg => V.EnvArg => MetaVar -> Locals -> VT
 insertedMeta x ls = case runIO (ES.readMeta x) of
-  ES.MESolved _ _ t v a True -> VTV $ E.spine v $! E.maskEnv' ?env ls a
-  _                          -> VTT $ InsertedMeta x ls
+  ES.MESolved s | s^.ES.isInlinable ->
+    VTV $ E.spine (s^.ES.solutionVal) $! E.maskEnv' ?env ls (s^.ES.ty)
+  _ ->
+    VTT $ InsertedMeta x ls
 {-# inline insertedMeta #-}
 
 meta :: LvlArg => V.EnvArg => MetaVar -> VT
 meta x = case runIO (ES.readMeta x) of
-  ES.MESolved _ _ t v a True -> VTV v
-  _                          -> VTT $ Meta x
+  ES.MESolved s | s^.ES.isInlinable -> VTV (s^.ES.solutionVal)
+  _                                 -> VTT $ Meta x
 {-# inline meta #-}
 
 inlineSp :: LvlArg => V.EnvArg => Tm -> VT
@@ -196,6 +203,8 @@ inline t = let
 inline0 :: Tm -> Tm
 inline0 t = let ?lvl = 0; ?env = V.ENil in inline t
 
+
+-- Count occurrences
 --------------------------------------------------------------------------------
 
 type Start  = (?start :: MetaVar)
@@ -250,13 +259,19 @@ count = \case
   ElSym             -> pure ()
   Magic _           -> impossible
 
+
+-- Simplification
+--------------------------------------------------------------------------------
+
 countAllOccurs :: Start => End => Occurs => Tm -> Ty -> IO ()
 countAllOccurs t a = do
+
   let go :: Start => End => Occurs => MetaVar -> IO ()
-      go x | x < ?end = ES.readMeta x >>= \case
-        ES.MEUnsolved _ _           -> go (x + 1)
-        ES.MESolved _ _ t _ _ False -> count t >> go (x + 1)
-        ES.MESolved _ _ t _ _ True  -> go (x + 1)
+      go x | x < ?end = do
+        ES.readMeta x >>= \case
+          ES.MESolved s | not (s^.ES.isInlinable) -> count (s^.ES.solution)
+          _                                       -> pure ()
+        go (x + 1)
       go x = pure ()
 
   go ?start
@@ -265,19 +280,23 @@ countAllOccurs t a = do
 
 updateInlines :: Start => End => Occurs => IO ()
 updateInlines = do
+
   let go :: Start => End => Occurs => MetaVar -> IO ()
       go x | x < ?end = do
-        -- debug ["MARK", show x, show ?start, show ?end]
-        ES.readMeta x >>= \case
-          ES.MESolved c ls t a va False -> do
-            let ?locals = ls
-            occCount <- lookupCount x
-            let inl = isInlinable t
-            when (inl || occCount <= 1) $
-              ES.writeMeta x (ES.MESolved c ls t a va True)
-          _ -> pure ()
-        go (x + 1)
 
+        ES.readMeta x >>= \case
+          ES.MESolved s | not (s^.ES.isInlinable) -> do
+            let ?locals = s^.ES.locals
+            occCount <- lookupCount x
+            let inl = isInlinable (s^.ES.solution)
+            -- debug ["UPD INLINE", show x, showTm0 (s^.ES.solution), show occCount, show inl]
+            when (inl || occCount <= 1) $
+              ES.writeMeta x $
+                ES.MESolved (s & ES.isInlinable      .~ True
+                               & ES.inlinableChanged .~ True)
+          _ -> pure ()
+
+        go (x + 1)
       go x = pure ()
   go ?start
 
@@ -287,9 +306,10 @@ inlineAll t a = do
   let go :: Start => End => Occurs => MetaVar -> IO ()
       go x | x < ?end = do
         ES.readMeta x >>= \case
-          ES.MEUnsolved{} -> pure ()
-          ES.MESolved c ls t v a inl -> do
-           ES.writeMeta x $ ES.MESolved c ls (inline0 t) v a inl
+          ES.MESolved s | s^.ES.inlinableChanged || not (s^.ES.isInlinable) -> do
+            ES.writeMeta x $ ES.MESolved (s & ES.inlinableChanged .~ False
+                                            & ES.solution %~ inline0)
+          _ -> pure ()
         go (x + 1)
       go x = pure ()
 
@@ -298,14 +318,19 @@ inlineAll t a = do
   t <- pure $! inline0 t
   pure (t, a)
 
-
 -- | Simplify current meta block.
 --     1. Count occurrences of metas.
---     2. Mark linear metas as inline.
---     3. Perform inlining on everything in the block.
+--     2. Mark linear and small metas as inline.
+--     3. Do inlining on everything in the block.
+simplificationPass :: Start => End => Occurs => (Tm, Ty) -> IO (Tm, Ty)
+simplificationPass (t, a) = do
+  AFM.set ?occurrences 0
+  countAllOccurs t a
+  updateInlines
+  inlineAll t a
+
 simplifyTopBlock :: (Tm, Ty) -> IO (Tm, Ty)
-simplifyTopBlock (t, a) = do
-  -- get extent of block
+simplifyTopBlock (!t, !a) = do
   start <- RF.read ES.frozen
   end   <- ES.nextMeta
 
@@ -314,21 +339,19 @@ simplifyTopBlock (t, a) = do
 
   if blockSize == 0 then
     pure (t, a)
+
   else do
     occurrences <- AFM.new @Int blockSize
-    AFM.set occurrences 0
 
     let ?start       = start
         ?end         = end
         ?occurrences = occurrences
 
-    -- occs <- AFI.foldr (:) [] <$> AFM.unsafeFreeze occurrences
-    -- debug ["PRE-OCCS", show $ zip [coerce ?start .. coerce ?end :: Int] occs]
+    let go :: Int -> (Tm, Ty) -> IO (Tm, Ty)
+        go 0 ta = pure ta
+        go n ta = do
+          -- debug ["OPTPASS"]
+          ta <- simplificationPass ta
+          go (n - 1) ta
 
-    countAllOccurs t a
-
-    -- occs <- AFI.foldr (:) [] <$> AFM.unsafeFreeze occurrences
-    -- debug ["POST-OCCS", show $ zip [coerce ?start .. coerce ?end :: Int] occs]
-
-    markInlines
-    inlineAll t a
+    go simplificationPasses (t, a)

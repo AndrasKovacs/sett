@@ -12,18 +12,35 @@ import NameTable
 import qualified Values as V
 import qualified Syntax as S
 import qualified Presyntax as P
--- import Optimize
 
 -- Metacontext
 --------------------------------------------------------------------------------
 
 type OccursCache = RF.Ref MetaVar
 
+data Unsolved = Unsolved {
+    unsolvedTy     :: Ty
+  , unsolvedLocals :: S.Locals}
+
+makeFields ''Unsolved
+
+data Solved = Solved {
+    solvedOccursCache      :: OccursCache
+  , solvedLocals           :: S.Locals
+  , solvedSolution         :: S.Tm
+  , solvedSolutionVal      :: Val
+  , solvedTy               :: Ty
+  , solvedIsInlinable      :: Bool
+  , solvedInlinableChanged :: Bool
+  }
+
+makeFields ''Solved
+
 data MetaEntry
   -- ^ Type, locals
-  = MEUnsolved Ty S.Locals
+  = MEUnsolved {-# unpack #-} Unsolved
   -- ^ Occurs check cache, solution, solution value, type, isInlinable, number of uses
-  | MESolved OccursCache S.Locals S.Tm Val Ty Bool
+  | MESolved {-# unpack #-} Solved
 
 type MetaCxt = ADL.Array MetaEntry
 
@@ -46,7 +63,7 @@ newMeta :: S.LocalsArg => Ty -> IO MetaVar
 newMeta a = do
   s <- ADL.size metaCxt
   debug ["NEW META", show s]
-  ADL.push metaCxt (MEUnsolved a ?locals)
+  ADL.push metaCxt (MEUnsolved (Unsolved a ?locals))
   pure (MkMetaVar s)
 {-# inline newMeta #-}
 
@@ -59,13 +76,13 @@ resetMetaCxt size = do
 
 unsolvedMetaType :: MetaVar -> IO V.Ty
 unsolvedMetaType x = readMeta x >>= \case
-  MEUnsolved a _ -> pure a
+  MEUnsolved us  -> pure $! us^.ty
   _              -> impossible
 
 metaType :: MetaVar -> IO V.Ty
 metaType x = readMeta x >>= \case
-  MEUnsolved a _       -> pure a
-  MESolved _ _ _ _ a _ -> pure a
+  MEUnsolved us -> pure $ us^.ty
+  MESolved   s  -> pure $ s^.ty
 
 countSolvedMetas :: IO Int
 countSolvedMetas = do

@@ -388,7 +388,6 @@ test = justElab $ unlines [
   "testId : {A : Set} → A → A",
   "  := id id id id id id id id id id",
   "     id id id id id id id id id id",
-  "     id id id id id id id id id id",
   "     id id id id id id id id id id  "
 
   ]

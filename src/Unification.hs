@@ -9,7 +9,6 @@ import Control.Exception
 import qualified Data.IntMap as IM
 import qualified Data.Ref.F as RF
 import qualified Data.Array.Dynamic.L as ADL
-import Lens.Micro.Platform
 
 import Values
 import Evaluation
@@ -191,11 +190,11 @@ approxOccursInMeta occ m = ES.isFrozen m >>= \case
       when (occ == m) $ do
         throwIO ApproxOccurs
 
-    ES.MESolved cache _ t tv a _ -> do
-      cached <- RF.read cache
+    ES.MESolved s -> do
+      cached <- RF.read (s^.ES.occursCache)
       when (cached /= occ) do
-        approxOccurs occ t
-        RF.write cache occ
+        approxOccurs occ (s^.ES.solution)
+        RF.write (s^.ES.occursCache) occ
 
 approxOccurs :: MetaVar -> S.Tm -> IO ()
 approxOccurs occ t = do
@@ -947,11 +946,13 @@ primSolve x t tv =
   ADL.unsafeRead ES.metaCxt (coerce x) >>= \case
     ES.MESolved{} ->
       impossible
-    ES.MEUnsolved a ls -> do
-      let ?locals = ls
+    ES.MEUnsolved us -> do
+      let ?locals = us^.ES.locals
       cache <- RF.new (-1)
       let inl = isInlinable t
-      ADL.write ES.metaCxt (coerce x) (ES.MESolved cache ls t tv a inl)
+      ADL.write
+        ES.metaCxt (coerce x)
+        (ES.MESolved (ES.Solved cache ?locals t tv (us^.ES.ty) False inl))
 
 -- | Solve (?x sp ?= rhs : A).
 solve :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg => MetaVar -> Spine -> Val -> Ty -> IO ()
@@ -1003,8 +1004,8 @@ solveEtaShort m sp rhs rhsty =
   catchUE (solve m sp rhs rhsty)
           (unifyEtaLong m sp rhs rhsty)
 
-intersect :: LvlArg => UnifyStateArg => LhsArg => RhsArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
-intersect = uf -- TODO
+-- intersect :: LvlArg => UnifyStateArg => LhsArg => RhsArg => MetaVar -> Spine -> MetaVar -> Spine -> Ty -> IO ()
+-- intersect = uf -- TODO
 
 unifyEtaLong :: LvlArg => UnifyStateArg => S.NamesArg => LhsArg => RhsArg => MetaVar -> Spine -> Val -> Ty -> IO ()
 unifyEtaLong m sp rhs rhsty = forceAll rhs >>= \case

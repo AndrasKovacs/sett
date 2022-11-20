@@ -15,7 +15,7 @@ import qualified Data.ByteString as B
 
 import Lexer
 import Presyntax
-import Common
+import Common hiding (assign)
 
 --------------------------------------------------------------------------------
 
