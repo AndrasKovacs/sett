@@ -972,7 +972,6 @@ solve x sp rhs rhsty = do
           _         -> throwIO CantSolveMetaInNonRigidState
 
         a <- ES.unsolvedMetaType x
-        -- debug ["solve", showTm' (quote (Flex (FHMeta x) sp rhsty)), showTm' (quote rhs)]
         sol <- catchUE
            (solveTopSp (PSub ENil (Just x) 0 ?lvl mempty True) S.LEmpty a (reverseSpine sp) rhs rhsty)
            cantUnify

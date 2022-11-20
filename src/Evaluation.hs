@@ -182,7 +182,8 @@ projFieldInfo val topa topn = do
           case a of
             Sg _ x a b      -> pure (x, a)
             El (Sg _ x a b) -> pure (x, El a)
-            _               -> impossible
+            v               -> error $ show v
+            -- _               -> impossible
         else
           case a of
             Sg _ _ a b      -> go (b $$ projField val ix) (ix + 1)

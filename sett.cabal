@@ -71,6 +71,7 @@ flag llvm
 library
   exposed-modules:
       Common
+      Configuration
       Cxt
       Cxt.Extension
       Cxt.Types

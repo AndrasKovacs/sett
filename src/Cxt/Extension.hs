@@ -30,11 +30,11 @@ bindWithTy x a k = bind x a (eval a) k
 
 -- | Add a definition to the context.
 define :: InCxt (Span -> S.Ty -> V.Ty -> S.Tm -> V.Val -> InCxt a -> a)
-define x a ga t ~vt k =
+define x a va t ~vt k =
   let ?lvl       = ?lvl + 1
       ?env       = V.EDef ?env vt
-      ?locals    = S.LDefine ?locals (NSpan x) a t
-      ?nameTable = N.insert (Bind x) (N.Local ?lvl ga) ?nameTable
+      ?locals    = S.LDefine ?locals (NSpan x) t a
+      ?nameTable = N.insert (Bind x) (N.Local ?lvl va) ?nameTable
   in forceCxt k
 {-# inline define #-}
 

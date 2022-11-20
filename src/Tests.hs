@@ -363,31 +363,38 @@ pairinfer = justElab $ unlines [
   "test : typeof test1 = El (⊤ × ⊤) := refl"
   ]
 
-test = justElab $ unlines [
-  "testPair1 : ⊤",
-  "  := let x0  := (Set, Set);",
-  "     let x1  := (x0, x0);",
-  "     let x2  := (x1, x1);",
-  "     let x3  := (x2, x2);",
-  "     let x4  := (x3, x3);",
-  "     let x5  := (x4, x4);",
-  "     let x6  := (x5, x5);",
-  "     let x7  := (x6, x6);",
-  "     let x8  := (x7, x7);",
-  "     let x9  := (x8, x8);",
-  "     let x10 := (x9, x9);",
-  "     let x11 := (x10, x10);",
-  "     let x12 := (x11, x11);",
-  "     let x13 := (x12, x12);",
-  "     let x14 := (x13, x13);",
-  "     let x15 := (x14, x14);",
-  "   tt",
+-- bug = justElab $ unlines [
+--   "Cat : Set",
+--   "  := (Ob    : Set)",
+--   "   × (Hom   : Ob → Ob → Set)",
+--   "   × ⊤",
+--   "",
+--   "Functor : Cat × Cat → Set := Newtype {Cat × Cat} (λ CD. let C : Cat := CD.1; let D : Cat := CD.2;",
+--   "     (Ob   : C.Ob → D.Ob)",
+--   "   × (Hom  : {x y} → C.Hom x y → D.Hom (Ob x) (Ob y))",
+--   "   × ⊤)"
+--   ]
+
+bug = justElab $ unlines [
+  "Cat : Set",
+  "  := (Ob : Set)",
+  "   × ⊤",
   "",
-  "id : {A : Set} → A → A := λ x. x",
+  "Functor : Cat × Cat → Set := Newtype {Cat × Cat} (λ CD. let C : Cat := CD.1; let D:Cat := CD.2;",
+  "     (Ob   : C.Ob → D.Ob)",
+  "   × ⊤)",
   "",
-  "testId : {A : Set} → A → A",
-  "  := id id id id id id id id id id",
-  "     id id id id id id id id id id",
-  "     id id id id id id id id id id  "
+  "Id : {C : Cat} → Functor(C, C)",
+  "  := ( λ x. x , tt)",
+  "",
+  "Comp : {C D E : Cat} → Functor(D, E) → Functor(C, D) → Functor(C, E)",
+  "  := λ {C}{D}{E} F G. (",
+  "    λ x. F.Ob (G.Ob x)",
+  "  , tt)",
+
+  "Idl : {C D : Cat}{F : Functor(C, D)} → Comp {C}{C}{D} F (Id{C}) ={Functor(C,D)} F",
+  "  := refl  "
+
+
 
   ]

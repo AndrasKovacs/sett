@@ -134,16 +134,16 @@ renderElab = do
           --   putStrLn $ show m ++ " : "
           --              ++ showTm0 (quote0 (s^.ty)) ++ " := " ++ showTm0 (s^.solution)
 
-          MESolved s | not (s^.isInlinable) ->
-            putStrLn $ show m ++ " := " ++ showTm0 (s^.solution)
+          -- MESolved s | not (s^.isInlinable) ->
+          --   putStrLn $ show m ++ " := " ++ showTm0 (s^.solution)
 
-          _ -> pure ()
+          -- _ -> pure ()
 
-          -- MESolved s -> do
-          --   putStrLn $ show m ++ " : "
-          --           ++ showTm0 (quote0 (s^.ty)) ++ " :="
-          --           ++ (if s^.isInlinable then "INLINE " else " ")
-          --           ++ showTm0 (s^.solution)
+          MESolved s -> do
+            putStrLn $ show m ++ " : "
+                    ++ showTm0 (quote0 (s^.ty)) ++ " :="
+                    ++ (if s^.isInlinable then "INLINE " else " ")
+                    ++ showTm0 (s^.solution)
 
         goMetaBlock frz (m + 1)
 
