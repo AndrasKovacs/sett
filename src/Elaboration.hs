@@ -13,6 +13,7 @@ import Pretty
 import Syntax
 import Unification (freshMeta, UnifyEx(..))
 import Values
+import Optimize
 
 import qualified NameTable as NT
 import qualified Presyntax as P
@@ -575,7 +576,9 @@ inferTop = \case
         let va = eval a
         pure (a, va)
 
-    t <- check t va
+    t      <- check t va
+    (t, a) <- inlineMetaBlock t a
+    ~va    <- pure (eval a)
 
     frz <- freezeMetas
     pushTop (TEDef x a t frz)
@@ -593,6 +596,9 @@ inferTop = \case
     a <- check a V.Set
     let ~va = eval a
         v   = Rigid (RHPostulate ?topLvl va) SId va
+
+    (a, _) <- inlineMetaBlock a S.Set
+    ~va <- pure (eval a)
 
     frz <- freezeMetas
     pushTop (TEPostulate x a va frz)

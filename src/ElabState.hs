@@ -22,7 +22,7 @@ type OccursCache = RF.Ref MetaVar
 data MetaEntry
   -- ^ Type, locals
   = MEUnsolved Ty S.Locals
-  -- ^ Occurs check cache, term solution, value, type, inlinable
+  -- ^ Occurs check cache, solution, solution value, type, isInlinable, number of uses
   | MESolved OccursCache S.Tm Val Ty Bool
 
 type MetaCxt = ADL.Array MetaEntry

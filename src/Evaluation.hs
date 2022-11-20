@@ -109,7 +109,7 @@ app t u i = case t of
   Flex h sp a      -> Flex h (SApp sp u i) (appTy a u)
   Unfold h sp t a  -> Unfold h (SApp sp u i) (app t u i) (appTy a u)
   Magic m          -> Magic m
-  _                -> impossible
+  v                -> impossible
 
 lazyApp :: LvlArg => Val -> Val -> Icit -> Val
 lazyApp t ~u i = case t of
@@ -554,12 +554,12 @@ unblock x deflt k = readMeta x >>= \case
 
 ------------------------------------------------------------
 
--- | Eliminate solved flex heads.
+-- | Eliminate solved flex heads & inlinable solved metas
 force :: LvlArg => Val -> IO Val
 force v = case v of
-  topv@(Flex h sp _)    -> forceFlex topv h sp
-  topv@(FlexEq x a t u) -> forceFlexEq topv x a t u
-  v                     -> pure v
+  topv@(Flex h sp _)     -> forceFlex topv h sp
+  topv@(FlexEq x a t u)  -> forceFlexEq topv x a t u
+  v                      -> pure v
 {-# inline force #-}
 
 forceFlexEq :: LvlArg => Val -> MetaVar -> Val -> Val -> Val -> IO Val

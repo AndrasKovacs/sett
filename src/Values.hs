@@ -210,7 +210,7 @@ uSP P = Prop
 
 --------------------------------------------------------------------------------
 
-data Env = ENil | EDef Env ~Val
+data Env = ENil | EDef Env ~Val deriving Show
 type EnvArg = (?env :: Env)
 
 envLength :: Env -> Lvl

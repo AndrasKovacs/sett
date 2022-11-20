@@ -1,28 +1,30 @@
 
-module Optimize (inline, isInlinable, inlineMetaBlock) where
+module Optimize (isInlinable, inlineMetaBlock) where
 
 {-|
 Inlining metas into elaboration output.
 -}
 
-import GHC.Exts hiding (inline)
-
-import IO
 import Common
 import Syntax
+import Pretty
+
+import qualified ElabState as ES
 import qualified Evaluation as E
 import qualified Values as V
-import qualified ElabState as ES
 
--- import qualified Data.Array.Dynamic.L as ADL
-import qualified Data.Array.FM        as AFM
-import qualified Data.Ref.F           as RF
--- import qualified Data.Ref.L           as RL
+import GHC.Exts hiding (inline)
+import IO
+import qualified Data.Array.FM as AFM
+import qualified Data.Array.FI as AFI
+import qualified Data.Ref.F    as RF
+
+import Debug.Trace
 
 --------------------------------------------------------------------------------
 
 inlineMaxSize :: Int
-inlineMaxSize = 15
+inlineMaxSize = 0
 
 tmSize :: Tm -> Int
 tmSize t = go t 0 where
@@ -72,7 +74,6 @@ metaSolutionSize t = tmSize (dropClosingLams t)
 isInlinable :: LocalsArg => Tm -> Bool
 isInlinable t = metaSolutionSize t <= inlineMaxSize
 
-
 -- Inline the inlinable metavars.
 --------------------------------------------------------------------------------
 
@@ -81,33 +82,43 @@ data VT = VT# Int Any
 pattern VTV :: V.Val -> VT
 pattern VTV v <- VT# 0 (unsafeCoerce# -> v) where
   VTV v = VT# 0 (unsafeCoerce# v)
+
 pattern VTT :: Tm -> VT
 pattern VTT t <- VT# 1 (unsafeCoerce# -> t) where
-  VTT t = VT# 0 (unsafeCoerce# t)
+  VTT t = VT# 1 (unsafeCoerce# t)
 {-# complete VTV, VTT #-}
 
+vtcase :: VT -> (V.Val -> a) -> (Tm -> a) -> a
+vtcase (VT# tag x) f g = case tag of
+  0 -> f (unsafeCoerce# x)
+  _ -> g (unsafeCoerce# x)
+{-# inline vtcase #-}
+
 vtmap :: VT -> (V.Val -> V.Val) -> (Tm -> Tm) -> VT
-vtmap (VTV v) f g = VTV (f v)
-vtmap (VTT t) f g = VTT (g t)
+vtmap t f g = vtcase t (VTV . f) (VTT . g)
 {-# inline vtmap #-}
 
 app :: LvlArg => VT -> V.Val -> Icit -> VT
-app t u i = vtmap t
+app t ~u i = vtmap t
   (\t -> E.app t u i)
   (\t -> App t (E.quote u) i)
+{-# inline app #-}
 
 proj1 :: LvlArg => VT -> VT
 proj1 t = vtmap t E.proj1 Proj1
+{-# inline proj1 #-}
 
 proj2 :: LvlArg => VT -> VT
 proj2 t = vtmap t E.proj2 Proj2
+{-# inline proj2 #-}
 
 projField :: LvlArg => VT -> Name -> Int -> VT
 projField t x n = vtmap t (\t -> E.projField t n) (\t -> ProjField t x n)
+{-# inline projField #-}
 
 quote :: LvlArg => VT -> Tm
-quote (VTV v) = E.quote v
-quote (VTT t) = t
+quote t = vtcase t E.quote id
+{-# inline quote #-}
 
 insertedMeta :: LvlArg => V.EnvArg => MetaVar -> Locals -> VT
 insertedMeta x ls = case runIO (ES.readMeta x) of
@@ -122,7 +133,7 @@ meta x = case runIO (ES.readMeta x) of
 {-# inline meta #-}
 
 inlineSp :: LvlArg => V.EnvArg => Tm -> VT
-inlineSp = \case
+inlineSp t = case t of
   InsertedMeta x ls -> insertedMeta x ls
   Meta x            -> meta x
   App t u i         -> app (inlineSp t) (E.eval u) i
@@ -136,10 +147,10 @@ inline t = let
   go = inline; {-# inline go #-}
 
   goBind a t =
-    let v = V.Var ?lvl (E.eval a) in
+    let v = V.Var ?lvl ((E.eval a)) in
     let ?lvl = ?lvl + 1 in
     let ?env = V.EDef ?env v in
-    go t
+    inline t
 
   in case t of
     LocalVar x        -> t
@@ -174,6 +185,16 @@ inline t = let
     ElSym             -> t
     Magic _           -> impossible
 
+-- inline0 :: Tm -> Tm
+-- inline0 t = runIO do
+--   debug ["INLINE0-PRE", showTm0 t]
+--   let ?lvl = 0; ?env = V.ENil
+--   let res = inline t
+--   debug ["INLINE0-POST", showTm0 res]
+--   pure res
+
+inline0 :: Tm -> Tm
+inline0 t = let ?lvl = 0; ?env = V.ENil in inline t
 
 --------------------------------------------------------------------------------
 
@@ -182,10 +203,18 @@ type End    = (?end   :: MetaVar)
 type Occurs = (?occurrences :: AFM.Array Int)
 
 lookupCount :: Start => Occurs => MetaVar -> IO Int
-lookupCount x = AFM.read ?occurrences (coerce x - coerce ?start)
+lookupCount x = do
+  let i = coerce x - coerce ?start :: Int
+  if 0 <= i && i < AFM.size ?occurrences
+    then AFM.read ?occurrences i            -- TODO: safeRead in primData
+    else impossible
 
 bump :: Start => Occurs => MetaVar -> IO ()
-bump x = AFM.modify ?occurrences (coerce x - coerce ?start) (+1)
+bump x = do
+  let i = coerce x - coerce ?start :: Int
+  if 0 <= i && i < AFM.size ?occurrences
+    then AFM.modify ?occurrences i (+1)     -- TODO: safeModify in primdata
+    else impossible
 
 count :: Start => Occurs => Tm -> IO ()
 count = \case
@@ -237,37 +266,66 @@ markInlines :: Start => End => Occurs => IO ()
 markInlines = do
   let go :: Start => End => Occurs => MetaVar -> IO ()
       go x | x < ?end = do
+        debug ["MARK", show x, show ?start, show ?end]
         ES.readMeta x >>= \case
-          ES.MEUnsolved{} -> go (x + 1)
-          ES.MESolved c t a va inl -> do
+          ES.MESolved c t a va _ -> do
             lookupCount x >>= \case
               n | n <= 1 -> ES.writeMeta x (ES.MESolved c t a va True)
-              _          -> go (x + 1)
+              _          -> pure ()
+          _ -> pure ()
+        go (x + 1)
+
       go x = pure ()
   go ?start
 
-inlineAll :: Start => End => Tm -> Ty -> IO (Tm, Ty)
-inlineAll t a = uf
+inlineAll :: Start => End => Occurs => Tm -> Ty -> IO (Tm, Ty)
+inlineAll t a = do
+
+  let go :: Start => End => Occurs => MetaVar -> IO ()
+      go x | x < ?end = do
+        ES.readMeta x >>= \case
+          ES.MEUnsolved{} -> pure ()
+          ES.MESolved c t v a inl -> do
+           ES.writeMeta x $ ES.MESolved c (inline0 t) v a inl
+        go (x + 1)
+      go x = pure ()
+
+  go ?start
+  a <- pure $! inline0 a
+  t <- pure $! inline0 t
+  pure (t, a)
+
 
 -- | Simplify current meta block.
 --     1. Count occurrences of metas.
---     2. Mark irrelevant or linear metas as inline.
+--     2. Mark linear metas as inline.
 --     3. Perform inlining on everything in the block.
 inlineMetaBlock :: Tm -> Ty -> IO (Tm, Ty)
 inlineMetaBlock t a = do
-  -- get extend of block
+  -- get extent of block
   start <- RF.read ES.frozen
   end   <- ES.nextMeta
 
   let blockSize :: Int
       blockSize = coerce end - coerce start
 
-  occurrences <- AFM.new @Int blockSize
+  if blockSize == 0 then
+    pure (t, a)
+  else do
+    occurrences <- AFM.new @Int blockSize
+    AFM.set occurrences 0
 
-  let ?start       = start
-      ?end         = end
-      ?occurrences = occurrences
+    let ?start       = start
+        ?end         = end
+        ?occurrences = occurrences
 
-  countAllOccurs t a
-  markInlines
-  inlineAll t a
+    occs <- AFI.foldr (:) [] <$> AFM.unsafeFreeze occurrences
+    debug ["PRE-OCCS", show $ zip [coerce ?start .. coerce ?end :: Int] occs]
+
+    countAllOccurs t a
+
+    occs <- AFI.foldr (:) [] <$> AFM.unsafeFreeze occurrences
+    debug ["POST-OCCS", show $ zip [coerce ?start .. coerce ?end :: Int] occs]
+
+    markInlines
+    inlineAll t a
