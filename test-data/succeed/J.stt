@@ -1,0 +1,5 @@
+J : {A : Set}{a : A}(B : {a' : A} → a = a' → Set) → B refl →
+  {a' : A}(e : a = a') → B e := λ {A}{a} B b {a'} e .
+  coe (ap (λ z . (e : a = z) → B e) e) (λ _ . b) e
+
+Jβ : {A : Set}{a : A}{B : {a' : A} → a = a' → Set}{b : B refl} → J B b refl = b := refl
