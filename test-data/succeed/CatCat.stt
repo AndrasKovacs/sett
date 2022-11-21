@@ -20,19 +20,22 @@ Id : {C} → Functor(C, C)
   := (λ x. x, λ f. f, refl, λ _ _. refl, tt)
 
 Comp : {C D E} → Functor(D, E) → Functor(C, D) → Functor(C, E)
-  := λ {C}{D}{E} F G. (
+  := λ F G. (
     λ x. F.Ob (G.Ob x)
   , λ f. F.Hom (G.Hom f)
   , trans (ap F.Hom G.id) F.id
   , λ f g. trans (ap F.Hom (G.comp f g)) (F.comp (G.Hom f) (G.Hom g))
   , tt)
 
-Idl : {C D}{F : Functor(C, D)} → Comp F Id = F
-  := refl
+Idl : {C D}(F : Functor(C, D)) → Comp F Id = F
+  := λ _. refl
 
-Idr : {C D}{F : Functor(C, D)} → Comp Id F = F
-  := refl
+Idr : {C D}(F : Functor(C, D)) → Comp Id F = F
+  := λ _. refl
 
-Ass : {C1 C2 C3 C4}{F : Functor(C3, C4)}{G : Functor(C2, C3)}{H : Functor(C1, C2)}
+Ass : {C1 C2 C3 C4}(F : Functor(C3, C4))(G : Functor(C2, C3))(H : Functor(C1, C2))
       → Comp F (Comp G H) = Comp (Comp F G) H
-  := refl
+  := λ _ _ _. refl
+
+CatCat : Cat
+  := (Cat, λ C D. Functor(C,D), Id, Comp, Idl, Idr, Ass, tt)
