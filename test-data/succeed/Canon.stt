@@ -1,0 +1,62 @@
+-- this should become a formalisation of the canonicity displayed model over any model of type theory.
+
+J : {A : Set}{a : A}(B : {a' : A} → a = a' → Set) → B refl →
+  {a' : A}(e : a = a') → B e := λ {A}{a} B b {a'} e .
+  coe (ap (λ z . (e : a = z) → B e) e) (λ _ . b) e
+
+Model : Set :=
+  (Con  : Set) ×
+  (Sub  : Con → Con → Set) ×
+  (cmp  : {Δ Γ} → Sub Δ Γ → {Θ} → Sub Θ Δ → Sub Θ Γ) ×
+  (ass  : {Δ Γ}(γ : Sub Δ Γ){Θ}(δ : Sub Θ Δ){Ξ}(θ : Sub Ξ Θ) → cmp (cmp γ δ) θ = cmp γ (cmp δ θ)) ×
+  (id   : {Γ} → Sub Γ Γ) ×
+  (idl  : {Δ Γ}(γ : Sub Δ Γ) → cmp id γ = γ) ×
+  (idr  : {Δ Γ}(γ : Sub Δ Γ) → cmp γ id = γ) ×
+  (emp  : Con) ×
+  (ε    : {Γ} → Sub Γ emp) ×
+  (empη : {Γ}{σ : Sub Γ emp} → σ = ε) ×
+  (Ty   : Con → Set) ×
+  (subT : {Γ} → Ty Γ → {Δ} → Sub Δ Γ → Ty Δ) ×
+  (cmpT : {Γ}(A : Ty Γ){Δ}(γ : Sub Δ Γ){Θ}(δ : Sub Θ Δ) → subT A (cmp γ δ) = subT (subT A γ) δ) ×
+  (idT  : {Γ}(A : Ty Γ) → subT A id = A) ×
+  (Tm   : (Γ : Con) → Ty Γ → Set) ×
+  (subt : {Γ}{A : Ty Γ} → Tm Γ A → {Δ}(γ : Sub Δ Γ) → Tm Δ (subT A γ)) ×
+--  (cmpt : {Γ}{A : Ty Γ}(a : Tm Γ A){Δ}(γ : Sub Δ Γ){Θ}(δ : Sub Θ Δ) → coe (ap (Tm Θ) (cmpT A γ δ)) (subt a (cmp γ δ)) = subt (subt a γ) δ) ×
+--  (idt  : {Γ}{A : Ty Γ}(a : Tm Γ A) → coe (ap (Tm Γ) (idT A)) (subt a id) = a) ×
+  ⊤
+
+DepModel : Model → Set := λ M .
+  (Con'  : M.Con → Set) ×
+  (Sub'  : {Δ} → Con' Δ → {Γ} → Con' Γ → M.Sub Δ Γ → Set) ×
+  (cmp'  : {Δ Δ' Γ Γ' γ} → Sub' {Δ} Δ' {Γ} Γ' γ → {Θ Θ' δ} → Sub' {Θ} Θ' Δ' δ → Sub' Θ' Γ' (M.cmp γ δ)) ×
+  (ass'  : {Δ Δ' Γ Γ' γ}(γ' : Sub' {Δ} Δ' {Γ} Γ' γ){Θ Θ' δ}(δ' : Sub' {Θ} Θ' Δ' δ){Ξ Ξ' θ}(θ' : Sub' {Ξ} Ξ' Θ' θ) →
+           coe (ap (Sub' Ξ' Γ') (M.ass γ δ θ)) (cmp' (cmp' γ' δ') θ') = cmp' γ' (cmp' δ' θ')) ×
+  (id'   : {Γ Γ'} → Sub' {Γ} Γ' Γ' M.id) ×
+  (idl'  : {Δ Δ' Γ Γ' γ}(γ' : Sub' {Δ} Δ' {Γ} Γ' γ) → coe (ap (Sub' Δ' Γ') (M.idl γ)) (cmp' id' γ') = γ') ×
+  (idr'  : {Δ Δ' Γ Γ' γ}(γ' : Sub' {Δ} Δ' {Γ} Γ' γ) → coe (ap (Sub' Δ' Γ') (M.idr γ)) (cmp' γ' id') = γ') ×
+  ⊤
+
+iappcoe : {A}{B C : A → Set}(f : {a : A} → B a → C a){a a'}(e : a = a'){b} →
+  f {a'} (coe (ap B e) b) = coe (ap C e) (f {a} b)
+  := λ {A}{B}{C} f e {b} . J (λ {a'} e . f (coe (ap B e) b) = coe (ap C e) (f b)) refl e
+
+Canon : (M : Model) → DepModel M := λ M . (
+  λ Γ . M.Sub M.emp Γ → Set ,
+  λ Δ' Γ' γ . {δ0} → Δ' δ0 → Γ' (M.cmp γ δ0) ,
+  λ {Γ := Γ}{Γ'}{γ} γ' {_}{_}{δ} δ' {θ0} θ1 . coe (ap Γ' (sym (M.ass γ δ θ0))) (γ' (δ' θ1)) ,
+  λ γ' δ' θ' . _ ,
+  λ {Γ}{Γ'}{γ0} γ1 . coe (ap Γ' (sym (M.idl γ0))) γ1 ,
+  λ γ' . refl ,
+  λ {Δ}{Δ'}{Γ}{Γ'}{γ} γ' . _ ,
+  --  ap
+  --    (λ z . coe (ap (λ γ . {δ0} → Δ' δ0 → Γ' (M.cmp γ δ0)) (M.idr γ)) (λ {δ0} δ1 . coe (ap Γ' (sym (M.ass γ M.id δ0))) z))
+  --    (iappcoe {_}{Δ'} γ' (sym (M.idl δ0)) {δ1}) ,
+  -- coe (ap (λ γ . {δ0} → Δ' δ0 → Γ' (M.cmp γ δ0)) (M.idr γ))
+  --   (λ {δ0} δ1 . coe (ap Γ' (sym (M.ass γ id δ0))) (γ' (coe (ap Δ' (sym (M.idl δ0))) δ1))) = γ'
+  -- iappcoe {_}{Δ'} γ' (sym (M.idl δ0)) {δ1} :
+  --   γ' (coe (ap Δ' (sym (M.idl δ0))) δ1) = coe (ap (λ z . Γ' (M.cmp z δ0)) (sym (M.idl δ0))) (γ' δ1)
+  tt)
+
+--          γ' δ1  : Γ' (γ ∘ δ0)
+-- coe ... (γ' δ1) : Γ' ()
+
