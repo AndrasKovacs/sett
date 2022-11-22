@@ -301,12 +301,13 @@ infer topt = do
     P.Sg _ x topa topb -> do
       Infer a aty <- infer topa
       let xn = bindToName x
-      bindWithTy x a \_ -> do
-        ensureSP topa aty >>= \case
-          S -> do
+      ensureSP topa aty >>= \case
+        S -> do
+          bindWithTy x a \_ -> do
             b <- check topb V.Set
             pure $! Infer (S.Sg S xn a b) V.Set
-          P -> do
+        P -> do
+          bindWithTy x (S.El a) \_ -> do
             Infer b bty <- infer topb
             ensureSP topb bty >>= \case
               S -> pure $! Infer (S.Sg S xn (S.El a) b) V.Set
