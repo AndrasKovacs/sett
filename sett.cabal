@@ -27,6 +27,7 @@ data-files:
     ./fail/unify-nonlinear.stt
     ./succeed/bottom.stt
     ./succeed/CatCat.stt
+    ./succeed/CatCwF.stt
     ./succeed/church-compute.stt
     ./succeed/coe-computation.stt
     ./succeed/CwF.stt

@@ -1,0 +1,118 @@
+
+-- Lib
+--------------------------------------------------------------------------------
+
+tr : {A : Set}(B : A → Set){x y : A} → x = y → B x → B y
+  := λ B p bx. coe (ap B p) bx
+
+-- CwF of categories
+--------------------------------------------------------------------------------
+
+Cat : Set
+  := (Ob    : Set)
+   × (Hom   : Ob → Ob → Set)
+   × (id    : {x} → Hom x x)
+   × (comp  : {x y z} → Hom y z → Hom x y → Hom x z)
+   × (idl   : {x y} (f : Hom x y) → comp id f = f)
+   × (idr   : {x y} (f : Hom x y) → comp f id = f)
+   × (ass   : {x y z w} (f : Hom z w) (g : Hom y z) (h : Hom x y) → comp f (comp g h) = comp (comp f g) h)
+   × ⊤
+
+Functor := Newtype {Cat × Cat} (λ CD. let C := CD.1; let D := CD.2;
+     (Ob   : C.Ob → D.Ob)
+   × (Hom  : {x y} → C.Hom x y → D.Hom (Ob x) (Ob y))
+   × (id   : {x} → Hom (C.id {x}) = D.id)
+   × (comp : {x y z}(f : C.Hom y z)(g : C.Hom x y) → Hom (C.comp f g) = D.comp (Hom f) (Hom g))
+   × ⊤)
+
+Id : {C} → Functor(C, C)
+  := (λ x. x, λ f. f, refl, λ _ _. refl, tt)
+
+Comp : {C D E} → Functor(D, E) → Functor(C, D) → Functor(C, E)
+  := λ F G. (
+    λ x. F.Ob (G.Ob x)
+  , λ f. F.Hom (G.Hom f)
+  , trans (ap F.Hom G.id) F.id
+  , λ f g. trans (ap F.Hom (G.comp f g)) (F.comp (G.Hom f) (G.Hom g))
+  , tt)
+
+Idl : {C D}(F : Functor(C, D)) → Comp F Id = F
+  := λ _. refl
+
+Idr : {C D}(F : Functor(C, D)) → Comp Id F = F
+  := λ _. refl
+
+Ass : {C1 C2 C3 C4}(F : Functor(C3, C4))(G : Functor(C2, C3))(H : Functor(C1, C2))
+      → Comp F (Comp G H) = Comp (Comp F G) H
+  := λ _ _ _. refl
+
+DispCat := Newtype {Cat} (λ C.
+    (Ob   : C.Ob → Set)
+
+  × (Hom  : {x} → Ob x → {y} → Ob y → C.Hom x y → Set)
+
+  × (id   : {x}{x' : Ob x} → Hom x' x' C.id)
+
+  × (comp : {x}{x' : Ob x}{y}{y' : Ob y}{z}{z' : Ob z}{f}
+            → Hom y' z' f → {g} → Hom x' y' g → Hom x' z' (C.comp f g))
+
+  × (idl  : {x}{x' : Ob x}{y}{y' : Ob y}{f}(f' : Hom x' y' f)
+            → tr (Hom x' y') (C.idl f) (comp id f') = f')
+
+  × (idr  : {x}{x' : Ob x}{y}{y' : Ob y}{f}(f' : Hom x' y' f)
+            → tr (Hom x' y') (C.idr f) (comp f' id) = f')
+
+  × (ass  : {x x' y y' z z' w w'}
+            {f}(f' : Hom {z} z' {w} w' f)
+            {g}(g' : Hom {y} y' {z} z' g)
+            {h}(h' : Hom {x} x' {y} y' h)
+            → tr (Hom x' w') (C.ass f g h) (comp f' (comp g' h')) = comp (comp f' g') h')
+
+  × ⊤)
+
+-- SubDC : {C D} → DispCat D → Functor(C, D) → DispCat C
+--   := λ {C}{D} A F.
+--   ( λ x. A.Ob (F.Ob x)
+--   , λ x' y' f. A.Hom x' y' (F.Hom f)
+--   , tr (A.Hom _ _) (sym F.id) A.id
+--   , λ f' g'. tr (A.Hom _ _) (sym (F.comp _ _)) (A.comp f' g')
+
+--   , _
+
+--    --   tr (λ f. Hom x' y' (F.Hom f)) _
+--    --            (tr (A.Hom _ _) _ (A.comp (tr (A.Hom _ _) _ A.id) f')) = f'
+
+--    -- coe _ (A.comp (coe _ A.id) f') = f'  -- need app-comp commutation!
+--    --                                      -- TODO: some kind of automatic tactic for coe-elims!!!
+
+--   , _
+--   , _
+--   , tt)
+
+-- Section := Newtype {(C : Cat) × DispCat C} (λ CA. let C := CA.1; let A := CA.2;
+--     (Ob   : (x : C.Ob) → A.Ob x)
+--   × (Hom  : {x y}(f : C.Hom x y) → A.Hom (Ob x) (Ob y) f)
+--   × (id   : {x} → Hom (C.id {x}) = A.id)
+--   × (comp : {x y z f g} → Hom (C.comp {x}{y}{z} f g) = A.comp (Hom f) (Hom g))
+--   × ⊤)
+
+-- Cat1 : Cat
+--   := (⊤, λ _ _. ⊤, tt, λ _ _. tt, λ _. refl, λ _. refl, λ _ _ _. refl, tt)
+
+-- -- TODO: try to eta-expand unsolved metas! Then we can write ε := _
+-- ε : {C} → Functor(C, Cat1)
+--   := (λ _. tt, λ _. tt, refl, λ _ _. refl, tt)
+
+-- Cat1'η : {C}{F : Functor(C, Cat1)} → F = ε
+--   := refl
+
+-- -- Ext : (C : Cat) → DispCat C → Cat
+-- --   := λ C A. (
+-- --     _
+-- --   , _
+-- --   , _
+-- --   , _
+-- --   , _
+-- --   , _
+-- --   , _
+-- --   , tt)

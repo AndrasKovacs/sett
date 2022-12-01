@@ -507,13 +507,14 @@ prArgTy p a = case (p, runIO (forceAll a)) of
   (PKeep      , a              ) -> a
   (PDrop      , a              ) -> El Top
   (p          , El a           ) -> El (prArgTyEl p a)
-  (PLam p     , Pi x i a b     ) -> Pi x i a $ Cl \x -> prArgTy p (b $$~ x)
-  (PPair p1 p2, Sg _ x a b     ) -> Sg S x (prArgTy p1 a) $ Cl \x ->
-                                    prArgTy p2 (b $$~ fromPrArg p1 a x)
+  (PLam p     , Pi x i a b     ) -> Pi x i a $ Cl \x -> prArgTy p (b $$~ x)                 --
+  (PPair p1 p2, Sg _ x a b     ) -> Sg S x (prArgTy p1 a) $ Cl \x ->                        -- A : Set,   x : A ⊢ B : Set
+                                    prArgTy p2 (b $$~ fromPrArg p1 a x)                     -- A* : Set,  ,
   (PPack p    , Newtype a b x bx) -> prArgTy p bx -- pruning must get rid of newtypes,
-                                                  -- we can't invent a pruned parametrization!
+                                                  -- we can't invent a pruned parametrization!   A* <- pruneTy σ σ⁻¹ A
   (_          , VUndefined     ) -> VUndefined
   _                              -> impossible
+
 
 toPrArgEl :: LvlArg => PruneVal -> Ty -> Val -> Val
 toPrArgEl p a t = case (p, runIO (forceAll a)) of
@@ -1027,7 +1028,7 @@ goUnifyMetaMeta m sp m' sp' ty =
   catch
     (solve m sp (Flex (FHMeta m') sp' ty) ty)
     (\case
-        CantInvertSpine -> debug ["mallac"] >> solve m' sp' (Flex (FHMeta m) sp ty) ty
+        CantInvertSpine -> solve m' sp' (Flex (FHMeta m) sp ty) ty
         e               -> cantUnify)
 
 -- | Try to unify when the sides are headed by different metas. We only retry in case of inversion
@@ -1040,6 +1041,17 @@ unifyMetaMeta m sp m' sp' ty
   -- not do dependecy-order traversal and just simply do older-first traversal.
   | m' < m = goUnifyMetaMeta m  sp  m' sp' ty
   | True   = goUnifyMetaMeta m' sp' m  sp  ty
+
+--           a
+--   ?0 (\x. f x x) y = f y z
+
+--         y1 y2
+--      f x x -> a x
+--      f = \y1 y2. a y1
+--       f
+
+--
+
 
 
 ----------------------------------------------------------------------------------------------------

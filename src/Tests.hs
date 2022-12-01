@@ -377,3 +377,5 @@ bug = justElab $ unlines [
 --  equality of Pack-s computes to a Pack of equality
 --    - otherwise if Eq Pack is just underlying Eq, we
 --      lose unfolding info in the current infrastructure!
+
+--  hide implicits + unfold metas in error printing!
