@@ -35,14 +35,11 @@ import qualified FlatParse.Stateful as FP
 --------------------------------------------------------------------------------
 
 debugToggle :: RL.Ref Bool
-debugToggle = runIO $ RL.new True
+debugToggle = runIO $ RL.new False
 {-# noinline debugToggle #-}
 
-enableDebug :: IO ()
-enableDebug = RL.write debugToggle True
-
-disableDebug :: IO ()
-disableDebug = RL.write debugToggle False
+modifyDebugToggle :: (Bool -> Bool) -> IO ()
+modifyDebugToggle = RL.modify debugToggle
 
 readDebugToggle :: IO Bool
 readDebugToggle = RL.read debugToggle
@@ -55,6 +52,7 @@ debug strs = do
   RL.read debugToggle >>= \case
     True -> traceM (intercalate " | " strs ++ " END")
     False -> pure ()
+{-# noinline debug #-}
 
 debugging :: IO () -> IO ()
 debugging act = act

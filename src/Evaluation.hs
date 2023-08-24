@@ -310,22 +310,24 @@ coe a b p t = case (a, b) of
   (a@(Flex h sp _), b) -> Flex (FHCoe (flexHeadMeta h) a b p t) SId b
   (a, b@(Flex h sp _)) -> Flex (FHCoe (flexHeadMeta h) a b p t) SId b
 
-  (a@Rigid{}, b) -> coeTrans a b p t
-  (a, b@Rigid{}) -> coeTrans a b p t
+  (a@Rigid{}, b) -> coeRefl a b p t
+  (a, b@Rigid{}) -> coeRefl a b p t
+
+  -- NOTE: coe-trans + coe-refl is undecidable
+
+  -- (a@Rigid{}, b) -> coeTrans a b p t
+  -- (a, b@Rigid{}) -> coeTrans a b p t
 
   -- Canonical mismatch
-  -- NOTE: Canonical mismatch can't compute to Exfalso!
-  --       That + coe-trans causes conversion to be undecidable.
-
   (a, b) -> Coe a b p t
 
-coeTrans :: LvlArg => Val -> Val -> Val -> Val -> Val
-coeTrans a b p t = case t of
-  Flex (FHCoe x a' _ p' t') SId _ -> coe a' b (Trans Set a' a b p' p) t'
-  Rigid (RHCoe a' _ p' t') SId _  -> coe a' b (Trans Set a' a b p' p) t'
-  t@(Unfold h sp ft _)            -> Unfold (UHCoe a b p t) SId (coeTrans a b p ft) b
-  Magic m                         -> Magic m
-  t                               -> coeRefl a b p t
+-- coeTrans :: LvlArg => Val -> Val -> Val -> Val -> Val
+-- coeTrans a b p t = case t of
+--   Flex (FHCoe x a' _ p' t') SId _ -> coe a' b (Trans Set a' a b p' p) t'
+--   Rigid (RHCoe a' _ p' t') SId _  -> coe a' b (Trans Set a' a b p' p) t'
+--   t@(Unfold h sp ft _)            -> Unfold (UHCoe a b p t) SId (coeTrans a b p ft) b
+--   Magic m                         -> Magic m
+--   t                               -> coeRefl a b p t
 
 coeRefl :: LvlArg => Val -> Val -> Val -> Val -> Val
 coeRefl a b p t = case runConv (conv a b) of

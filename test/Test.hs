@@ -40,7 +40,7 @@ main = do
   succeedFiles <- getFilesRecursive (dir </> "succeed")
   failFiles    <- getFilesRecursive (dir </> "fail")
 
-  disableDebug
+  modifyDebugToggle \_ -> False
 
   succeedFails <- flip filterM succeedFiles \path -> do
     let path' = dropDir path

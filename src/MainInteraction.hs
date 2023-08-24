@@ -41,7 +41,6 @@ main = do
   hSetBuffering stdout NoBuffering
   putStrLn "sett 0.1.0.0"
   putStrLn "enter :? for help"
-  disableDebug
 
   args <- getArgs
   state <- case args of
@@ -225,13 +224,9 @@ loop state = do
       whenLoaded \_ -> renderElab >> loop state
     ':':'b':'r':'o':_ ->
       whenLoaded \_ -> renderBrowse >> loop state
-    ':':'n':'o':'d':'e':'b':'u':'g':_ -> do
-      putStrLn "debug printing disabled"
-      disableDebug
-      loop state
     ':':'d':'e':'b':'u':'g':_ -> do
       putStrLn "debug printing enabled"
-      enableDebug
+      modifyDebugToggle not
       loop state
     ':':'?':_ -> do
       putStrLn ":l <file>    load file"
@@ -242,8 +237,7 @@ loop state = do
       putStrLn ":out         show whole elaboration output"
       putStrLn ":bro         show defined top-level names and their types"
       putStrLn ":q           quit"
-      putStrLn ":debug       enable printing debugging information"
-      putStrLn ":nodebug     disable printing debugging information"
+      putStrLn ":debug       toggle printing debugging information"
       putStrLn ":?           show this message"
       loop state
     ':':'q':_ -> do

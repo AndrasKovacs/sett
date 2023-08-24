@@ -448,7 +448,7 @@ etaExpandMeta m sp = do
    Undefined without throwing any error. So we mostly just copy code from
    `quote` to `partialQuote` which does ensure that the output is fully defined.
 
-TODO : handle pruning contractible types! In that case we should insert
+TODO: handle pruning contractible types! In that case we should insert
   the unique value instead of Undefined.
 
 -}
@@ -1163,7 +1163,11 @@ unify (G topt ftopt) (G topt' ftopt') = do
               (SId, SId) -> pure ()  -- if spines are empty, target types must be the same
               _          -> goJoin b b'
 
-            goJoin (coe a a' (Trans Set a b a' p (Sym Set a' b p')) t) t'
+            -- NOTE: coe-trans is undecidable!
+            -- goJoin (coe a a' (Trans Set a b a' p (Sym Set a' b p')) t) t'
+
+            goJoin a a'
+            goJoin t t'
 
           _ -> cantUnify
         goSp sp sp'
