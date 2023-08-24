@@ -16,8 +16,6 @@ import Language.Haskell.TH
 import Common
 import Presyntax
 
-import qualified Data.ByteString.Char8 as B
-
 --------------------------------------------------------------------------------
 
 data Expected
@@ -53,7 +51,7 @@ prettyError src DontUnboxError = impossible
 prettyError src (Error pos e)  =
 
   let bstr   = srcToBs src
-      ls     = FP.lines bstr
+      ls     = FP.linesUtf8 bstr
       (l, c) = head $ posLineCols bstr [rawPos pos]
       line   = if 0 <= l && l < length ls then ls !! l else ""
       linum  = show (l+1)
@@ -109,7 +107,7 @@ runParser p src = FP.runParser p (Env src 0) 0 (srcToBs src)
 
 -- | Run parser, print pretty error on failure.
 testParser :: Show a => Parser a -> String -> IO ()
-testParser p str = case Interactive (packUTF8 str) of
+testParser p str = case Interactive (strToUtf8 str) of
   b -> case runParser p b of
     Err e    -> putStrLn $ prettyError b e
     OK a _ _ -> print a
@@ -291,7 +289,7 @@ anyKw = $(switch [| case _ of
   "Newtype" -> eof |])
 
 scanIdent :: Parser ()
-scanIdent = identStartChar >> many_ inlineIdentChar
+scanIdent = identStartChar >> skipMany inlineIdentChar
 
 withSpan :: Parser a -> Parser (a, Span)
 withSpan a = FP.withSpan a \a (FP.Span x y) -> do
@@ -314,12 +312,3 @@ ident = lvl >> identBase
 ident' :: Parser Presyntax.Name
 ident' = lvl' >> identBase `pcut` Lit "identifier"
 {-# inline ident' #-}
-
-branch :: Parser a -> (a -> Parser b) -> Parser b -> Parser b
-branch p success fail = FP.Parser \fp !r eob s n -> case FP.runParser# p fp r eob s n of
-  FP.OK# a s n -> FP.runParser# (success a) fp r eob s n
-  FP.Fail#     -> FP.runParser# fail fp r eob s n
-  FP.Err# e    -> FP.Err# e
-{-# inline branch #-}
-
-test = FP.runParser traceRest () 0 (B.pack "")

@@ -1,7 +1,16 @@
 
-resolver: nightly-2022-07-07
-# compiler: ghc-9.4.1
-# compiler-check: match-minor
+# Note: stack tracing setup:
+#   1. disable strict impl params plugin in package.yaml
+#   2. enable profiling here
+#   3. stack clean, stack build
+#   4. customize-group > haskell > haskell-interactive > stack ghci args
+#      add the following args
+#      --ghci-options="-fexternal-interpreter"
+#      --ghci-options="-prof"
+#      --ghci-options="-fprof-auto-calls"
+#   5. reload ghci
+
+resolver: lts-21.8
 
 packages:
 - .
@@ -14,12 +23,10 @@ ghc-options:
     "$everything": -split-sections
 
 extra-deps:
-- git: https://github.com/AndrasKovacs/flatparse.git
-  commit: f51ead69b568f73bb7d3b47f3bc7a2b2b6db259d
 - git: https://github.com/AndrasKovacs/dynamic-array.git
-  commit: 043157c7b3f1715f178a932e737bb732e5e1263f
+  commit: a9880641ddc174db68c7e4735742e763d910453e
 - git: https://github.com/AndrasKovacs/primdata.git
-  commit: 4a7ed6b807a367a90c8dffaf1e98c3a0d0c28c32
+  commit: 46b257c41a9eb0ad99ac1cd8c5dda029601089f5
 - git: https://github.com/AndrasKovacs/ghc-strict-implicit-params.git
-  commit: 215e0353374a61c0f8790371e4826b247c69580f
+  commit: 9097efc8860553f5d0189acc9bc56479c71c2125
 - dir-traverse-0.2.3.0@sha256:adcc128f201ff95131b15ffe41365dc99c50dc3fa3a910f021521dc734013bfa,2137

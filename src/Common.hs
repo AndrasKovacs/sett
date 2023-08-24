@@ -260,7 +260,7 @@ instance Eq Span where
   x == y = spanToBs x == spanToBs y
 
 spanToString :: Span -> String
-spanToString s = FP.unpackUTF8 (spanToBs s)
+spanToString s = FP.utf8ToStr (spanToBs s)
 
 -- Names in core syntax
 --------------------------------------------------------------------------------

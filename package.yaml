@@ -90,6 +90,7 @@ library:
   ghc-options:
   - -O
   - -fdicts-strict
+  - -fworker-wrapper-cbv
   - -fmax-worker-args=15
   - -Wall
   - -Wno-name-shadowing
@@ -110,7 +111,7 @@ executable:
   - -O
   - -rtsopts
   - -threaded
-  - -with-rtsopts= "-A64M -N4"
+  - -with-rtsopts= "-N4 -A8M -qb0"
 
 data-dir:
   test-data
@@ -132,4 +133,4 @@ tests:
       - -O
       - -rtsopts
       - -threaded
-      - -with-rtsopts= "-A64M -N4"
+      - -with-rtsopts= "-N4 -A8M -qb0"

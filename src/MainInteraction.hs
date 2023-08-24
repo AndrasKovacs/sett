@@ -182,7 +182,7 @@ loop state = do
       loadTopEntry :: String -> (Lvl -> S.Ty -> Ty -> Val -> IO a) -> IO a
       loadTopEntry x act = whenLoaded \_ -> do
         ntbl <- RL.read topNameTable
-        case NT.lookupBS (FP.packUTF8 x) ntbl of
+        case NT.lookupBS (FP.strToUtf8 x) ntbl of
           Just (NT.Top l a va v) -> act l a va v
           _ -> putStrLn "name not in scope" >> loop state
 

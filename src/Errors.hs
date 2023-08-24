@@ -85,7 +85,7 @@ instance Exception ErrorInCxt
 --   the span.
 render :: B.ByteString -> Span -> String -> String
 render bs (Span pos _) msg = let
-  ls     = FP.lines bs
+  ls     = FP.linesUtf8 bs
   (l, c) = head $ FP.posLineCols bs [rawPos pos]
   line   = if l < length ls then ls !! l else ""
   linum  = show (l + 1)

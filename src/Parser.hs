@@ -111,24 +111,24 @@ braceR' = $(sym' "}")
 -- TODO: optimize for performance
 atom :: Parser Tm
 atom =
-  branch ident           (pure . Var)          $
-  branch parL            parens                $
-  branch $(sym "_")      (pure . Hole)         $
-  branch $(kw "refl")    (pure . Refl)         $
-  branch $(kw "Set")     (pure . Set)          $
-  branch $(kw "Prop")    (pure . Prop)         $
-  branch $(sym "⊤")      (pure . Top)          $
-  branch $(kw "Top")     (pure . Top)          $
-  branch $(sym "⊥")      (pure . Bot)          $
-  branch $(kw "Bot")     (pure . Bot)          $
-  branch $(kw "tt")      (pure . Tt)           $
-  branch $(kw "exfalso") (pure . Exfalso)      $
-  branch $(kw "ap")      (pure . Ap)           $
-  branch $(kw "coe")     (pure . Coe)          $
-  branch $(kw "trans")   (pure . Trans)        $
-  branch $(kw "sym")     (pure . Sym)          $
-  branch $(kw "El")      (pure . El)           $
-  branch $(kw "Newtype") (pure . Newtype)      $
+  FP.withOption ident           (pure . Var)          $
+  FP.withOption parL            parens                $
+  FP.withOption $(sym "_")      (pure . Hole)         $
+  FP.withOption $(kw "refl")    (pure . Refl)         $
+  FP.withOption $(kw "Set")     (pure . Set)          $
+  FP.withOption $(kw "Prop")    (pure . Prop)         $
+  FP.withOption $(sym "⊤")      (pure . Top)          $
+  FP.withOption $(kw "Top")     (pure . Top)          $
+  FP.withOption $(sym "⊥")      (pure . Bot)          $
+  FP.withOption $(kw "Bot")     (pure . Bot)          $
+  FP.withOption $(kw "tt")      (pure . Tt)           $
+  FP.withOption $(kw "exfalso") (pure . Exfalso)      $
+  FP.withOption $(kw "ap")      (pure . Ap)           $
+  FP.withOption $(kw "coe")     (pure . Coe)          $
+  FP.withOption $(kw "trans")   (pure . Trans)        $
+  FP.withOption $(kw "sym")     (pure . Sym)          $
+  FP.withOption $(kw "El")      (pure . El)           $
+  FP.withOption $(kw "Newtype") (pure . Newtype)      $
   empty
 
 parens :: Span -> Parser Tm
@@ -146,13 +146,13 @@ bind' = bind `pcut` Lit "a binder"
 
 goProj :: Tm -> Parser Tm
 goProj t =
-  branch $(sym ".")
-    (\_ ->
-       branch $(sym "₁")      (\(Span _ p) -> goProj (Proj1 t p)) $
-       branch $(sym "1")      (\(Span _ p) -> goProj (Proj1 t p)) $
-       branch $(sym "₂")      (\(Span _ p) -> goProj (Proj2 t p)) $
-       branch $(sym "2")      (\(Span _ p) -> goProj (Proj2 t p)) $
-       branch $(kw  "unpack") (\(Span _ p) -> goProj (Unpack t p)) $
+  FP.branch $(sym ".")
+    (
+       FP.withOption $(sym "₁")      (\(Span _ p) -> goProj (Proj1 t p)) $
+       FP.withOption $(sym "1")      (\(Span _ p) -> goProj (Proj1 t p)) $
+       FP.withOption $(sym "₂")      (\(Span _ p) -> goProj (Proj2 t p)) $
+       FP.withOption $(sym "2")      (\(Span _ p) -> goProj (Proj2 t p)) $
+       FP.withOption $(kw  "unpack") (\(Span _ p) -> goProj (Unpack t p)) $
        (ident `pcut`
           Lit "a field projection: \".₁\", \".1\", \".₂\", \".2\" or field name projection")
           >>= \x -> goProj (ProjField t x))
@@ -165,9 +165,9 @@ proj' = (do
   `cut` projErr
 
 goApp :: Tm -> Parser Tm
-goApp t = branch braceL
+goApp t = FP.branch braceL
 
-  (\_ -> branch (ident <* assign)
+  (FP.withOption (ident <* assign)
     (\x -> do
       u <- tm'
       p <- rightPos <$> (braceR `pcut` Lit "\"}\" in implicit application")
@@ -178,7 +178,7 @@ goApp t = branch braceL
       p <- rightPos <$> (braceR `pcut` Lit "\"}\" in implicit application")
       goApp (App t u (AIImpl p))))
 
-  (branch atom
+  (FP.withOption atom
      (\u -> do
          u <- goProj u
          goApp (App t u AIExpl))
@@ -186,22 +186,22 @@ goApp t = branch braceL
 
 app' :: Parser Tm
 app' =
-  (branch $(kw "pack") (\x -> Pack x <$> proj')
+  (FP.withOption $(kw "pack") (\x -> Pack x <$> proj')
            (goApp =<< proj'))
   `cut` appErr
 
 eq' :: Parser Tm
 eq' = (do
   t <- app'
-  branch $(sym "=")
-    (\_ -> Eq t <$> optional (braceL *> tm <* braceR') <*> app')
+  FP.branch $(sym "=")
+    (Eq t <$> optional (braceL *> tm <* braceR') <*> app')
     (pure t))
   `cut` eqErr
 
 sigma' :: Parser Tm
 sigma' = (do
   p <- getPos
-  branch (parL *> bind <* colon)
+  FP.withOption (parL *> bind <* colon)
     (\x -> do
       a <- tm'
       parR   `pcut` Lit "\")\" in sigma binder"
@@ -210,8 +210,8 @@ sigma' = (do
       pure $ Sg p x a b)
     (do
       t <- eq'
-      branch times
-        (\_ -> Sg p DontBind t <$> sigma')
+      FP.branch times
+        (Sg p DontBind t <$> sigma')
         (pure t)))
   `cut` sigmaErr
 
@@ -228,33 +228,33 @@ implPiBinder :: Parser ([Bind], Tm, Icit)
 implPiBinder = do
   (binders, sp) <- withSpan (some bind)
   let braceClose = braceR  `pcut` Lit "\"}\" in implicit argument binder"
-  branch colon
-    (\_ -> (binders,,Impl) <$> (tm' <* braceClose))
+  FP.branch colon
+    ((binders,,Impl) <$> (tm' <* braceClose))
 
     -- if there's no type annotation, we use the span of all binders for the hole
     ((binders, Hole sp, Impl) <$ braceClose)
 
 piBinder :: Parser ([Bind], Tm, Icit)
 piBinder =
-  branch parL   (\_ -> explPiBinder) $
-  branch braceL (\_ -> implPiBinder) $
+  FP.branch parL   (explPiBinder) $
+  FP.branch braceL (implPiBinder) $
   empty
 
 pi' :: Parser Tm
 pi' = (do
   pos <- getPos
-  branch (try (some piBinder)) -- TODO: lookahead instead of try
+  FP.withOption (try (some piBinder)) -- TODO: lookahead instead of try
 
     (\case
         -- pi/sigma ambiguity resolution
         [([x], a, Expl)] ->
-          branch arrow
-            (\_ -> Pi pos x Expl a <$> pi') $
-            branch times
-              (\_ -> do
+          FP.branch arrow
+            (Pi pos x Expl a <$> pi') $
+            FP.branch times
+              (do
                   dom <- Sg pos x a <$> sigma'
-                  branch arrow
-                    (\_ -> Pi pos DontBind Expl dom <$> pi')
+                  FP.branch arrow
+                    (Pi pos DontBind Expl dom <$> pi')
                     (pure dom))
               (err $ Precise $ Msg "expected \"->\", \"→\", \"×\" or \"*\" after binder" )
 
@@ -267,8 +267,8 @@ pi' = (do
 
     (do
       t <- sigma'
-      branch arrow
-        (\_ -> Pi pos DontBind Expl t <$> pi')
+      FP.branch arrow
+        (Pi pos DontBind Expl t <$> pi')
         (pure t)))
 
   `cut` piErr
@@ -284,8 +284,8 @@ implLamBinder = do
       pure (DontBind, AIImpl p, ma)
     Bind x   -> do
       ma <- optional (colon *> tyAnnot)
-      branch assign
-        (\_ -> do
+      FP.branch assign
+        (do
             y <- bind'
             p <- rightPos <$> braceR'
             pure (y, AINamedImpl x p, ma))
@@ -294,34 +294,34 @@ implLamBinder = do
 
 lamBinder :: Parser (Bind, ArgInfo, Maybe Tm)
 lamBinder =
-  branch parL (\_ -> (,AIExpl,) <$> bind' <*> (Just <$> (colon' *> tyAnnot <* parR'))) $
-  branch braceL (\_ -> implLamBinder) $
+  FP.branch parL ((,AIExpl,) <$> bind' <*> (Just <$> (colon' *> tyAnnot <* parR'))) $
+  FP.branch braceL (implLamBinder) $
   ((,AIExpl,Nothing) <$> bind)
 
 lamLet' :: Parser Tm
 lamLet' = (do
   pos <- getPos
-  branch lambda
+  FP.branch lambda
 
     -- lambda
-    (\_ -> do
+    (do
         binders <- some lamBinder
         dot `pcut` Lit "\".\" after lambda binders"
         body <- lamLet'
         pure $! foldr' (\(x, inf, a) -> Lam pos x inf a) body binders)
 
     -- let
-    (branch $(kw "let")
-      (\_ -> do
+    (FP.branch $(kw "let")
+      (do
           x <- ident'
-          branch assign
-            (\_ -> do
+          FP.branch assign
+            (do
                 t <- tm'
                 semi `pcut` Lit "\";\" in let-definition"
                 u <- lamLet'
                 pure $ Let pos x Nothing t u)
-            (branch colon
-              (\_ -> do
+            (FP.branch colon
+              (do
                   a <- tm'
                   assign `pcut` Lit "\":=\" in let-definition"
                   t <- tm'
@@ -341,8 +341,8 @@ lamLet' = (do
 tm :: Parser Tm
 tm = do
   t <- lamLet'
-  branch $(sym ",")
-    (\_ -> Pair t <$> tm')
+  FP.branch $(sym ",")
+    (Pair t <$> tm')
     (pure t)
 
 tm' :: Parser Tm
@@ -352,7 +352,7 @@ tyAnnot :: Parser Tm
 tyAnnot = tm `cut` ["a type annotation"]
 
 topLevel :: Parser TopLevel
-topLevel = branch eof (\_ -> pure Nil) do
+topLevel = FP.branch eof (pure Nil) do
   exactLvl' 0
   x <- ident `cut` ["top-level definition"]
   FP.modify (+1) -- TODO: remove this hack
@@ -388,7 +388,7 @@ parseBS path bs = do
 
 parseString :: String -> IO (Src, TopLevel)
 parseString str = do
-  let src = Interactive (packUTF8 str)
+  let src = Interactive (strToUtf8 str)
   case runParser parse src of
     OK a _ _ -> pure (src, a)
     Fail     -> impossible

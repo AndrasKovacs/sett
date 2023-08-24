@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.35.0.
+-- This file has been generated from package.yaml by hpack version 0.35.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -20,12 +20,12 @@ build-type:     Simple
 extra-source-files:
     README.md
 data-files:
-    ./bug/iso.stt
     ./fail/fail.stt
     ./fail/prune-nonlinear.stt
     ./fail/unify-nested-nonlinear.stt
     ./fail/unify-nonlinear.stt
     ./succeed/bottom.stt
+    ./succeed/Canon.stt
     ./succeed/CatCat.stt
     ./succeed/CatCwF.stt
     ./succeed/church-compute.stt
@@ -34,6 +34,7 @@ data-files:
     ./succeed/eq-computation.stt
     ./succeed/implicit-basics.stt
     ./succeed/iso.stt
+    ./succeed/J.stt
     ./succeed/meta-asymptotics.stt
     ./succeed/nested-unification.stt
     ./succeed/newtype-id.stt
@@ -121,7 +122,7 @@ library
       TupleSections
       TypeApplications
       ViewPatterns
-  ghc-options: -O -fdicts-strict -fmax-worker-args=15 -Wall -Wno-name-shadowing -Wno-missing-signatures -Wno-unused-do-bind -Wno-unused-matches -Wno-missing-pattern-synonym-signatures -fmax-relevant-binds=3 -fmax-valid-hole-fits=0 -fplugin StrictImplParams
+  ghc-options: -O -fdicts-strict -fworker-wrapper-cbv -fmax-worker-args=15 -Wall -Wno-name-shadowing -Wno-missing-signatures -Wno-unused-do-bind -Wno-unused-matches -Wno-missing-pattern-synonym-signatures -fmax-relevant-binds=3 -fmax-valid-hole-fits=0 -fplugin StrictImplParams
   build-depends:
       base >=4.7 && <5
     , bytestring
@@ -173,7 +174,7 @@ executable sett
       TupleSections
       TypeApplications
       ViewPatterns
-  ghc-options: -O -rtsopts -threaded -with-rtsopts= "-A64M -N4"
+  ghc-options: -O -rtsopts -threaded -with-rtsopts= "-N4 -A8M -qb0"
   build-depends:
       base >=4.7 && <5
     , sett
@@ -216,7 +217,7 @@ test-suite units
       TupleSections
       TypeApplications
       ViewPatterns
-  ghc-options: -O -rtsopts -threaded -with-rtsopts= "-A64M -N4"
+  ghc-options: -O -rtsopts -threaded -with-rtsopts= "-N4 -A8M -qb0"
   build-depends:
       ansi-terminal
     , base >=4.7 && <5
